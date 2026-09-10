@@ -118,6 +118,9 @@ def get_all_players() -> list:
 _ATTEMPTING_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+attempting to join\.')
 _CONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+fully connected \(')
 
+# Leave: <STEAMID> "Name" disconnected. — verify exact wording against your live log if needed.
+_DISCONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+(?:disconnected|left the game|timed out)')
+
 # TODO: confirm the death line format on your live server and set this. Examples that
 # have appeared in the wild (verify!):
 #   r'^\[\S+\s+\S+\]\s+.*?"(.+?)"\s+died\.'
@@ -226,21 +229,7 @@ class PlayerTrackerCog(commands.Cog):
                 if not line:
                     continue
 
-                # "attempting to join" -> Discord welcome (first-time only)
-                m = _ATTEMPTING_RE.match(line)
-                if m:
-                    name = m.group(1)
-                    with _db() as conn:
-                        already_known = conn.execute(
-                            "SELECT 1 FROM players WHERE username = ?", (name,)
-                        ).fetchone()
-                    if already_known is None and name not in self._pending_discord:
-                        self._pending_discord.add(name)
-                        asyncio.ensure_future(self._delayed_discord_welcome(name))
-                        print(f"[PlayerTracker] Queued Discord welcome (10s) -> {name}")
-                    continue
-
-                # "fully connected" -> in-game welcome / welcome-back
+                # "fully connected" -> Discord join notification + in-game welcome
                 m = _CONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
@@ -248,9 +237,29 @@ class PlayerTrackerCog(commands.Cog):
                     rank_cog = self.bot.get_cog("RankSync")
                     if rank_cog:
                         await rank_cog.sync_by_pz_username(name)
+                    if is_new:
+                        await self.bot.send_notification(
+                            f"{self.bot.Emojis.SPIFFO_WAVE} New player **{name}** joined for the first time!",
+                            discord.Colour.blue(),
+                        )
+                    else:
+                        await self.bot.send_notification(
+                            f"{self.bot.Emojis.HAPPY} **{name}** joined the server.",
+                            discord.Colour.green(),
+                        )
                     asyncio.ensure_future(self._delayed_in_game_welcome(name, is_new))
-                    self._pending_discord.discard(name)
-                    print(f"[PlayerTracker] Queued in-game welcome ({'new' if is_new else 'returning'}) -> {name}")
+                    print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
+                    continue
+
+                # "disconnected" -> Discord leave notification
+                m = _DISCONNECTED_RE.match(line)
+                if m:
+                    name = m.group(1)
+                    await self.bot.send_notification(
+                        f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** left the server.",
+                        discord.Colour.dark_grey(),
+                    )
+                    print(f"[PlayerTracker] Leave -> {name}")
                     continue
 
                 # Death (disabled until _DEATH_RE is confirmed)

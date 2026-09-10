@@ -246,6 +246,10 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
         # Row 4
         embed.add_field(name="\U0001f4cb Status", value=horde_status, inline=True)
         embed.add_field(name="\U0001f3c6 Completed", value=horde_completed, inline=True)
+
+        raw_players = str(world.get("players", "") or "")
+        names = [n.strip() for n in raw_players.split(",") if n.strip()]
+        embed.add_field(name="\U0001f3ae Online Now", value=", ".join(sorted(names)) if names else "None", inline=False)
     else:
         embed.add_field(name="\u200b", value="\U0001f534 **Server Offline**", inline=False)
 
@@ -327,7 +331,10 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     fields.append(("SERVER AGE", f"Day {age}", f"Since {mn} {day}"))
 
     pc = world.get("playerCount", 0)
-    fields.append(("PLAYERS", f"{pc} / {max_players}", "Online"))
+    raw_players = str(world.get("players", "") or "")
+    names = [n.strip() for n in raw_players.split(",") if n.strip()]
+    players_sub = ", ".join(sorted(names))[:22] if names else "Online"
+    fields.append(("PLAYERS", f"{pc} / {max_players}", players_sub))
 
     weather = world.get("weather", "Clear")
     temp = world.get("temperature", 0)
