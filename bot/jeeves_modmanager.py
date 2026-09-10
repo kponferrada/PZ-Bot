@@ -68,7 +68,7 @@ class JeevesModManagerCog(commands.Cog):
             for it in items:
                 rendered = f"`{it}`"
                 sep = 2 if cur else 0
-                if cur and cur_len + sep + len(rendered) > 1000:
+                if cur and cur_len + sep + len(rendered) > 900:
                     chunks.append(", ".join(f"`{x}`" for x in cur))
                     cur = []
                     cur_len = 0
@@ -97,8 +97,8 @@ class JeevesModManagerCog(commands.Cog):
         total = len(current.title or "")
 
         for name, value in fields:
-            size = len(name) + len(value) + 8  # field overhead + margin
-            if current.fields and (total + size > 5800 or len(current.fields) >= 24):
+            size = len(name) + len(value)
+            if current.fields and (total + size > 5000 or len(current.fields) >= 24):
                 embeds.append(current)
                 current = discord.Embed(title="📋 Server Mod List (cont.)", colour=discord.Colour.purple())
                 total = len(current.title or "")
