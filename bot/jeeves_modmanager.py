@@ -2,7 +2,7 @@
 jeeves_modmanager.py — /modlist only (remote).
 
 Shows the server's configured mods and Workshop items by reading the server
-`.ini` over SFTP.
+`.ini` over SFTP (via the shared `server_config` helper).
 
 Removed from the original Jeeves mod manager:
   - /modadd, /modremove  -> require SteamCMD (same-server)
@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import sftp_client
+import server_config
 
 
 class JeevesModManagerCog(commands.Cog):
@@ -26,48 +26,6 @@ class JeevesModManagerCog(commands.Cog):
     def _check_role(self, interaction: discord.Interaction) -> bool:
         role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
         return role is not None and role in interaction.user.roles
-
-    def _server_dir(self) -> str | None:
-        """Derive the remote Server/ folder (sibling of Lua/)."""
-        root = getattr(self.bot.config, "SFTP_ZOMBOID_ROOT", None)
-        if root:
-            return f"{root.rstrip('/')}/Server"
-        lua = getattr(self.bot.config, "SFTP_LUA_DIR", None)
-        if lua:
-            parent = "/".join(lua.rstrip('/').split('/')[:-1])
-            return f"{parent}/Server"
-        return None
-
-    async def _read_ini(self) -> str | None:
-        sftp = sftp_client.get()
-        # 1. Explicit path, if configured and present.
-        ini = getattr(self.bot.config, "SFTP_SERVER_INI", None)
-        if ini and await sftp.exists(ini):
-            return await sftp.read_text(ini)
-        # 2. Auto-detect: the main server ini is the .ini file in Server/.
-        server_dir = self._server_dir()
-        if server_dir:
-            try:
-                for name in await sftp.list_dir(server_dir):
-                    if name.endswith(".ini"):
-                        path = f"{server_dir.rstrip('/')}/{name}"
-                        print(f"[ModManager] Auto-detected server INI: {path}")
-                        return await sftp.read_text(path)
-            except sftp_client.SftpError:
-                pass
-        print("[ModManager] Could not find a server INI. Set SFTP_SERVER_INI explicitly.")
-        return None
-
-    @staticmethod
-    def _ini_value(text: str, key: str) -> list[str]:
-        for line in text.splitlines():
-            if line.strip().startswith(f"{key}="):
-                raw = line.split("=", 1)[1].strip()
-                values = [v.strip() for v in raw.split(";") if v.strip()]
-                if key == "Mods":
-                    values = [v.lstrip("\\") for v in values]  # b42 backslash-prefixed IDs
-                return values
-        return []
 
     @app_commands.command(
         name="modlist",
@@ -84,7 +42,7 @@ class JeevesModManagerCog(commands.Cog):
 
         await interaction.response.defer()
 
-        text = await self._read_ini()
+        text = await server_config.read_ini(self.bot)
         if text is None:
             await interaction.followup.send(embed=discord.Embed(
                 title="📋 Mod List",
@@ -94,9 +52,9 @@ class JeevesModManagerCog(commands.Cog):
             ))
             return
 
-        mods = self._ini_value(text, "Mods")
-        workshop = self._ini_value(text, "WorkshopItems")
-        maps = self._ini_value(text, "Map")
+        mods = server_config.ini_value(text, "Mods")
+        workshop = server_config.ini_value(text, "WorkshopItems")
+        maps = server_config.ini_value(text, "Map")
 
         # Build (field_name, field_value) pairs, each value <= 1000 chars.
         fields = []

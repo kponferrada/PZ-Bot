@@ -34,6 +34,7 @@ from discord.ext import commands, tasks
 
 import lua_bridge
 import status_card
+import server_config
 
 # ============================================================================
 # Constants
@@ -508,7 +509,7 @@ class ServerStatusCog(commands.Cog):
             world = world or self._last_world or {}
             horde = horde or self._last_horde or {}
 
-            max_players = getattr(self.bot.config, "MAX_PLAYERS", 32)
+            max_players = await server_config.read_max_players(self.bot, getattr(self.bot.config, "MAX_PLAYERS", 32))
 
             if self._mode == "image":
                 pc = world.get("playerCount", 0)
