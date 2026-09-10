@@ -477,7 +477,7 @@ async def on_ready() -> None:
     # Set the online baseline silently — no startup message or up/down banner here.
     # Real up/down transitions are announced by monitor_server_state after startup.
     bot._was_online = bot.rcon.is_server_online(timeout=10)
-    print(f"[Startup] Server {'online' if bot._was_online else 'offline'} — baseline set (no banner)")
+    print(f"[Startup] Bot started up OK — server {'online' if bot._was_online else 'offline'} (baseline set; no Discord message sent)")
 
 
 # =============================================================================
