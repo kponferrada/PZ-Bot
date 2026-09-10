@@ -136,9 +136,15 @@ def render_status_card(
 
     # --- header -----------------------------------------------------------
     draw.text((40, 24), "PROJECT ZOMBOID", font=f_small, fill=GREY)
-    w_pz = _tw(draw, "PZ ", f_title)
-    draw.text((40, 48), "PZ", font=f_title, fill=WHITE)
-    draw.text((40 + w_pz, 48), "TAMBAYAN", font=f_title, fill=BLUE)
+    parts = title.split(" ", 1)
+    first = parts[0]
+    rest = parts[1] if len(parts) > 1 else ""
+    if rest:
+        w_first = _tw(draw, first + " ", f_title)
+        draw.text((40, 48), first, font=f_title, fill=WHITE)
+        draw.text((40 + w_first, 48), rest, font=f_title, fill=BLUE)
+    else:
+        draw.text((40, 48), first, font=f_title, fill=WHITE)
     draw.text((42, 128), subtitle, font=f_small, fill=GREY)
     tw = _tw(draw, tagline, f_tag)
     draw.text((WIDTH - 40 - tw, 52), tagline, font=f_tag, fill=GREY)

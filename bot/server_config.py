@@ -83,3 +83,33 @@ async def read_max_players(bot, fallback: int = 32) -> int:
     _max_players_cache["value"] = value
     _max_players_cache["ts"] = now
     return value
+
+# --- Server name (cached) ---------------------------------------------------
+
+_server_name_cache = {"value": None, "ts": 0.0}
+
+
+async def read_server_name(bot, fallback: str = "PZ TAMBAYAN") -> str:
+    """Read the server's public name from the .ini (cached ~5 min)."""
+    now = time.time()
+    cached = _server_name_cache["value"]
+    if cached is not None and (now - _server_name_cache["ts"]) < _MAX_PLAYERS_TTL:
+        return cached
+
+    value = fallback
+    try:
+        text = await read_ini(bot)
+        if text:
+            for key in ("PublicName", "Name", "ServerName"):
+                vals = ini_value(text, key)
+                if vals and vals[0]:
+                    value = vals[0].strip('"').strip("'")
+                    print(f"[ServerConfig] Server name = {value!r} (from server INI)")
+                    break
+    except sftp_client.SftpError as e:
+        print(f"[ServerConfig] Could not read server name, using fallback {fallback!r}: {e}")
+
+    _server_name_cache["value"] = value
+    _server_name_cache["ts"] = now
+    return value
+

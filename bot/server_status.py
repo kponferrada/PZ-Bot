@@ -517,6 +517,7 @@ class ServerStatusCog(commands.Cog):
                 now = datetime.datetime.now().strftime("%b %d, %I:%M %p")
                 status_card.render_status_card(
                     self._image_path,
+                    title=DASHBOARD_TITLE,
                     online=server_online,
                     players=f"{pc} / {max_players}",
                     fields=fields,
@@ -536,7 +537,7 @@ class ServerStatusCog(commands.Cog):
     @status_loop.before_loop
     async def _before_status(self):
         await self.bot.wait_until_ready()
-        global ICON_URL, IMAGE_URL
+        global ICON_URL, IMAGE_URL, DASHBOARD_TITLE
         cfg = self.bot.config
         ICON_URL = await _resolve_image_url(
             self.bot,
@@ -547,6 +548,9 @@ class ServerStatusCog(commands.Cog):
             self.bot,
             getattr(cfg, "DASHBOARD_BANNER_IMAGE", ""),
             getattr(cfg, "DASHBOARD_BANNER_URL", ""),
+        )
+        DASHBOARD_TITLE = await server_config.read_server_name(
+            self.bot, getattr(cfg, "DASHBOARD_TITLE", "PZ TAMBAYAN")
         )
         await asyncio.sleep(5)
         print("[ServerStatus] Dashboard started")
