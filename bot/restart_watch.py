@@ -8,8 +8,9 @@ clean `save` + `quit`. Bringing the server back up is the host's job.
 
 This cog watches the server logs over SFTP and reacts:
 
-    mod-update / countdown detected  ->  announce in Discord
+    mod-update / countdown detected  ->  announce in Discord + set the restart flag
     "Server will restart in 10s"    ->  RCON `save` (world saved before shutdown)
+    "Server will restart in 5s"     ->  RCON `kickuser` for every remaining player
 
 The bot cannot *trigger* a PhunServer restart via RCON (that shutdown is an
 in-process Lua call, not an RCON command); it only coordinates the save +
@@ -19,6 +20,7 @@ Config (config.env):
     WORKSHOP_UPDATE_CHANNEL_ID=  (Discord channel for workshop-update / restart announcements)
     WORKSHOP_UPDATE_ROLE_ID=     (optional role to @mention)
     RESTART_SAVE_AT_SECONDS=10    (countdown mark at which to RCON `save`)
+    RESTART_KICK_AT_SECONDS=5     (countdown mark at which to kick remaining players)
 """
 
 import os
@@ -43,6 +45,7 @@ class RestartWatch(commands.Cog):
         self._channel_id = int(getattr(bot.config, "WORKSHOP_UPDATE_CHANNEL_ID", 0) or 0)
         self._role_id = int(getattr(bot.config, "WORKSHOP_UPDATE_ROLE_ID", 0) or 0)
         self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "10") or "10")
+        self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", "5") or "5")
         self._log_dir = getattr(bot.config, "SFTP_LOGS_DIR", None) or os.getenv("SFTP_LOGS_DIR")
 
         self._chat_file = None
@@ -52,6 +55,7 @@ class RestartWatch(commands.Cog):
 
         self._announced = False
         self._saved = False
+        self._kicked = False
 
         self._active = bool(self._log_dir)
         if not self._active:
@@ -82,12 +86,30 @@ class RestartWatch(commands.Cog):
         except discord.HTTPException as e:
             print(f"[RestartWatch] announce error: {e}")
 
+    async def _kick_all_players(self) -> int:
+        """Force-kick every connected player via RCON `kickuser`."""
+        names = set(self.bot.state.player_names)
+        if not names:
+            resp = await self.bot.rcon.send_command("players")
+            if resp:
+                names, _ = self.bot.rcon.parse_players(resp)
+        kicked = 0
+        for name in sorted(names):
+            if not name:
+                continue
+            clean = name.replace('"', "")
+            await self.bot.rcon.send_command(f'kickuser "{clean}" -r "Server restarting"')
+            kicked += 1
+            print(f"[RestartWatch] Kicked player: {clean}")
+        return kicked
+
     async def _handle_line(self, line: str) -> None:
         # 1) Mod-update signal (server log) -> announce specifically as a mod update.
         if MOD_UPDATE_RE.search(line):
             if not self._announced:
                 self._announced = True
                 self._saved = False
+                self._kicked = False
                 self.bot.state.expect_restart()
                 await self._announce(
                     "\U0001f527 **Mod update detected** \u2014 the server will restart to apply it.",
@@ -111,6 +133,7 @@ class RestartWatch(commands.Cog):
         if not self._announced:
             self._announced = True
             self._saved = False
+            self._kicked = False
             self.bot.state.expect_restart()
             await self._announce(
                 f"\U0001f504 **Server restarting** in {num} {unit}.",
@@ -123,6 +146,14 @@ class RestartWatch(commands.Cog):
             await self._announce(
                 f"\U0001f4be World saved (T-{seconds}s before restart).",
                 discord.Colour.green(),
+            )
+
+        if seconds <= self._kick_at and not self._kicked:
+            self._kicked = True
+            kicked = await self._kick_all_players()
+            await self._announce(
+                f"\U0001f6a8 Kicked {kicked} player(s) — restart imminent.",
+                discord.Colour.red(),
             )
 
     @tasks.loop(seconds=2.0)
@@ -141,6 +172,7 @@ class RestartWatch(commands.Cog):
                     self._chat_pos = st[0] if st else 0
                     self._announced = False  # new server session
                     self._saved = False
+                    self._kicked = False
                 else:
                     try:
                         text, self._chat_pos = await sftp.tail(chat, self._chat_pos)
