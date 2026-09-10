@@ -474,16 +474,10 @@ async def on_ready() -> None:
     bot.state.server_ready = True
     if not bot.monitor_server_state.is_running():
         bot.monitor_server_state.start()
-    await bot.send_notification(f"{Emojis.JEEVES} Barangay Captain online — monitoring the server...", discord.Colour.purple())
-    if bot.rcon.is_server_online(timeout=10):
-        bot._was_online = True
-        await bot.send_banner(bot.config.ANNOUNCE_UP_IMAGE, f"{Emojis.HAPPY} Server is Online!")
-    else:
-        bot._was_online = False
-        await bot.send_banner(
-            bot.config.ANNOUNCE_DOWN_IMAGE,
-            f"{Emojis.PANIC} Server appears Offline (RCON unreachable). "
-            "Use the host panel to start it.")
+    # Set the online baseline silently — no startup message or up/down banner here.
+    # Real up/down transitions are announced by monitor_server_state after startup.
+    bot._was_online = bot.rcon.is_server_online(timeout=10)
+    print(f"[Startup] Server {'online' if bot._was_online else 'offline'} — baseline set (no banner)")
 
 
 # =============================================================================
