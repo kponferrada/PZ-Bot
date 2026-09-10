@@ -88,6 +88,7 @@ class RestartWatch(commands.Cog):
             if not self._announced:
                 self._announced = True
                 self._saved = False
+                self.bot.state.expect_restart()
                 await self._announce(
                     "\U0001f527 **Mod update detected** \u2014 the server will restart to apply it.",
                     discord.Colour.orange(),
@@ -110,6 +111,7 @@ class RestartWatch(commands.Cog):
         if not self._announced:
             self._announced = True
             self._saved = False
+            self.bot.state.expect_restart()
             await self._announce(
                 f"\U0001f504 **Server restarting** in {num} {unit}.",
                 discord.Colour.orange(),

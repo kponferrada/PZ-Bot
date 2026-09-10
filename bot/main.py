@@ -176,6 +176,8 @@ class ServerState:
         self.last_rcon_ok = False
         self.last_alive_ts: float = 0.0
         self.alive_source: str = "none"
+        self.expecting_restart = False
+        self.restart_expected_until = 0.0
 
     def mark_alive(self, source: str) -> None:
         """Record that the server was observably alive just now."""
@@ -186,6 +188,17 @@ class ServerState:
         if self.last_alive_ts <= 0:
             return None
         return max(0.0, time.time() - self.last_alive_ts)
+
+    def expect_restart(self, duration_seconds: float = 900.0) -> None:
+        """Flag that a restart is in progress (mod update / scheduled)."""
+        self.expecting_restart = True
+        self.restart_expected_until = time.time() + duration_seconds
+
+    def restart_expected(self) -> bool:
+        """True while a restart is expected (auto-expires)."""
+        if self.expecting_restart and time.time() > self.restart_expected_until:
+            self.expecting_restart = False
+        return self.expecting_restart
 
 
 # =============================================================================
@@ -254,6 +267,9 @@ class RCONHelper:
 # DISCORD BOT
 # =============================================================================
 
+RESTART_GRACE_SECONDS = 300  # 5 min: offline longer than this = a real "down", not a restart
+
+
 class PZBot(commands.Bot):
     Emojis = Emojis
 
@@ -263,6 +279,8 @@ class PZBot(commands.Bot):
         self.state = ServerState()
         self.rcon = RCONHelper(config)
         self._was_online = None
+        self._offline_since = None
+        self._down_announced = False
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.config.GUILD_ID)
@@ -385,16 +403,44 @@ class PZBot(commands.Bot):
 
     @tasks.loop(seconds=30)
     async def monitor_server_state(self):
-        """Announce server up/down transitions with the configured banners."""
+        """Announce server up/down, distinguishing restarts from real outages."""
         online = self.rcon.is_server_online()
         prev = self._was_online
+        now = time.time()
+
         if prev is not None:
             if online and not prev:
-                await self.send_banner(self.config.ANNOUNCE_UP_IMAGE, f"{Emojis.HAPPY} Server is back online!")
+                # Server came back online.
+                if self._down_announced:
+                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                           f"{Emojis.HAPPY} Server is back online!")
+                elif self.state.restart_expected():
+                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                           f"{Emojis.HAPPY} Server restart complete!")
+                else:
+                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                           f"{Emojis.HAPPY} Server is back online!")
                 print("[Announce] Server UP transition")
+                self._down_announced = False
+                self._offline_since = None
+                self.state.expecting_restart = False
             elif not online and prev:
-                await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE, f"{Emojis.PANIC} Server went offline!")
-                print("[Announce] Server DOWN transition")
+                # Just went offline — don't announce yet; it may be a restart.
+                self._offline_since = now
+                self._down_announced = False
+                print("[Announce] Server offline (waiting to see if it's a restart)")
+            elif not online and not prev:
+                # Still offline — only announce "down" after the grace period,
+                # and never while a restart is expected.
+                if (not self._down_announced
+                        and not self.state.restart_expected()
+                        and self._offline_since is not None
+                        and (now - self._offline_since) > RESTART_GRACE_SECONDS):
+                    await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE,
+                                           f"{Emojis.PANIC} Server went offline!")
+                    self._down_announced = True
+                    print("[Announce] Server DOWN (real outage)")
+
         self._was_online = online
 
     @monitor_server_state.before_loop
@@ -428,7 +474,7 @@ async def on_ready() -> None:
     bot.state.server_ready = True
     if not bot.monitor_server_state.is_running():
         bot.monitor_server_state.start()
-    await bot.send_notification(f"{Emojis.JEEVES} Bot online — monitoring the server...", discord.Colour.purple())
+    await bot.send_notification(f"{Emojis.JEEVES} Barangay Captain online — monitoring the server...", discord.Colour.purple())
     if bot.rcon.is_server_online(timeout=10):
         bot._was_online = True
         await bot.send_banner(bot.config.ANNOUNCE_UP_IMAGE, f"{Emojis.HAPPY} Server is Online!")
