@@ -199,7 +199,7 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
         embed.add_field(name="\u23f0 Time", value=f"{hh}:{mins:02d} {period}", inline=True)
 
         month = world.get("month", 0)
-        day = world.get("day", 1)
+        day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
         mn = MONTH_NAMES[month][:3] if 0 <= month < 12 else "?"
         year = world.get("year")
         date_val = f"{mn} {day}, {year}" if year else f"{mn} {day}"
@@ -314,7 +314,7 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     fields.append(("TIME", f"{hh}:{mins:02d} {period}", "In-game"))
 
     month = world.get("month", 0)
-    day = world.get("day", 1)
+    day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
     mn = MONTH_NAMES[month] if 0 <= month < 12 else "?"
     year = world.get("year")
     date_val = f"{mn} {day}, {year}" if year else f"{mn} {day}"
