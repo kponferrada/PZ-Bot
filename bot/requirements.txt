@@ -1,0 +1,5 @@
+discord.py>=2.3.0
+python-dotenv>=1.0.0
+rcon>=2.4.0
+asyncssh>=2.14.0
+Pillow>=10.0.0
