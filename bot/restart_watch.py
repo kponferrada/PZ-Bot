@@ -16,8 +16,8 @@ in-process Lua call, not an RCON command); it only coordinates the save +
 announcement. See the module docstring notes in README for the full picture.
 
 Config (config.env):
-    RESTART_ANNOUNCE_CHANNEL_ID=  (Discord channel for restart announcements)
-    RESTART_ANNOUNCE_ROLE_ID=     (optional role to @mention)
+    WORKSHOP_UPDATE_CHANNEL_ID=  (Discord channel for workshop-update / restart announcements)
+    WORKSHOP_UPDATE_ROLE_ID=     (optional role to @mention)
     RESTART_SAVE_AT_SECONDS=10    (countdown mark at which to RCON `save`)
 """
 
@@ -40,8 +40,8 @@ COUNTDOWN_RE = re.compile(
 class RestartWatch(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._channel_id = int(os.getenv("RESTART_ANNOUNCE_CHANNEL_ID", "0") or "0")
-        self._role_id = int(os.getenv("RESTART_ANNOUNCE_ROLE_ID", "0") or "0")
+        self._channel_id = int(getattr(bot.config, "WORKSHOP_UPDATE_CHANNEL_ID", 0) or 0)
+        self._role_id = int(getattr(bot.config, "WORKSHOP_UPDATE_ROLE_ID", 0) or 0)
         self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "10") or "10")
         self._log_dir = getattr(bot.config, "SFTP_LOGS_DIR", None) or os.getenv("SFTP_LOGS_DIR")
 

@@ -95,6 +95,11 @@ class Config:
 
         # Role to @-mention in every status announcement (0 = disabled)
         self.NOTIFY_ROLE_ID = _env_int("NOTIFY_ROLE_ID", 0)
+        # Dedicated channel for server up/down banners (0 = fall back to DISCORD_CHANNEL_ID)
+        self.SERVER_NOTIFICATION_CHANNEL_ID = _env_int("SERVER_NOTIFICATION_CHANNEL_ID", 0)
+        # Dedicated channel for the workshop-update / restart relay (0 = fall back to chat relay, then notification)
+        self.WORKSHOP_UPDATE_CHANNEL_ID = _env_int("WORKSHOP_UPDATE_CHANNEL_ID", 0)
+        self.WORKSHOP_UPDATE_ROLE_ID = _env_int("WORKSHOP_UPDATE_ROLE_ID", 0)
 
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
@@ -297,6 +302,11 @@ class PZBot(commands.Bot):
     def get_notification_channel(self) -> Optional[discord.TextChannel]:
         return self.get_channel(self.config.CHANNEL_ID)
 
+    def get_server_notification_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for server up/down banners (dedicated if configured, else the main channel)."""
+        ch_id = self.config.SERVER_NOTIFICATION_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
     async def send_notification(self, title: str, colour: discord.Colour = discord.Colour.purple(),
                                 description: Optional[str] = None) -> None:
         channel = self.get_notification_channel()
@@ -312,8 +322,8 @@ class PZBot(commands.Bot):
             print(f"Warning: failed to send notification: {e}")
 
     async def send_banner(self, image_path: str, caption: str = None) -> None:
-        """Send a banner image (local file) + @-mention to the notification channel."""
-        channel = self.get_notification_channel()
+        """Send a banner image (local file) + @-mention to the server-notification channel."""
+        channel = self.get_server_notification_channel()
         if not channel:
             print(f"[Announce] No notification channel for banner: {image_path}")
             return
