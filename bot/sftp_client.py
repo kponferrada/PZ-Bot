@@ -91,6 +91,15 @@ class SftpClient:
         except Exception as exc:
             raise SftpError(f"read_text({path}): {exc}") from exc
 
+    async def read_bytes(self, path: str) -> bytes:
+        """Read `path` raw (no decoding) — for binary files like players.db."""
+        await self._ensure()
+        try:
+            async with self._sftp.open(path, "rb") as f:
+                return await f.read()
+        except Exception as exc:
+            raise SftpError(f"read_bytes({path}): {exc}") from exc
+
     async def stat(self, path: str) -> tuple[int, int] | None:
         """Return (size, mtime) for `path`, or None if the file does not exist."""
         await self._ensure()

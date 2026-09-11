@@ -25,6 +25,7 @@ import datetime
 import os
 import re
 import sqlite3
+import time
 from pathlib import Path
 from typing import Optional, Set
 
@@ -144,6 +145,8 @@ class PlayerTrackerCog(commands.Cog):
         self._file_pos: int = 0
         self._pending_discord: Set[str] = set()
         self._welcome_sent: dict = {}
+        self._seeded = False
+        self._last_seed_attempt = 0.0
 
         init_db()
         self._tail_user_log.start()
@@ -202,6 +205,9 @@ class PlayerTrackerCog(commands.Cog):
     @tasks.loop(seconds=2.0)
     async def _tail_user_log(self):
         try:
+            if not self._seeded and time.time() - self._last_seed_attempt > 300:
+                self._last_seed_attempt = time.time()
+                await self._seed_known_players()
             sftp = sftp_client.get()
             log_file = await self._find_latest_user_log()
             if not log_file:
@@ -273,9 +279,69 @@ class PlayerTrackerCog(commands.Cog):
         except Exception as e:
             print(f"[PlayerTracker] Tail error: {e}")
 
+    async def _read_server_known_players(self) -> set:
+        """Read the game server's own players.db (over SFTP) for known players.
+
+        PZ records every player who has ever joined in
+        <root>/Saves/Multiplayer/<world>/players.db (SQLite). We read its
+        `networkPlayers` table so a fresh bot deployment recognises returning
+        players instead of treating everyone as new.
+        """
+        known = set()
+        try:
+            sftp = sftp_client.get()
+            root = getattr(self.bot.config, "SFTP_ZOMBOID_ROOT", None) or "/server-data"
+            mp = f"{root.rstrip('/')}/Saves/Multiplayer"
+            names = await sftp.list_dir(mp)
+        except sftp_client.SftpError as e:
+            print(f"[PlayerTracker] Cannot list server saves, skipping seed: {e}")
+            return known
+        for name in names:
+            pdb = f"{mp}/{name}/players.db"
+            if not await sftp.exists(pdb):
+                continue
+            try:
+                data = await sftp.read_bytes(pdb)
+            except sftp_client.SftpError as e:
+                print(f"[PlayerTracker] Cannot read {pdb}, skipping: {e}")
+                continue
+            rows = []
+            try:
+                conn = sqlite3.connect(":memory:")
+                try:
+                    conn.deserialize(data)
+                    rows = conn.execute("SELECT username, name FROM networkPlayers").fetchall()
+                finally:
+                    conn.close()
+            except Exception as e:
+                print(f"[PlayerTracker] Could not parse {pdb}: {e}")
+                continue
+            for u, n in rows:
+                if u:
+                    known.add(u)
+                if n:
+                    known.add(n)
+        return known
+
+    async def _seed_known_players(self):
+        known = await self._read_server_known_players()
+        if not known:
+            print("[PlayerTracker] No known players found on the server; starting with an empty list")
+            return
+        now = datetime.datetime.utcnow().isoformat()
+        with _db() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO players (username, first_seen, last_seen, join_count, death_count) "
+                "VALUES (?, ?, ?, 1, 0)",
+                [(u, now, now) for u in known],
+            )
+        self._seeded = True
+        print(f"[PlayerTracker] Seeded {len(known)} known player(s) from the server's players.db")
+
     @_tail_user_log.before_loop
     async def _before_tail(self):
         await self.bot.wait_until_ready()
+        await self._seed_known_players()
         print(f"[PlayerTracker] Started — watching {self._log_dir} for *_user.txt over SFTP")
 
 
