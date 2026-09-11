@@ -34,7 +34,6 @@ import discord
 from discord.ext import commands, tasks
 
 import sftp_client
-import lua_bridge
 
 _DEFAULT_LOG_DIR = "Logs"
 
@@ -242,7 +241,6 @@ class PlayerTrackerCog(commands.Cog):
                     f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was lost.",
                     discord.Colour.dark_grey(),
                 )
-                await lua_bridge.chat_relay("Server", f"{name}'s signal was lost.")
             print(f"[PlayerTracker] Leave -> {name}")
         except Exception as e:
             print(f"[PlayerTracker] delayed leave error: {e}")
@@ -300,7 +298,6 @@ class PlayerTrackerCog(commands.Cog):
                                 f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** was found!",
                                 discord.Colour.blue(),
                             )
-                            await lua_bridge.chat_relay("Server", f"{name} was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.")
                     else:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification_to(
@@ -308,7 +305,6 @@ class PlayerTrackerCog(commands.Cog):
                                 f"{self.bot.Emojis.HAPPY} **{name}**'s signal is back.",
                                 discord.Colour.green(),
                             )
-                            await lua_bridge.chat_relay("Server", f"{name}'s signal is back.")
                     print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
                     continue
 
