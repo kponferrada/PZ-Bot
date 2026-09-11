@@ -101,6 +101,10 @@ class Config:
         self.WORKSHOP_UPDATE_CHANNEL_ID = _env_int("WORKSHOP_UPDATE_CHANNEL_ID", 0)
         self.WORKSHOP_UPDATE_ROLE_ID = _env_int("WORKSHOP_UPDATE_ROLE_ID", 0)
         self.DEATH_LOGS_CHANNEL_ID = _env_int("DEATH_LOGS_CHANNEL_ID", 0)
+        self.AIRDROP_CHANNEL_ID = _env_int("AIRDROP_CHANNEL_ID", 0)
+        self.AIRDROP_ROLE_ID = _env_int("AIRDROP_ROLE_ID", 0)
+        self.HORDE_CHANNEL_ID = _env_int("HORDE_CHANNEL_ID", 0)
+        self.HORDE_ROLE_ID = _env_int("HORDE_ROLE_ID", 0)
 
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
@@ -333,6 +337,16 @@ class PZBot(commands.Bot):
         ch_id = self.config.DEATH_LOGS_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
+    def get_airdrop_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for air-drop notifications (dedicated if configured, else the main channel)."""
+        ch_id = self.config.AIRDROP_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
+    def get_horde_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for horde-event notifications (dedicated if configured, else the main channel)."""
+        ch_id = self.config.HORDE_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
     async def send_notification(self, title: str, colour: discord.Colour = discord.Colour.purple(),
                                 description: Optional[str] = None) -> None:
         channel = self.get_notification_channel()
@@ -346,6 +360,16 @@ class PZBot(commands.Bot):
                   f"{self.config.CHANNEL_ID}. Re-invite the bot with 'Send Messages' and 'Embed Links'.")
         except discord.HTTPException as e:
             print(f"Warning: failed to send notification: {e}")
+
+    async def send_to_channel(self, channel, role_id: int, embed: discord.Embed) -> None:
+        """Send an embed to a channel with an optional role @mention."""
+        if not channel:
+            return
+        content = f"<@&{role_id}> " if role_id else None
+        try:
+            await channel.send(content=content, embed=embed)
+        except discord.HTTPException as e:
+            print(f"Warning: failed to send embed: {e}")
 
     async def send_banner(self, image_path: str, caption: str = None) -> None:
         """Send a banner image (local file) + @-mention to the server-notification channel."""

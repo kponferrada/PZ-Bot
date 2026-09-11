@@ -91,7 +91,7 @@ class JeevesDropsCog(commands.Cog):
                 source = status.get("source", "auto")
                 crate_label = status.get("crateLabel", "Supply")
 
-                channel = self.bot.get_notification_channel()
+                channel = self.bot.get_airdrop_channel()
                 if not channel:
                     print("[JeevesDrops] No notification channel found, skipping drop notification")
                     return
@@ -110,7 +110,7 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.blue()
                 )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
                 self._sent_drops.add(drop_key)
                 print(f"[JeevesDrops] Notification sent for dropId={drop_id}, ts={ts}")
 
@@ -123,7 +123,7 @@ class JeevesDropsCog(commands.Cog):
                 target = status.get("targetPlayer", "")
                 crate_type = status.get("crateType", "")
                 valid_types = status.get("validTypes", "")
-                channel = self.bot.get_notification_channel()
+                channel = self.bot.get_airdrop_channel()
                 if channel:
                     desc = f"Air drop failed: **{reason}**"
                     if target:
@@ -132,7 +132,7 @@ class JeevesDropsCog(commands.Cog):
                         desc += f"\nRequested type: `{crate_type}`"
                     if valid_types:
                         desc += f"\nValid types: `{valid_types}`"
-                    await channel.send(embed=discord.Embed(
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, discord.Embed(
                         title="⚠️ Air Drop Error",
                         description=desc,
                         colour=discord.Colour.orange()
@@ -204,9 +204,9 @@ class JeevesDropsCog(commands.Cog):
             )
             await interaction.followup.send(embed=embed)
 
-            channel = self.bot.get_notification_channel()
+            channel = self.bot.get_airdrop_channel()
             if channel and channel.id != interaction.channel_id:
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
         else:
             await interaction.followup.send(embed=discord.Embed(
                 title="Failed to trigger air drop",
@@ -309,7 +309,7 @@ class JeevesDropsCog(commands.Cog):
                 return
             self._last_event_poller_key = poller_key
 
-            channel = self.bot.get_notification_channel()
+            channel = self.bot.get_airdrop_channel()
             if not channel:
                 return
 
@@ -339,7 +339,7 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.red()
                 )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
                 self._sent_events.add(event_key)
                 print(f"[JeevesDrops] Supply event notification sent: {loc_name} (id={event_id})")
 
@@ -362,7 +362,7 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.dark_red()
                 )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
 
             elif phase == "ended":
                 skipped = status.get("skipped", False)
@@ -378,7 +378,7 @@ class JeevesDropsCog(commands.Cog):
                         description="The supply event has concluded. Crates will be cleaned up on next restart.",
                         colour=discord.Colour.greyple()
                     )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
 
         except Exception as e:
             print(f"[JeevesDrops] Supply event poller error: {e}")

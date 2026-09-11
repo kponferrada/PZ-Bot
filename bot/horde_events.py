@@ -86,7 +86,7 @@ class JeevesHordesCog(commands.Cog):
             if key in self._sent_phases:
                 return
 
-            channel = self.bot.get_notification_channel()
+            channel = self.bot.get_horde_channel()
             if not channel:
                 return
 
@@ -109,7 +109,7 @@ class JeevesHordesCog(commands.Cog):
                     ),
                     colour=discord.Colour.red()
                 )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
                 self._sent_phases.add(key)
                 print(f"[JeevesHordes] Notification sent: active, eventDay={event_day}")
 
@@ -123,7 +123,7 @@ class JeevesHordesCog(commands.Cog):
                     description=desc,
                     colour=discord.Colour.green()
                 )
-                await channel.send(embed=embed)
+                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
                 self._sent_phases.add(key)
                 print(f"[JeevesHordes] Notification sent: ended, eventDay={event_day}")
 
@@ -199,9 +199,9 @@ class JeevesHordesCog(commands.Cog):
             )
             await interaction.followup.send(embed=embed)
 
-            channel = self.bot.get_notification_channel()
+            channel = self.bot.get_horde_channel()
             if channel and channel.id != interaction.channel_id:
-                await channel.send(embed=discord.Embed(
+                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, discord.Embed(
                     title="\U0001f9df Horde Event Triggered!",
                     description=desc,
                     colour=discord.Colour.red()
@@ -352,9 +352,9 @@ class JeevesHordesCog(commands.Cog):
             )
             await interaction.followup.send(embed=embed)
 
-            channel = self.bot.get_notification_channel()
+            channel = self.bot.get_horde_channel()
             if channel and channel.id != interaction.channel_id:
-                await channel.send(embed=discord.Embed(
+                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, discord.Embed(
                     title="\U0001f319 Horde Night Scheduled!",
                     description=f"Triggered by **{interaction.user.display_name}** — horde will fire tonight.",
                     colour=discord.Colour.dark_red()
