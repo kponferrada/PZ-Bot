@@ -165,12 +165,14 @@ _CONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+fully connected \(
 # Leave: <STEAMID> "Name" disconnected. — verify exact wording against your live log if needed.
 _DISCONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+(?:disconnected|left the game|timed out)')
 
-# TODO: confirm the death line format on your live server and set this. Examples that
-# have appeared in the wild (verify!):
-#   r'^\[\S+\s+\S+\]\s+.*?"(.+?)"\s+died\.'
-#   r'^\[\S+\s+\S+\]\s+.*?Player\s+"(.+?)"\s+has died'
-# Leave None to disable death detection until verified.
-_DEATH_RE: Optional[re.Pattern] = None
+# PZ Build 42 logs a death to `_user.txt` as:
+#   [date time] user <Name> died at (x, y, z) (non pvp|pvp)
+# The name is captured without surrounding quotes. If a death still isn't
+# detected, paste the raw `_user.txt` death line and adjust this regex.
+_DEATH_RE: Optional[re.Pattern] = re.compile(
+    r'^\[\S+\s+\S+\]\s+user\s+"?([^"]+?)"?\s+died\b',
+    re.IGNORECASE,
+)
 
 
 # ---- Cog ---------------------------------------------------------------------
@@ -290,13 +292,15 @@ class PlayerTrackerCog(commands.Cog):
                     print(f"[PlayerTracker] Leave -> {name}")
                     continue
 
-                # Death (disabled until _DEATH_RE is confirmed)
+                # Death -> death notification (to the death-logs channel)
                 if _DEATH_RE:
                     m = _DEATH_RE.match(line)
                     if m:
                         name = m.group(1)
                         asyncio.ensure_future(self._handle_death(name))
                         continue
+                    if "died" in line.lower():
+                        print(f"[PlayerTracker] Unmatched death line: {line}")
 
         except Exception as e:
             print(f"[PlayerTracker] Tail error: {e}")
