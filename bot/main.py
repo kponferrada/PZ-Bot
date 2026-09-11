@@ -49,6 +49,7 @@ except ImportError:
 
 import lua_bridge
 import sftp_client
+import features
 
 
 # =============================================================================
@@ -285,6 +286,7 @@ class PZBot(commands.Bot):
         self.config = config
         self.state = ServerState()
         self.rcon = RCONHelper(config)
+        self.features = features.FeatureFlags()
         self._was_online = None
         self._offline_since = None
         self._down_announced = False
@@ -304,7 +306,7 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "rank_sync", "chat_relay", "horde_events",
                     "jeeves_drops", "jeeves_modmanager", "server_status", "horde_leaderboard",
-                    "restart_watch"):
+                    "restart_watch", "feature_controls"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
@@ -449,15 +451,16 @@ class PZBot(commands.Bot):
                     print(f"[Announce] Ignoring brief offline blip ({offline_duration:.0f}s)")
                     self._offline_since = None
                 else:
-                    if self._down_announced:
-                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                               f"{Emojis.HAPPY} Server is back online!")
-                    elif self.state.restart_expected():
-                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                               f"{Emojis.HAPPY} Server restart complete!")
-                    else:
-                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                               f"{Emojis.HAPPY} Server is back online!")
+                    if self.features.is_enabled("server_status"):
+                        if self._down_announced:
+                            await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                                   f"{Emojis.HAPPY} Server is back online!")
+                        elif self.state.restart_expected():
+                            await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                                   f"{Emojis.HAPPY} Server restart complete!")
+                        else:
+                            await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                                   f"{Emojis.HAPPY} Server is back online!")
                     print("[Announce] Server UP transition")
                     self._down_announced = False
                     self._offline_since = None
@@ -474,8 +477,9 @@ class PZBot(commands.Bot):
                         and not self.state.restart_expected()
                         and self._offline_since is not None
                         and (now - self._offline_since) > RESTART_GRACE_SECONDS):
-                    await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE,
-                                           f"{Emojis.PANIC} Server went offline!")
+                    if self.features.is_enabled("server_status"):
+                        await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE,
+                                               f"{Emojis.PANIC} Server went offline!")
                     self._down_announced = True
                     print("[Announce] Server DOWN (real outage)")
 

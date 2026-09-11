@@ -166,10 +166,11 @@ class ChatRelay(commands.Cog):
 
                 msg = self._format_message(chat_type, clean_author, message_text)
 
-                try:
-                    await channel.send(msg)
-                except discord.HTTPException as e:
-                    print(f"[ChatRelay] Discord send error: {e}")
+                if self.bot.features.is_enabled("chat_relay"):
+                    try:
+                        await channel.send(msg)
+                    except discord.HTTPException as e:
+                        print(f"[ChatRelay] Discord send error: {e}")
 
         except Exception as e:
             print(f"[ChatRelay] Tail error: {e}")
@@ -205,6 +206,8 @@ class ChatRelay(commands.Cog):
         if not message.content.strip():
             return
 
+        if not self.bot.features.is_enabled("chat_relay"):
+            return
         try:
             display_name = message.author.display_name
             await lua_bridge.chat_relay(display_name, message.content)

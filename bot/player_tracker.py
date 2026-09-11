@@ -205,6 +205,9 @@ class PlayerTrackerCog(commands.Cog):
     async def _handle_death(self, name: str):
         """Post a death notification to the death-logs Discord channel (no in-game broadcast)."""
         death_count = record_death(name)
+        if not self.bot.features.is_enabled("deaths"):
+            print(f"[PlayerTracker] Death -> {name} (#{death_count}) (notifications disabled)")
+            return
         channel = self.bot.get_death_logs_channel()
         if channel:
             try:
@@ -260,15 +263,17 @@ class PlayerTrackerCog(commands.Cog):
                     if rank_cog:
                         await rank_cog.sync_by_pz_username(name)
                     if is_new:
-                        await self.bot.send_notification(
-                            f"{self.bot.Emojis.SPIFFO_WAVE} New player **{name}** joined for the first time!",
-                            discord.Colour.blue(),
-                        )
+                        if self.bot.features.is_enabled("join_leave"):
+                            await self.bot.send_notification(
+                                f"{self.bot.Emojis.SPIFFO_WAVE} New player **{name}** joined for the first time!",
+                                discord.Colour.blue(),
+                            )
                     else:
-                        await self.bot.send_notification(
-                            f"{self.bot.Emojis.HAPPY} **{name}** joined the server.",
-                            discord.Colour.green(),
-                        )
+                        if self.bot.features.is_enabled("join_leave"):
+                            await self.bot.send_notification(
+                                f"{self.bot.Emojis.HAPPY} **{name}** joined the server.",
+                                discord.Colour.green(),
+                            )
                     print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
                     continue
 
@@ -276,10 +281,11 @@ class PlayerTrackerCog(commands.Cog):
                 m = _DISCONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
-                    await self.bot.send_notification(
-                        f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** left the server.",
-                        discord.Colour.dark_grey(),
-                    )
+                    if self.bot.features.is_enabled("join_leave"):
+                        await self.bot.send_notification(
+                            f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** left the server.",
+                            discord.Colour.dark_grey(),
+                        )
                     print(f"[PlayerTracker] Leave -> {name}")
                     continue
 

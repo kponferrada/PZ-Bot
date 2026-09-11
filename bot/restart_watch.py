@@ -132,10 +132,11 @@ class RestartWatch(commands.Cog):
                 self._saved = False
                 self._kicked = False
                 self.bot.state.expect_restart()
-                await self._announce_banner(
-                    self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
-                    "\U0001f527 Mod update detected \u2014 the server will restart to apply it.",
-                )
+                if self.bot.features.is_enabled("restart"):
+                    await self._announce_banner(
+                        self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
+                        "\U0001f527 Mod update detected \u2014 the server will restart to apply it.",
+                    )
             return
 
         # 2) Countdown (chat) -> announce once, then save at the T-10s mark.
@@ -156,29 +157,32 @@ class RestartWatch(commands.Cog):
             self._saved = False
             self._kicked = False
             self.bot.state.expect_restart()
-            await self._announce_banner(
-                self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                f"\U0001f504 Server restarting in {num} {unit}.",
-            )
+            if self.bot.features.is_enabled("restart"):
+                await self._announce_banner(
+                    self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                    f"\U0001f504 Server restarting in {num} {unit}.",
+                )
 
         if seconds <= self._save_at and not self._saved:
             self._saved = True
             await self.bot.rcon.send_command("save")
-            await self.bot.rcon.send_command(
-                'servermsg "World saved. Server restarting \u2014 players will be kicked shortly."'
-            )
-            await self._announce(
-                f"\U0001f4be World saved (T-{seconds}s before restart).",
-                discord.Colour.green(),
-            )
+            if self.bot.features.is_enabled("restart"):
+                await self.bot.rcon.send_command(
+                    'servermsg "World saved. Server restarting \u2014 players will be kicked shortly."'
+                )
+                await self._announce(
+                    f"\U0001f4be World saved (T-{seconds}s before restart).",
+                    discord.Colour.green(),
+                )
 
         if seconds <= self._kick_at and not self._kicked:
             self._kicked = True
             kicked = await self._kick_all_players()
-            await self._announce(
-                f"\U0001f6a8 Kicked {kicked} player(s) — restart imminent.",
-                discord.Colour.red(),
-            )
+            if self.bot.features.is_enabled("restart"):
+                await self._announce(
+                    f"\U0001f6a8 Kicked {kicked} player(s) — restart imminent.",
+                    discord.Colour.red(),
+                )
 
     @tasks.loop(seconds=2.0)
     async def _tail(self):

@@ -110,14 +110,14 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.blue()
                 )
-                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                if self.bot.features.is_enabled("airdrop"):
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    # In-game servermsg for random/server drops only (skip individual /airdrop drops).
+                    if source != "bot":
+                        await self.bot.rcon.send_command(
+                            f'servermsg "📦 AIR DROP! A {crate_label} crate has landed near {target}."'
+                        )
                 self._sent_drops.add(drop_key)
-
-                # In-game servermsg for random/server drops only (skip individual /airdrop drops).
-                if source != "bot":
-                    await self.bot.rcon.send_command(
-                        f'servermsg "📦 AIR DROP! A {crate_label} crate has landed near {target}."'
-                    )
 
                 print(f"[JeevesDrops] Notification sent for dropId={drop_id}, ts={ts}")
 
@@ -131,7 +131,7 @@ class JeevesDropsCog(commands.Cog):
                 crate_type = status.get("crateType", "")
                 valid_types = status.get("validTypes", "")
                 channel = self.bot.get_airdrop_channel()
-                if channel:
+                if channel and self.bot.features.is_enabled("airdrop"):
                     desc = f"Air drop failed: **{reason}**"
                     if target:
                         desc += f" (target: {target})"
@@ -346,11 +346,12 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.red()
                 )
-                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                if self.bot.features.is_enabled("airdrop"):
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.rcon.send_command(
+                        f'servermsg "🚨 SUPPLY DROP EVENT at {loc_name}! Massive loot incoming — get moving!"'
+                    )
                 self._sent_events.add(event_key)
-                await self.bot.rcon.send_command(
-                    f'servermsg "🚨 SUPPLY DROP EVENT at {loc_name}! Massive loot incoming — get moving!"'
-                )
                 print(f"[JeevesDrops] Supply event notification sent: {loc_name} (id={event_id})")
 
                 if len(self._sent_events) > 30:
@@ -372,10 +373,11 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.dark_red()
                 )
-                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                await self.bot.rcon.send_command(
-                    f'servermsg "📦 Supply crates have landed at {loc_name}! Grab what you can."'
-                )
+                if self.bot.features.is_enabled("airdrop"):
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.rcon.send_command(
+                        f'servermsg "📦 Supply crates have landed at {loc_name}! Grab what you can."'
+                    )
 
             elif phase == "ended":
                 skipped = status.get("skipped", False)
@@ -391,10 +393,11 @@ class JeevesDropsCog(commands.Cog):
                         description="The supply event has concluded. Crates will be cleaned up on next restart.",
                         colour=discord.Colour.greyple()
                     )
-                await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                await self.bot.rcon.send_command(
-                    'servermsg "📦 Supply event has ended."'
-                )
+                if self.bot.features.is_enabled("airdrop"):
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.rcon.send_command(
+                        'servermsg "📦 Supply event has ended."'
+                    )
 
         except Exception as e:
             print(f"[JeevesDrops] Supply event poller error: {e}")

@@ -67,6 +67,8 @@ class JeevesHordesCog(commands.Cog):
         used by server_status._horde_fields), so horde night is 'today' when the
         world's day counter equals nextHordeDay - 1.
         """
+        if not self.bot.features.is_enabled("horde"):
+            return
         next_day = status.get("nextHordeDay", 0)
         if not next_day or next_day in self._horde_night_announced:
             return
@@ -141,11 +143,12 @@ class JeevesHordesCog(commands.Cog):
                     ),
                     colour=discord.Colour.red()
                 )
-                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
+                if self.bot.features.is_enabled("horde"):
+                    await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
+                    await self.bot.rcon.send_command(
+                        'servermsg "🧟 HORDE NIGHT has begun! The dead are coming. Take cover!"'
+                    )
                 self._sent_phases.add(key)
-                await self.bot.rcon.send_command(
-                    'servermsg "🧟 HORDE NIGHT has begun! The dead are coming. Take cover!"'
-                )
                 print(f"[JeevesHordes] Notification sent: active, eventDay={event_day}")
 
             elif phase == "ended":
@@ -158,11 +161,12 @@ class JeevesHordesCog(commands.Cog):
                     description=desc,
                     colour=discord.Colour.green()
                 )
-                await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
+                if self.bot.features.is_enabled("horde"):
+                    await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
+                    await self.bot.rcon.send_command(
+                        'servermsg "✅ Horde night has ended. The dead have been repelled."'
+                    )
                 self._sent_phases.add(key)
-                await self.bot.rcon.send_command(
-                    'servermsg "✅ Horde night has ended. The dead have been repelled."'
-                )
                 print(f"[JeevesHordes] Notification sent: ended, eventDay={event_day}")
 
                 # Clean up old dedup entries (keep only recent 5 events)
