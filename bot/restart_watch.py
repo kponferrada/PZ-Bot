@@ -34,6 +34,11 @@ import sftp_client
 # PhunServer 2 "Outdated workshop items detected, restarting in N minute(s)" (server log).
 MOD_UPDATE_RE = re.compile(r"Outdated workshop items? detected", re.IGNORECASE)
 
+# The "restarting in N minute(s)/second(s)" suffix on the mod-update log line.
+MOD_UPDATE_DURATION_RE = re.compile(
+    r"restarting in\s+(\d+|one)\s+(minute|minutes|second|seconds)", re.IGNORECASE
+)
+
 # PhunServer 2 countdown "Server will restart in N minutes/seconds" (chat).
 COUNTDOWN_RE = re.compile(
     r"Server will restart in\s+(\d+|one)\s+(minute|minutes|second|seconds)", re.IGNORECASE
@@ -136,6 +141,16 @@ class RestartWatch(commands.Cog):
                     self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
                     "\U0001f527 Mod update detected \u2014 the server will restart to apply it.",
                 )
+                dur_m = MOD_UPDATE_DURATION_RE.search(line)
+                if dur_m:
+                    n = dur_m.group(1)
+                    u = dur_m.group(2).lower()
+                    if n.lower() == "one":
+                        n, u = "1", "minute"
+                    msg = f"Mod update detected! Server will restart in {n} {u} to apply changes."
+                else:
+                    msg = "Mod update detected! Server will restart to apply changes."
+                await self.bot.rcon.send_command(f'servermsg "{msg}"')
             return
 
         # 2) Countdown (chat) -> announce once, then save at the T-10s mark.
@@ -160,6 +175,7 @@ class RestartWatch(commands.Cog):
                 self.bot.config.ANNOUNCE_RESTART_IMAGE,
                 f"\U0001f504 Server restarting in {num} {unit}.",
             )
+            await self.bot.rcon.send_command(f'servermsg "Server will restart in {num} {unit}!"')
 
         if seconds <= self._save_at and not self._saved:
             self._saved = True
