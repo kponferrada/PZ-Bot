@@ -17,10 +17,10 @@ in-process Lua call, not an RCON command); it only coordinates the save +
 announcement. See the module docstring notes in README for the full picture.
 
 Config (config.env):
-    WORKSHOP_UPDATE_CHANNEL_ID=  (Discord channel for workshop-update / restart announcements)
-    WORKSHOP_UPDATE_ROLE_ID=     (optional role to @mention)
-    RESTART_SAVE_AT_SECONDS=10    (countdown mark at which to RCON `save`)
-    RESTART_KICK_AT_SECONDS=5     (countdown mark at which to kick remaining players)
+    SERVER_NOTIFICATION_CHANNEL_ID=  (channel for restart banners — same as server up/down)
+    NOTIFY_ROLE_ID=                  (role to @mention — same as server up/down)
+    RESTART_SAVE_AT_SECONDS=10       (countdown mark at which to RCON `save`)
+    RESTART_KICK_AT_SECONDS=5        (countdown mark at which to kick remaining players)
 """
 
 import os
@@ -43,8 +43,9 @@ COUNTDOWN_RE = re.compile(
 class RestartWatch(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._channel_id = int(getattr(bot.config, "WORKSHOP_UPDATE_CHANNEL_ID", 0) or 0)
-        self._role_id = int(getattr(bot.config, "WORKSHOP_UPDATE_ROLE_ID", 0) or 0)
+        # Restart/mod-update announcements use the same channel + @role as server up/down.
+        self._channel_id = int(getattr(bot.config, "SERVER_NOTIFICATION_CHANNEL_ID", 0) or 0)
+        self._role_id = int(getattr(bot.config, "NOTIFY_ROLE_ID", 0) or 0)
         self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "10") or "10")
         self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", "5") or "5")
         self._log_dir = getattr(bot.config, "SFTP_LOGS_DIR", None) or os.getenv("SFTP_LOGS_DIR")
@@ -88,7 +89,7 @@ class RestartWatch(commands.Cog):
             print(f"[RestartWatch] announce error: {e}")
 
     async def _announce_banner(self, image_path: str, caption: str) -> None:
-        """Send an image banner (local file) + @-mention to the workshop-update channel."""
+        """Send an image banner (local file) + @-mention to the server-notification channel."""
         channel = self._channel()
         if not channel:
             print("[RestartWatch] no announcement channel available")
