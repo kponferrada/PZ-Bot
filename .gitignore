@@ -18,6 +18,7 @@ venv/
 *.db
 dashboard_assets.json
 status_card.png
+feature_state.json
 
 # Runtime lock file (bot PID)
 *.lock
