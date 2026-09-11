@@ -37,10 +37,10 @@ import sftp_client
 
 _DEFAULT_LOG_DIR = "Logs"
 
-# After a death, PZ logs a spurious "left the game" + "fully connected" as the
-# character is removed and the player respawns. Suppress leave/join notifications
-# for a player within this many seconds of their death.
-_DEATH_RESPAWN_WINDOW = 120
+# When a player dies, PZ logs a spurious "left the game" + "fully connected" as the
+# character is removed and the player respawns. Treat an immediate leave-then-join
+# (within this many seconds) as a respawn and suppress both notifications.
+_RESPAWN_WINDOW = 15
 
 # ---- DB ----------------------------------------------------------------------
 
@@ -195,7 +195,7 @@ class PlayerTrackerCog(commands.Cog):
         self._file_pos: int = 0
         self._seeded = False
         self._last_seed_attempt = 0.0
-        self._recent_deaths: dict = {}
+        self._pending_leave: dict = {}
 
         init_db()
         self._tail_user_log.start()
@@ -228,16 +228,21 @@ class PlayerTrackerCog(commands.Cog):
                 print(f"[PlayerTracker] Failed to send death log: {e}")
         print(f"[PlayerTracker] Death -> {name} (#{death_count})")
 
-    def _recent_death(self, name: str) -> bool:
-        """True if this player died within the respawn-debounce window (suppress
-        the spurious leave/rejoin that PZ logs on death)."""
-        t = self._recent_deaths.get(name)
-        if t is None:
-            return False
-        if time.time() - t > _DEATH_RESPAWN_WINDOW:
-            self._recent_deaths.pop(name, None)
-            return False
-        return True
+    async def _delayed_leave(self, name: str) -> None:
+        """Send a leave notification after the respawn window, unless the player
+        rejoined in the meantime (an immediate leave-then-join is a death respawn)."""
+        try:
+            await asyncio.sleep(_RESPAWN_WINDOW)
+            if self._pending_leave.pop(name, None) is None:
+                return  # a join followed -> respawn, leave notification suppressed
+            if self.bot.features.is_enabled("join_leave"):
+                await self.bot.send_notification(
+                    f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was lost.",
+                    discord.Colour.dark_grey(),
+                )
+            print(f"[PlayerTracker] Leave -> {name}")
+        except Exception as e:
+            print(f"[PlayerTracker] delayed leave error: {e}")
 
 
     # ---- main tail loop ------------------------------------------------------
@@ -278,23 +283,23 @@ class PlayerTrackerCog(commands.Cog):
                 m = _CONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
+                    if self._pending_leave.pop(name, None) is not None:
+                        print(f"[PlayerTracker] Join -> {name} (respawn after leave, suppressed)")
+                        continue
                     is_new = upsert_player(name)
                     rank_cog = self.bot.get_cog("RankSync")
                     if rank_cog:
                         await rank_cog.sync_by_pz_username(name)
-                    if self._recent_death(name):
-                        print(f"[PlayerTracker] Join -> {name} (respawn after death, suppressed)")
-                        continue
                     if is_new:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification(
-                                f"{self.bot.Emojis.SPIFFO_WAVE} New player **{name}** joined for the first time!",
+                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.",
                                 discord.Colour.blue(),
                             )
                     else:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification(
-                                f"{self.bot.Emojis.HAPPY} **{name}** joined the server.",
+                                f"{self.bot.Emojis.HAPPY} **{name}**'s signal is back.",
                                 discord.Colour.green(),
                             )
                     print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
@@ -304,15 +309,8 @@ class PlayerTrackerCog(commands.Cog):
                 m = _DISCONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
-                    if self._recent_death(name):
-                        print(f"[PlayerTracker] Leave -> {name} (death respawn, suppressed)")
-                        continue
-                    if self.bot.features.is_enabled("join_leave"):
-                        await self.bot.send_notification(
-                            f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** left the server.",
-                            discord.Colour.dark_grey(),
-                        )
-                    print(f"[PlayerTracker] Leave -> {name}")
+                    self._pending_leave[name] = time.time()
+                    asyncio.create_task(self._delayed_leave(name))
                     continue
 
                 # Death -> death notification (to the death-logs channel)
@@ -320,7 +318,6 @@ class PlayerTrackerCog(commands.Cog):
                     m = _DEATH_RE.match(line)
                     if m:
                         name = m.group(1)
-                        self._recent_deaths[name] = time.time()
                         asyncio.ensure_future(self._handle_death(name))
                         continue
                     if "died" in line.lower():
