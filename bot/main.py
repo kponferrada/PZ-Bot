@@ -106,6 +106,8 @@ class Config:
         self.AIRDROP_ROLE_ID = _env_int("AIRDROP_ROLE_ID", 0)
         self.HORDE_CHANNEL_ID = _env_int("HORDE_CHANNEL_ID", 0)
         self.HORDE_ROLE_ID = _env_int("HORDE_ROLE_ID", 0)
+        # Dedicated channel for join/leave notifications (0 = fall back to DISCORD_CHANNEL_ID)
+        self.JOIN_LEAVE_CHANNEL_ID = _env_int("JOIN_LEAVE_CHANNEL_ID", 0)
 
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
@@ -349,6 +351,11 @@ class PZBot(commands.Bot):
         ch_id = self.config.HORDE_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
+    def get_join_leave_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for join/leave notifications (dedicated if configured, else the main channel)."""
+        ch_id = self.config.JOIN_LEAVE_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
     async def send_notification(self, title: str, colour: discord.Colour = discord.Colour.purple(),
                                 description: Optional[str] = None) -> None:
         channel = self.get_notification_channel()
@@ -360,6 +367,19 @@ class PZBot(commands.Bot):
         except discord.Forbidden:
             print(f"Warning: Missing 'Send Messages' permission in notification channel "
                   f"{self.config.CHANNEL_ID}. Re-invite the bot with 'Send Messages' and 'Embed Links'.")
+        except discord.HTTPException as e:
+            print(f"Warning: failed to send notification: {e}")
+
+    async def send_notification_to(self, channel, title: str,
+                                   colour: discord.Colour = discord.Colour.purple(),
+                                   description: Optional[str] = None) -> None:
+        """Send a simple title+colour embed to a specific channel."""
+        if not channel:
+            return
+        try:
+            await channel.send(embed=discord.Embed(title=title, colour=colour, description=description))
+        except discord.Forbidden:
+            print(f"Warning: Missing 'Send Messages' permission in channel {channel.id}.")
         except discord.HTTPException as e:
             print(f"Warning: failed to send notification: {e}")
 

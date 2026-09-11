@@ -237,7 +237,8 @@ class PlayerTrackerCog(commands.Cog):
             if self._pending_leave.pop(name, None) is None:
                 return  # a join followed -> respawn, leave notification suppressed
             if self.bot.features.is_enabled("join_leave"):
-                await self.bot.send_notification(
+                await self.bot.send_notification_to(
+                    self.bot.get_join_leave_channel(),
                     f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was lost.",
                     discord.Colour.dark_grey(),
                 )
@@ -294,14 +295,16 @@ class PlayerTrackerCog(commands.Cog):
                         await rank_cog.sync_by_pz_username(name)
                     if is_new:
                         if self.bot.features.is_enabled("join_leave"):
-                            await self.bot.send_notification(
+                            await self.bot.send_notification_to(
+                                self.bot.get_join_leave_channel(),
                                 f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** was found!",
                                 discord.Colour.blue(),
                             )
                             await lua_bridge.chat_relay("Server", f"{name} was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.")
                     else:
                         if self.bot.features.is_enabled("join_leave"):
-                            await self.bot.send_notification(
+                            await self.bot.send_notification_to(
+                                self.bot.get_join_leave_channel(),
                                 f"{self.bot.Emojis.HAPPY} **{name}**'s signal is back.",
                                 discord.Colour.green(),
                             )
