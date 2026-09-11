@@ -120,6 +120,7 @@ class Config:
         self.SFTP_LUA_DIR = _env("SFTP_LUA_DIR") or _join(self.SFTP_ZOMBOID_ROOT, "Lua")
         self.SFTP_LOGS_DIR = _env("SFTP_LOGS_DIR") or _join(self.SFTP_ZOMBOID_ROOT, "Logs")
         self.SFTP_SERVER_INI = _env("SFTP_SERVER_INI")
+        self.SFTP_SERVER_DB = _env("SFTP_SERVER_DB") or _join(self.SFTP_ZOMBOID_ROOT, "db/pzserver.db")
         self.SFTP_MODS_DIR = _env("SFTP_MODS_DIR")
 
         print(f"Config loaded: RCON={self.RCON_HOST}:{self.RCON_PORT} "

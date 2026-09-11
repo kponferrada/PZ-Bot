@@ -114,6 +114,32 @@ def get_all_players() -> list:
         ).fetchall()
 
 
+def _extract_usernames(data: bytes) -> set:
+    """Extract username-like values from a PZ SQLite DB, schema-agnostic."""
+    found = set()
+    try:
+        conn = sqlite3.connect(":memory:")
+        conn.deserialize(data)
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    except Exception:
+        return found
+    for tbl in tables:
+        try:
+            cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
+        except sqlite3.OperationalError:
+            continue
+        user_cols = [c for c in cols if c.lower() in ("username", "name", "user", "user_name", "playername", "player")]
+        for col in user_cols:
+            try:
+                for (v,) in conn.execute(f'SELECT "{col}" FROM "{tbl}"').fetchall():
+                    v = str(v).strip()
+                    if v:
+                        found.add(v)
+            except sqlite3.OperationalError:
+                pass
+    conn.close()
+    return found
+
 # ---- log-line regexes --------------------------------------------------------
 
 _ATTEMPTING_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+attempting to join\.')
@@ -280,47 +306,37 @@ class PlayerTrackerCog(commands.Cog):
             print(f"[PlayerTracker] Tail error: {e}")
 
     async def _read_server_known_players(self) -> set:
-        """Read the game server's own players.db (over SFTP) for known players.
+        """Read the game server's player database (over SFTP) for known players.
 
-        PZ records every player who has ever joined in
-        <root>/Saves/Multiplayer/<world>/players.db (SQLite). We read its
-        `networkPlayers` table so a fresh bot deployment recognises returning
-        players instead of treating everyone as new.
+        Path comes from SFTP_SERVER_DB (default /server-data/db/pzserver.db on
+        Indifferent Broccoli). Falls back to the vanilla PZ world-player DBs
+        (<root>/Saves/Multiplayer/<world>/players.db) if that file is absent.
         """
         known = set()
+        sftp = sftp_client.get()
+        root = getattr(self.bot.config, "SFTP_ZOMBOID_ROOT", None) or "/server-data"
+        db = getattr(self.bot.config, "SFTP_SERVER_DB", "") or f"{root.rstrip('/')}/db/pzserver.db"
+
+        candidates = [db]
         try:
-            sftp = sftp_client.get()
-            root = getattr(self.bot.config, "SFTP_ZOMBOID_ROOT", None) or "/server-data"
             mp = f"{root.rstrip('/')}/Saves/Multiplayer"
-            names = await sftp.list_dir(mp)
-        except sftp_client.SftpError as e:
-            print(f"[PlayerTracker] Cannot list server saves, skipping seed: {e}")
-            return known
-        for name in names:
-            pdb = f"{mp}/{name}/players.db"
-            if not await sftp.exists(pdb):
-                continue
+            for name in await sftp.list_dir(mp):
+                candidates.append(f"{mp}/{name}/players.db")
+        except sftp_client.SftpError:
+            pass
+
+        for pdb in candidates:
             try:
+                if not await sftp.exists(pdb):
+                    continue
                 data = await sftp.read_bytes(pdb)
             except sftp_client.SftpError as e:
-                print(f"[PlayerTracker] Cannot read {pdb}, skipping: {e}")
+                print(f"[PlayerTracker] Cannot read {pdb}: {e}")
                 continue
-            rows = []
-            try:
-                conn = sqlite3.connect(":memory:")
-                try:
-                    conn.deserialize(data)
-                    rows = conn.execute("SELECT username, name FROM networkPlayers").fetchall()
-                finally:
-                    conn.close()
-            except Exception as e:
-                print(f"[PlayerTracker] Could not parse {pdb}: {e}")
-                continue
-            for u, n in rows:
-                if u:
-                    known.add(u)
-                if n:
-                    known.add(n)
+            found = _extract_usernames(data)
+            if found:
+                known |= found
+                print(f"[PlayerTracker] Found {len(found)} known player(s) in {pdb}")
         return known
 
     async def _seed_known_players(self):
