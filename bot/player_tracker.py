@@ -115,7 +115,12 @@ def get_all_players() -> list:
 
 
 def _extract_usernames(data: bytes) -> set:
-    """Extract username-like values from a PZ SQLite DB, schema-agnostic."""
+    """Extract known-player names from a PZ SQLite DB.
+
+    Targets the known-player tables specifically (whitelist in the server DB,
+    networkPlayers/players in the world DB) so role/capability/other `name`
+    columns are not mistaken for players.
+    """
     found = set()
     try:
         conn = sqlite3.connect(":memory:")
@@ -123,15 +128,27 @@ def _extract_usernames(data: bytes) -> set:
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
     except Exception:
         return found
+
+    preferred = {
+        "whitelist": ("username", "displayName"),
+        "networkplayers": ("username", "name"),
+        "players": ("username", "name"),
+    }
     for tbl in tables:
+        key = tbl.lower()
+        if key not in preferred:
+            continue
         try:
             cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
         except sqlite3.OperationalError:
             continue
-        user_cols = [c for c in cols if c.lower() in ("username", "name", "user", "user_name", "playername", "player")]
-        for col in user_cols:
+        col_lookup = {c.lower(): c for c in cols}
+        for want in preferred[key]:
+            actual = col_lookup.get(want.lower())
+            if not actual:
+                continue
             try:
-                for (v,) in conn.execute(f'SELECT "{col}" FROM "{tbl}"').fetchall():
+                for (v,) in conn.execute(f'SELECT "{actual}" FROM "{tbl}"').fetchall():
                     v = str(v).strip()
                     if v:
                         found.add(v)
