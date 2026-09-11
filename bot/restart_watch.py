@@ -181,9 +181,9 @@ class RestartWatch(commands.Cog):
             self.bot.state.restart_shutdown_started = True  # real shutdown imminent
             kicked = await self._kick_all_players()
             if self.bot.features.is_enabled("restart"):
-                await self._announce(
-                    f"\U0001f6a8 Kicked {kicked} player(s) — restart imminent.",
-                    discord.Colour.red(),
+                await self._announce_banner(
+                    self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                    f"\U0001f504 Server restarting now — {kicked} player(s) kicked.",
                 )
 
     @tasks.loop(seconds=2.0)
