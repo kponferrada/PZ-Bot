@@ -98,7 +98,19 @@ MONTH_NAMES = [
     "July", "August", "September", "October", "November", "December"
 ]
 
-RESTART_HOURS_UTC = [1, 5, 9, 13, 17, 21]
+def _parse_restart_schedule():
+    raw = os.environ.get("RESTART_SCHEDULE_UTC", "")
+    if raw:
+        try:
+            hours = [int(x.strip()) for x in raw.split(",") if x.strip()]
+            if hours:
+                return hours
+        except ValueError:
+            pass
+    return [1, 5, 9, 13, 17, 21]
+
+
+RESTART_HOURS_UTC = _parse_restart_schedule()
 
 WEATHER_EMOJI = {
     "Clear": "\u2600\ufe0f",
@@ -122,11 +134,28 @@ BRIDGE_FRESHNESS_SECONDS = 120
 # Data helpers
 # ============================================================================
 
-def _next_restart_str(skip_active):
-    # The bot no longer schedules restarts (host-managed now).
-    return "—"
+def _next_restart():
+    """Return (countdown, clock_time) for the next scheduled restart.
 
-
+    Schedule hours are interpreted in UTC (override via RESTART_SCHEDULE_UTC);
+    the clock time shown is Philippine Time (UTC+8). The countdown itself is
+    timezone-independent.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    candidates = []
+    for h in RESTART_HOURS_UTC:
+        t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if t <= now:
+            t += datetime.timedelta(days=1)
+        candidates.append(t)
+    nxt = min(candidates)
+    delta = nxt - now
+    total_minutes = int(delta.total_seconds() // 60)
+    hours, minutes = total_minutes // 60, total_minutes % 60
+    countdown = f"in {hours}h {minutes}m" if hours else f"in {minutes}m"
+    pht = nxt + datetime.timedelta(hours=8)
+    time_str = _format_time(pht.hour, pht.minute) + " PHT"
+    return countdown, time_str
 def _format_time(hour, minutes):
     period = "AM" if hour < 12 else "PM"
     display_hour = hour % 12
@@ -241,7 +270,8 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
 
         horde_day, horde_status, horde_completed = _horde_fields(horde)
         embed.add_field(name="\U0001f480 Horde", value=horde_day, inline=True)
-        embed.add_field(name="\U0001f504 Restart", value="\u2014", inline=True)
+        restart_cd, restart_tm = _next_restart()
+        embed.add_field(name="\U0001f504 Restart", value=f"{restart_cd} · {restart_tm}", inline=True)
 
         # Row 4
         embed.add_field(name="\U0001f4cb Status", value=horde_status, inline=True)
@@ -361,7 +391,8 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     else:
         fields.append(("HORDE", "\u2014", "None detected"))
 
-    fields.append(("RESTART", "\u2014", "Host-managed"))
+    restart_cd, restart_tm = _next_restart()
+    fields.append(("RESTART", restart_cd, restart_tm))
 
     h_status = "Idle"
     if phase == "active":
