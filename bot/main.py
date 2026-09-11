@@ -44,6 +44,7 @@ from discord.ext import commands, tasks
 try:
     import rcon.source
     from rcon.source import Client
+    from rcon.exceptions import EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword
 except ImportError:
     sys.exit("ERROR: rcon package not installed. Install with: pip install rcon")
 
@@ -232,7 +233,8 @@ class RCONHelper:
         except asyncio.TimeoutError:
             print(f"RCON timeout ({timeout}s): {command}")
             return None
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+        except (socket.timeout, ConnectionRefusedError, OSError,
+                EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword) as e:
             print(f"RCON error: {e}")
             return None
 
@@ -251,7 +253,8 @@ class RCONHelper:
             with Client(self.host, self.port, passwd=self.password, timeout=timeout) as client:
                 client.run("players")
                 return True
-        except (socket.timeout, ConnectionRefusedError, OSError):
+        except (socket.timeout, ConnectionRefusedError, OSError,
+                EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword):
             return False
 
     @staticmethod
