@@ -2,20 +2,21 @@
 set -euo pipefail
 
 # Install the PZ Tambayan bot as a systemd service.
-# Run from anywhere; auto-detects the repo layout (<repo>/bot).
+# Supports running a second instance (e.g. a test bot) by passing a different
+# bot dir and service name.
 #
 # Usage:
-#   sudo ./install-service.sh            # bot dir = <repo>/bot
-#   sudo ./install-service.sh /root/bot  # explicit bot dir
+#   sudo ./install-service.sh                                  # live
+#   sudo ./install-service.sh /opt/pz-tambayan-bot-test/bot pz-tambayan-bot-test   # test
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BOT_DIR="${1:-$REPO_DIR/bot}"
-SERVICE_NAME="pz-tambayan-bot"
+SERVICE_NAME="${2:-pz-tambayan-bot}"
 UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 
 if [ ! -f "$BOT_DIR/run.sh" ]; then
     echo "ERROR: run.sh not found in $BOT_DIR" >&2
-    echo "Usage: $0 [bot-dir]   (default: $REPO_DIR/bot)" >&2
+    echo "Usage: $0 [bot-dir] [service-name]   (defaults: $REPO_DIR/bot pz-tambayan-bot)" >&2
     exit 1
 fi
 
@@ -29,7 +30,7 @@ fi
 
 cat > "$UNIT" <<EOF
 [Unit]
-Description=PZ Tambayan Discord Bot
+Description=PZ Tambayan Discord Bot (${SERVICE_NAME})
 After=network-online.target
 Wants=network-online.target
 
