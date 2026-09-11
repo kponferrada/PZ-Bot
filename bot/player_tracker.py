@@ -175,7 +175,9 @@ _DISCONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+(?:disconnected
 # The name is captured without surrounding quotes. If a death still isn't
 # detected, paste the raw `_user.txt` death line and adjust this regex.
 _DEATH_RE: Optional[re.Pattern] = re.compile(
-    r'^\[\S+\s+\S+\]\s+user\s+"?([^"]+?)"?\s+died\b',
+    r'^\[\S+\s+\S+\]\s+user\s+"?([^"]+?)"?\s+died\b'
+    r'(?:\s+at\s+\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\))?'
+    r'(?:\s*\(([^)]*)\))?',
     re.IGNORECASE,
 )
 
@@ -211,19 +213,25 @@ class PlayerTrackerCog(commands.Cog):
 
     # ---- delayed-action helpers ----------------------------------------------
 
-    async def _handle_death(self, name: str):
+    async def _handle_death(self, name: str, details: Optional[dict] = None):
         """Post a death notification to the death-logs Discord channel (no in-game broadcast)."""
-        death_count = record_death(name)
+        details = details or {}
+        death_count = record_death(name, details.get("cause"))
         if not self.bot.features.is_enabled("deaths"):
             print(f"[PlayerTracker] Death -> {name} (#{death_count}) (notifications disabled)")
             return
         channel = self.bot.get_death_logs_channel()
         if channel:
+            embed = discord.Embed(
+                title=f"\u2620\ufe0f **{name}** has died! (death #{death_count})",
+                colour=discord.Colour.red(),
+            )
+            if details.get("location"):
+                embed.add_field(name="Location", value=details["location"], inline=True)
+            if details.get("pvp") is not None:
+                embed.add_field(name="Cause", value=("Player kill" if details["pvp"] else "PvE"), inline=True)
             try:
-                await channel.send(embed=discord.Embed(
-                    title=f"\u2620\ufe0f **{name}** has died! (death #{death_count})",
-                    colour=discord.Colour.red(),
-                ))
+                await channel.send(embed=embed)
             except (discord.Forbidden, discord.HTTPException) as e:
                 print(f"[PlayerTracker] Failed to send death log: {e}")
         print(f"[PlayerTracker] Death -> {name} (#{death_count})")
@@ -316,12 +324,19 @@ class PlayerTrackerCog(commands.Cog):
                     asyncio.create_task(self._delayed_leave(name))
                     continue
 
-                # Death -> death notification (to the death-logs channel)
-                if _DEATH_RE:
+                # Death -> death notification (to the death-logs channel).
+                # The Death Log mod (death_log.py) is the rich source when present;
+                # otherwise fall back to this vanilla line (name + location + pvp).
+                if _DEATH_RE and not self.bot.state.death_log_active:
                     m = _DEATH_RE.match(line)
                     if m:
                         name = m.group(1)
-                        asyncio.ensure_future(self._handle_death(name))
+                        details = {}
+                        if m.group(2) is not None:
+                            details["location"] = f"X: {m.group(2)}, Y: {m.group(3)}"
+                        if m.group(5) is not None:
+                            details["pvp"] = "pvp" in m.group(5).lower()
+                        asyncio.ensure_future(self._handle_death(name, details))
                         continue
                     if "died" in line.lower():
                         print(f"[PlayerTracker] Unmatched death line: {line}")

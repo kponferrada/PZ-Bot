@@ -189,6 +189,7 @@ class ServerState:
         self.expecting_restart = False
         self.restart_expected_until = 0.0
         self.restart_shutdown_started = False  # set True once players are kicked (real shutdown)
+        self.death_log_active = False  # True once the Death Log mod's file is seen
 
     def mark_alive(self, source: str) -> None:
         """Record that the server was observably alive just now."""
@@ -312,7 +313,7 @@ class PZBot(commands.Bot):
         )
         lua_bridge.init(self)
 
-        for ext in ("player_tracker", "rank_sync", "chat_relay", "horde_events",
+        for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "horde_events",
                     "jeeves_drops", "jeeves_modmanager", "server_status", "horde_leaderboard",
                     "restart_watch", "feature_controls"):
             try:
