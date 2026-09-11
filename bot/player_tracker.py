@@ -37,6 +37,11 @@ import sftp_client
 
 _DEFAULT_LOG_DIR = "Logs"
 
+# After a death, PZ logs a spurious "left the game" + "fully connected" as the
+# character is removed and the player respawns. Suppress leave/join notifications
+# for a player within this many seconds of their death.
+_DEATH_RESPAWN_WINDOW = 120
+
 # ---- DB ----------------------------------------------------------------------
 
 DB_PATH = Path(__file__).parent / "players.db"
@@ -190,6 +195,7 @@ class PlayerTrackerCog(commands.Cog):
         self._file_pos: int = 0
         self._seeded = False
         self._last_seed_attempt = 0.0
+        self._recent_deaths: dict = {}
 
         init_db()
         self._tail_user_log.start()
@@ -221,6 +227,17 @@ class PlayerTrackerCog(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as e:
                 print(f"[PlayerTracker] Failed to send death log: {e}")
         print(f"[PlayerTracker] Death -> {name} (#{death_count})")
+
+    def _recent_death(self, name: str) -> bool:
+        """True if this player died within the respawn-debounce window (suppress
+        the spurious leave/rejoin that PZ logs on death)."""
+        t = self._recent_deaths.get(name)
+        if t is None:
+            return False
+        if time.time() - t > _DEATH_RESPAWN_WINDOW:
+            self._recent_deaths.pop(name, None)
+            return False
+        return True
 
 
     # ---- main tail loop ------------------------------------------------------
@@ -265,6 +282,9 @@ class PlayerTrackerCog(commands.Cog):
                     rank_cog = self.bot.get_cog("RankSync")
                     if rank_cog:
                         await rank_cog.sync_by_pz_username(name)
+                    if self._recent_death(name):
+                        print(f"[PlayerTracker] Join -> {name} (respawn after death, suppressed)")
+                        continue
                     if is_new:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification(
@@ -284,6 +304,9 @@ class PlayerTrackerCog(commands.Cog):
                 m = _DISCONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
+                    if self._recent_death(name):
+                        print(f"[PlayerTracker] Leave -> {name} (death respawn, suppressed)")
+                        continue
                     if self.bot.features.is_enabled("join_leave"):
                         await self.bot.send_notification(
                             f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** left the server.",
@@ -297,6 +320,7 @@ class PlayerTrackerCog(commands.Cog):
                     m = _DEATH_RE.match(line)
                     if m:
                         name = m.group(1)
+                        self._recent_deaths[name] = time.time()
                         asyncio.ensure_future(self._handle_death(name))
                         continue
                     if "died" in line.lower():
