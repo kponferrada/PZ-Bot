@@ -295,10 +295,10 @@ class PlayerTrackerCog(commands.Cog):
                     if is_new:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification(
-                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.",
+                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** was found!",
                                 discord.Colour.blue(),
                             )
-                            await lua_bridge.chat_relay("Server", f"{name}'s was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.")
+                            await lua_bridge.chat_relay("Server", f"{name} was found! Welcome to the PZ Tambayan PH. F6 to claim your starter kit.")
                     else:
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification(
