@@ -295,7 +295,7 @@ class PlayerTrackerCog(commands.Cog):
                         if self.bot.features.is_enabled("join_leave"):
                             await self.bot.send_notification_to(
                                 self.bot.get_join_leave_channel(),
-                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}** was found!",
+                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was found!",
                                 discord.Colour.blue(),
                             )
                     else:
