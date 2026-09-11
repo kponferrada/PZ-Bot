@@ -27,12 +27,11 @@ import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional
 
 import discord
 from discord.ext import commands, tasks
 
-import lua_bridge
 import sftp_client
 
 _DEFAULT_LOG_DIR = "Logs"
@@ -186,8 +185,6 @@ class PlayerTrackerCog(commands.Cog):
         # Tail state
         self._current_log: Optional[str] = None
         self._file_pos: int = 0
-        self._pending_discord: Set[str] = set()
-        self._welcome_sent: dict = {}
         self._seeded = False
         self._last_seed_attempt = 0.0
 
@@ -205,43 +202,20 @@ class PlayerTrackerCog(commands.Cog):
 
     # ---- delayed-action helpers ----------------------------------------------
 
-    async def _delayed_discord_welcome(self, name: str, delay: float = 10.0):
-        await asyncio.sleep(delay)
-        await self.bot.send_notification(
-            f"{self.bot.Emojis.SPIFFO_WAVE} New player **{name}** has joined for the first time!",
-            discord.Colour.blue(),
-        )
-        print(f"[PlayerTracker] Discord welcome sent -> {name}")
-
-    async def _delayed_in_game_welcome(self, name: str, is_new: bool, delay: float = 10.0):
-        await asyncio.sleep(delay)
-        import time
-        now = time.time()
-        last = self._welcome_sent.get(name, 0)
-        if now - last < 30:
-            print(f"[PlayerTracker] Skipping duplicate welcome for {name}")
-            return
-        self._welcome_sent[name] = now
-
-        # Customize these strings for PZ Tambayan.
-        if is_new:
-            msg = f"Welcome to PZ Tambayan, {name}! Enjoy your stay and be safe out there!"
-        else:
-            msg = f"Welcome back, {name}!"
-        await lua_bridge.write_command("display", message=msg)
-        label = "First-time" if is_new else "Returning"
-        print(f"[PlayerTracker] In-game welcome ({label}) -> {name}")
-
     async def _handle_death(self, name: str):
-        """Post a death notification to Discord, record it, and broadcast in-game."""
+        """Post a death notification to the death-logs Discord channel (no in-game broadcast)."""
         death_count = record_death(name)
-        await self.bot.send_notification(
-            f"\u2620\ufe0f **{name}** has died! (death #{death_count})",
-            discord.Colour.red(),
-        )
-        # Customize this string for PZ Tambayan.
-        await lua_bridge.write_command("display", message=f"RIP {name}. The dead tell no tales.")
-        print(f"[PlayerTracker] Death recorded -> {name} (#{death_count})")
+        channel = self.bot.get_death_logs_channel()
+        if channel:
+            try:
+                await channel.send(embed=discord.Embed(
+                    title=f"\u2620\ufe0f **{name}** has died! (death #{death_count})",
+                    colour=discord.Colour.red(),
+                ))
+            except (discord.Forbidden, discord.HTTPException) as e:
+                print(f"[PlayerTracker] Failed to send death log: {e}")
+        print(f"[PlayerTracker] Death -> {name} (#{death_count})")
+
 
     # ---- main tail loop ------------------------------------------------------
 
@@ -259,7 +233,6 @@ class PlayerTrackerCog(commands.Cog):
             # Log rotation: new file detected — seek to its end.
             if log_file != self._current_log:
                 self._current_log = log_file
-                self._pending_discord.clear()
                 st = await sftp.stat(log_file)
                 self._file_pos = st[0] if st else 0
                 print(f"[PlayerTracker] Now tailing: {log_file} (from {self._file_pos})")
@@ -278,7 +251,7 @@ class PlayerTrackerCog(commands.Cog):
                 if not line:
                     continue
 
-                # "fully connected" -> Discord join notification + in-game welcome
+                # "fully connected" -> Discord join notification
                 m = _CONNECTED_RE.match(line)
                 if m:
                     name = m.group(1)
@@ -296,7 +269,6 @@ class PlayerTrackerCog(commands.Cog):
                             f"{self.bot.Emojis.HAPPY} **{name}** joined the server.",
                             discord.Colour.green(),
                         )
-                    asyncio.ensure_future(self._delayed_in_game_welcome(name, is_new))
                     print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
                     continue
 

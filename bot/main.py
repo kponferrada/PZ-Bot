@@ -100,6 +100,7 @@ class Config:
         # Dedicated channel for the workshop-update / restart relay (0 = fall back to chat relay, then notification)
         self.WORKSHOP_UPDATE_CHANNEL_ID = _env_int("WORKSHOP_UPDATE_CHANNEL_ID", 0)
         self.WORKSHOP_UPDATE_ROLE_ID = _env_int("WORKSHOP_UPDATE_ROLE_ID", 0)
+        self.DEATH_LOGS_CHANNEL_ID = _env_int("DEATH_LOGS_CHANNEL_ID", 0)
 
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
@@ -324,6 +325,11 @@ class PZBot(commands.Bot):
     def get_server_notification_channel(self) -> Optional[discord.TextChannel]:
         """Channel for server up/down banners (dedicated if configured, else the main channel)."""
         ch_id = self.config.SERVER_NOTIFICATION_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
+    def get_death_logs_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for death-log notifications (dedicated if configured, else the main channel)."""
+        ch_id = self.config.DEATH_LOGS_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
     async def send_notification(self, title: str, colour: discord.Colour = discord.Colour.purple(),
