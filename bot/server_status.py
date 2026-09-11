@@ -107,7 +107,7 @@ def _parse_restart_schedule():
                 return hours
         except ValueError:
             pass
-    return [1, 5, 9, 13, 17, 21]
+    return [4, 10, 16, 22]
 
 
 RESTART_HOURS_UTC = _parse_restart_schedule()
