@@ -1,0 +1,19 @@
+# PZ Tambayan Discord Bot — systemd unit (reference).
+# `deploy/install-service.sh` generates the real one with the correct paths
+# and installs it. Adjust User= if you run the bot as a non-root user.
+[Unit]
+Description=PZ Tambayan Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/pz-tambayan-bot/bot
+ExecStart=/opt/pz-tambayan-bot/bot/run.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
