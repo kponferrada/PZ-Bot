@@ -174,8 +174,8 @@ git clone https://github.com/kponferrada/PZ-Tambayan-Bot.git /opt/pz-tambayan-bo
 git clone https://github.com/kponferrada/PZ-Tambayan-Bot.git /opt/pz-tambayan-bot-test  # -> checkout develop
 
 # each gets its own config.env (different token + channel IDs)
-sudo /opt/pz-tambayan-bot/deploy/install-service.sh       /opt/pz-tambayan-bot/bot       pz-tambayan-bot
-sudo /opt/pz-tambayan-bot-test/deploy/install-service.sh  /opt/pz-tambayan-bot-test/bot  pz-tambayan-bot-test
+sudo ~/Live/PZ-Tambayan-Bot/deploy/install-service.sh    ~/Live/PZ-Tambayan-Bot/bot   pz-tambayan-bot-live
+sudo ~/Test/PZ-Tambayan-Bot/deploy/install-service.sh    ~/Test/PZ-Tambayan-Bot/bot   pz-tambayan-bot-test
 ```
 
 Keep **live → tag**, **test → `develop`**. They share SFTP/RCON but have separate tokens, channels, and state.
