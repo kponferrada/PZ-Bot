@@ -42,8 +42,6 @@ class JeevesHordesCog(commands.Cog):
         # Dedup: track (eventDay, phase, timestamp) tuples we've already sent
         self._sent_phases: set[tuple] = set()
         self._last_poller_key = None
-        # In-game servermsg dedup: 'horde tonight' heads-up, once per horde day.
-        self._horde_night_announced: set = set()
 
     async def cog_load(self):
         self.horde_status_poller.start()
@@ -59,36 +57,6 @@ class JeevesHordesCog(commands.Cog):
             interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE
         )
         return role is not None and role in interaction.user.roles
-
-    async def _maybe_announce_horde_tonight(self, status: dict) -> None:
-        """Post a once-per-day in-game servermsg when tonight is horde night.
-
-        nextHordeDay runs 1 ahead of the in-game display day (the same offset
-        used by server_status._horde_fields), so horde night is 'today' when the
-        world's day counter equals nextHordeDay - 1.
-        """
-        if not self.bot.features.is_enabled("horde"):
-            return
-        next_day = status.get("nextHordeDay", 0)
-        if not next_day or next_day in self._horde_night_announced:
-            return
-
-        world = await lua_bridge.read_world_status()
-        if not world:
-            return
-        try:
-            world_day = int(world.get("elapsedDays") or world.get("worldAgeDays") or 0)
-        except (TypeError, ValueError):
-            return
-
-        if world_day != int(next_day) - 1:
-            return
-
-        self._horde_night_announced.add(next_day)
-        await self.bot.rcon.send_command(
-            'servermsg "⚠️ HORDE NIGHT is coming tonight! Prepare and barricade."'
-        )
-        print(f"[JeevesHordes] In-game heads-up sent: horde tonight (day {int(next_day) - 1})")
 
     # ── background poller ───────────────────────────────────────────────
 
@@ -106,10 +74,6 @@ class JeevesHordesCog(commands.Cog):
 
             if not phase or not event_day:
                 return
-
-            # In-game 'horde tonight' heads-up (deduped per horde day).
-            if phase == "scheduled":
-                await self._maybe_announce_horde_tonight(status)
 
             # Log only on state changes
             poller_key = (phase, event_day, ts)
@@ -145,9 +109,6 @@ class JeevesHordesCog(commands.Cog):
                 )
                 if self.bot.features.is_enabled("horde"):
                     await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
-                    await self.bot.rcon.send_command(
-                        'servermsg "🧟 HORDE NIGHT has begun! The dead are coming. Take cover!"'
-                    )
                 self._sent_phases.add(key)
                 print(f"[JeevesHordes] Notification sent: active, eventDay={event_day}")
 
@@ -163,9 +124,6 @@ class JeevesHordesCog(commands.Cog):
                 )
                 if self.bot.features.is_enabled("horde"):
                     await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
-                    await self.bot.rcon.send_command(
-                        'servermsg "✅ Horde night has ended. The dead have been repelled."'
-                    )
                 self._sent_phases.add(key)
                 print(f"[JeevesHordes] Notification sent: ended, eventDay={event_day}")
 

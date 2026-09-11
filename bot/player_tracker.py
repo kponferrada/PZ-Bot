@@ -2,8 +2,9 @@
 Player Tracker Extension (SFTP).
 
 Tails the PZ server `*_user.txt` log over SFTP for join events and sends
-welcome / welcome-back messages to Discord and in-game. Also detects player
-deaths and posts a death notification + records it in the local SQLite DB.
+welcome / welcome-back messages to Discord only (in-game join/leave is handled
+by PhunServer 2). Also detects player deaths and posts a death notification +
+records it in the local SQLite DB.
 
 Log file detection:
   - Looks in SFTP_LOGS_DIR for the newest file ending in _user.txt
@@ -11,7 +12,7 @@ Log file detection:
 
 Trigger lines:
   "<STEAMID> \"Name\" attempting to join."       -> first-time Discord welcome
-  "<STEAMID> \"Name\" fully connected (x,y,z)."  -> in-game welcome / welcome-back
+  "<STEAMID> \"Name\" fully connected (x,y,z)."  -> Discord welcome / welcome-back
   (death line)                                    -> death notification (see _DEATH_RE)
 
 IMPORTANT: the exact death log line varies by PZ build and may not live in

@@ -112,11 +112,6 @@ class JeevesDropsCog(commands.Cog):
                 )
                 if self.bot.features.is_enabled("airdrop"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                    # In-game servermsg for random/server drops only (skip individual /airdrop drops).
-                    if source != "bot":
-                        await self.bot.rcon.send_command(
-                            f'servermsg "📦 AIR DROP! A {crate_label} crate has landed near {target}."'
-                        )
                 self._sent_drops.add(drop_key)
 
                 print(f"[JeevesDrops] Notification sent for dropId={drop_id}, ts={ts}")
@@ -348,9 +343,6 @@ class JeevesDropsCog(commands.Cog):
                 )
                 if self.bot.features.is_enabled("airdrop"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                    await self.bot.rcon.send_command(
-                        f'servermsg "🚨 SUPPLY DROP EVENT at {loc_name}! Massive loot incoming — get moving!"'
-                    )
                 self._sent_events.add(event_key)
                 print(f"[JeevesDrops] Supply event notification sent: {loc_name} (id={event_id})")
 
@@ -375,9 +367,6 @@ class JeevesDropsCog(commands.Cog):
                 )
                 if self.bot.features.is_enabled("airdrop"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                    await self.bot.rcon.send_command(
-                        f'servermsg "📦 Supply crates have landed at {loc_name}! Grab what you can."'
-                    )
 
             elif phase == "ended":
                 skipped = status.get("skipped", False)
@@ -395,9 +384,6 @@ class JeevesDropsCog(commands.Cog):
                     )
                 if self.bot.features.is_enabled("airdrop"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
-                    await self.bot.rcon.send_command(
-                        'servermsg "📦 Supply event has ended."'
-                    )
 
         except Exception as e:
             print(f"[JeevesDrops] Supply event poller error: {e}")
