@@ -25,6 +25,7 @@ Config (config.env):
 
 import os
 import re
+from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
@@ -86,6 +87,26 @@ class RestartWatch(commands.Cog):
         except discord.HTTPException as e:
             print(f"[RestartWatch] announce error: {e}")
 
+    async def _announce_banner(self, image_path: str, caption: str) -> None:
+        """Send an image banner (local file) + @-mention to the workshop-update channel."""
+        channel = self._channel()
+        if not channel:
+            print("[RestartWatch] no announcement channel available")
+            return
+        mention = f"<@&{self._role_id}> " if self._role_id else ""
+        path = Path(image_path)
+        if not path.is_absolute():
+            path = Path(__file__).parent / path
+        content = (mention + caption).strip() or None
+        if path.is_file():
+            try:
+                await channel.send(content=content, file=discord.File(str(path)))
+            except discord.HTTPException as e:
+                print(f"[RestartWatch] banner error: {e}")
+        else:
+            print(f"[RestartWatch] banner image not found: {image_path} - falling back to text")
+            await self._announce(caption, discord.Colour.orange())
+
     async def _kick_all_players(self) -> int:
         """Force-kick every connected player via RCON `kickuser`."""
         names = set(self.bot.state.player_names)
@@ -111,9 +132,9 @@ class RestartWatch(commands.Cog):
                 self._saved = False
                 self._kicked = False
                 self.bot.state.expect_restart()
-                await self._announce(
-                    "\U0001f527 **Mod update detected** \u2014 the server will restart to apply it.",
-                    discord.Colour.orange(),
+                await self._announce_banner(
+                    self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
+                    "\U0001f527 Mod update detected \u2014 the server will restart to apply it.",
                 )
             return
 
@@ -135,9 +156,9 @@ class RestartWatch(commands.Cog):
             self._saved = False
             self._kicked = False
             self.bot.state.expect_restart()
-            await self._announce(
-                f"\U0001f504 **Server restarting** in {num} {unit}.",
-                discord.Colour.orange(),
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                f"\U0001f504 Server restarting in {num} {unit}.",
             )
 
         if seconds <= self._save_at and not self._saved:

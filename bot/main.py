@@ -270,6 +270,7 @@ class RCONHelper:
 # =============================================================================
 
 RESTART_GRACE_SECONDS = 300  # 5 min: offline longer than this = a real "down", not a restart
+UP_DEBOUNCE_SECONDS = 60   # min offline before "up/restart complete" is announced (filters RCON blips)
 
 
 class PZBot(commands.Bot):
@@ -417,20 +418,26 @@ class PZBot(commands.Bot):
 
         if prev is not None:
             if online and not prev:
-                # Server came back online.
-                if self._down_announced:
-                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                           f"{Emojis.HAPPY} Server is back online!")
-                elif self.state.restart_expected():
-                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                           f"{Emojis.HAPPY} Server restart complete!")
+                # Server came back online — but ignore brief RCON blips so we don't
+                # announce "restart complete" before the real restart.
+                offline_duration = (now - self._offline_since) if self._offline_since else None
+                if offline_duration is not None and offline_duration < UP_DEBOUNCE_SECONDS:
+                    print(f"[Announce] Ignoring brief offline blip ({offline_duration:.0f}s)")
+                    self._offline_since = None
                 else:
-                    await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
-                                           f"{Emojis.HAPPY} Server is back online!")
-                print("[Announce] Server UP transition")
-                self._down_announced = False
-                self._offline_since = None
-                self.state.expecting_restart = False
+                    if self._down_announced:
+                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                               f"{Emojis.HAPPY} Server is back online!")
+                    elif self.state.restart_expected():
+                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                               f"{Emojis.HAPPY} Server restart complete!")
+                    else:
+                        await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                               f"{Emojis.HAPPY} Server is back online!")
+                    print("[Announce] Server UP transition")
+                    self._down_announced = False
+                    self._offline_since = None
+                    self.state.expecting_restart = False
             elif not online and prev:
                 # Just went offline — don't announce yet; it may be a restart.
                 self._offline_since = now
