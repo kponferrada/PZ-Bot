@@ -178,6 +178,7 @@ class RestartWatch(commands.Cog):
 
         if seconds <= self._kick_at and not self._kicked:
             self._kicked = True
+            self.bot.state.restart_shutdown_started = True  # real shutdown imminent
             kicked = await self._kick_all_players()
             if self.bot.features.is_enabled("restart"):
                 await self._announce(

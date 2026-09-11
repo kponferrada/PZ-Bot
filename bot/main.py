@@ -187,6 +187,7 @@ class ServerState:
         self.alive_source: str = "none"
         self.expecting_restart = False
         self.restart_expected_until = 0.0
+        self.restart_shutdown_started = False  # set True once players are kicked (real shutdown)
 
     def mark_alive(self, source: str) -> None:
         """Record that the server was observably alive just now."""
@@ -202,11 +203,13 @@ class ServerState:
         """Flag that a restart is in progress (mod update / scheduled)."""
         self.expecting_restart = True
         self.restart_expected_until = time.time() + duration_seconds
+        self.restart_shutdown_started = False  # will flip True once players are kicked
 
     def restart_expected(self) -> bool:
         """True while a restart is expected (auto-expires)."""
         if self.expecting_restart and time.time() > self.restart_expected_until:
             self.expecting_restart = False
+            self.restart_shutdown_started = False
         return self.expecting_restart
 
 
@@ -455,7 +458,7 @@ class PZBot(commands.Bot):
             self.state.last_rcon_ok = False
         return response
 
-    @tasks.loop(seconds=30)
+    @tasks.loop(seconds=15)
     async def monitor_server_state(self):
         """Announce server up/down, distinguishing restarts from real outages."""
         online = self.rcon.is_server_online()
@@ -467,7 +470,8 @@ class PZBot(commands.Bot):
                 # Server came back online — but ignore brief RCON blips so we don't
                 # announce "restart complete" before the real restart.
                 offline_duration = (now - self._offline_since) if self._offline_since else None
-                if offline_duration is not None and offline_duration < UP_DEBOUNCE_SECONDS:
+                if (offline_duration is not None and offline_duration < UP_DEBOUNCE_SECONDS
+                        and not self.state.restart_shutdown_started):
                     print(f"[Announce] Ignoring brief offline blip ({offline_duration:.0f}s)")
                     self._offline_since = None
                 else:
@@ -485,6 +489,7 @@ class PZBot(commands.Bot):
                     self._down_announced = False
                     self._offline_since = None
                     self.state.expecting_restart = False
+                    self.state.restart_shutdown_started = False
             elif not online and prev:
                 # Just went offline — don't announce yet; it may be a restart.
                 self._offline_since = now
