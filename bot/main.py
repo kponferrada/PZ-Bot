@@ -565,17 +565,15 @@ async def cmd_players(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="playerlist", description="Show everyone who has ever joined.")
 @require_role(config.DEFAULT_ROLE)
 async def cmd_playerlist(interaction: discord.Interaction) -> None:
-    from player_tracker import get_all_players
-    players = get_all_players()
-    if not players:
+    import server_config
+    names = sorted(await server_config.read_server_players(bot))
+    if not names:
         await _respond(interaction, "No players recorded yet.")
         return
-    lines = [f"**{u}** — {c} session(s), {d} death(s), first seen {f[:10]}"
-             for u, f, _, c, d in players[:25]]
-    desc = "\n".join(lines)
-    if len(players) > 25:
-        desc += f"\n\n*...and {len(players) - 25} more*"
-    await _respond(interaction, f"Player Database ({len(players)} total)", description=desc)
+    desc = "\n".join(f"\u2022 {n}" for n in names[:25])
+    if len(names) > 25:
+        desc += f"\n\n*...and {len(names) - 25} more*"
+    await _respond(interaction, f"Player Database ({len(names)} total)", description=desc)
 
 
 @bot.tree.command(name="teleport", description="Teleport player1 to player2's location.")
