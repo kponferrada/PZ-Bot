@@ -111,6 +111,19 @@ def record_death(username: str, cause: Optional[str] = None) -> int:
         return row[0] if row else 0
 
 
+def is_known_player(username: str) -> bool:
+    """True if this username has actually connected before (i.e. a real player).
+
+    PZ has a vanilla bug where entities with a placeholder name (e.g. "Bob")
+    that are really animals/zombies still emit `user <name> died` lines. Those
+    never go through "fully connected", so they are absent from `players`; we
+    use that to filter them out of death notifications.
+    """
+    with _db() as conn:
+        row = conn.execute("SELECT 1 FROM players WHERE username = ?", (username,)).fetchone()
+        return row is not None
+
+
 def get_all_players() -> list:
     with _db() as conn:
         return conn.execute(
@@ -215,6 +228,9 @@ class PlayerTrackerCog(commands.Cog):
 
     async def _handle_death(self, name: str, details: Optional[dict] = None):
         """Post a death notification to the death-logs Discord channel (no in-game broadcast)."""
+        if not is_known_player(name):
+            print(f"[PlayerTracker] Skipping death for unknown entity {name!r} (vanilla-bug false positive)")
+            return
         details = details or {}
         death_count = record_death(name, details.get("cause"))
         if not self.bot.features.is_enabled("deaths"):
