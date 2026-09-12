@@ -160,6 +160,14 @@ class RestartWatch(commands.Cog):
 
     # ---- Restart (RCON) ------------------------------------------------------
 
+    async def _servermsg(self, message: str) -> None:
+        """Send an in-game server announcement (red text) to all players."""
+        clean = message.replace('"', "'")
+        try:
+            await self.bot.rcon.send_command(f'servermsg "{clean}"')
+        except Exception as e:
+            print(f"[RestartWatch] servermsg error: {e}")
+
     async def _save_world(self) -> None:
         await self.bot.rcon.send_command("save")
 
@@ -167,12 +175,13 @@ class RestartWatch(commands.Cog):
         await self._kick_all_players()
 
     async def _announce_kick_notification(self) -> None:
-        """Announce that players will be kicked (no server-restarting image)."""
+        """Announce (Discord + in-game) that players will be kicked."""
         if self.bot.features.is_enabled("restart"):
             await self._announce(
                 "🔔 Kicking players in 1 minute.",
                 discord.Colour.orange(),
             )
+            await self._servermsg("Players will be kicked in 1 minute, please seek shelter!")
 
     async def _quit_server(self) -> None:
         """Save, announce the restart, then quit over RCON."""
@@ -203,6 +212,8 @@ class RestartWatch(commands.Cog):
             if not saved and remaining <= self._save_at:
                 saved = True
                 await self._save_world()
+                if self.bot.features.is_enabled("restart"):
+                    await self._servermsg("World saved.")
             if not kicked and remaining <= self._kick_at:
                 kicked = True
                 self.bot.state.restart_shutdown_started = True
@@ -222,6 +233,7 @@ class RestartWatch(commands.Cog):
                 self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
                 f"🔧 {reason}.",
             )
+            await self._servermsg(f"{reason} — server will restart.")
         if await self._get_player_count() <= 0:
             await self._restart_server()
             return
