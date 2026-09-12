@@ -1,21 +1,26 @@
-"""restart_watch.py — detects PhunServer 2 restarts, coordinates save/kick, and
-can defer the restart while horde / air-drop / supply events are in progress.
+"""restart_watch.py — coordinates server restarts, save/kick, and the bot-driven
+mod update checker, and can defer restarts while horde / air-drop / supply
+events are in progress.
 
-PhunServer 2 (Workshop 3792193021) drives restarts via cron jobs in
-`/Lua/PhunServer2Cron.json` (a `shutdown` action for scheduled restarts and a
-`modcheck` action for mod updates). Each triggers a countdown, then `save` +
-`quit`; bringing the server back up is the host's job.
+PhunServer 2 (Workshop 3792193021) drives scheduled restarts via the `shutdown`
+cron action in `/Lua/PhunServer2Cron.json`. It triggers a countdown, then `save`
++ `quit`; bringing the server back up is the host's job.
 
-This cog watches the logs over SFTP and reacts:
+Two restart sources:
+    - Scheduled:  PhunServer 2's `shutdown` cron action starts a countdown.
+    - Mod update: this cog polls the Steam Workshop itself (see `_mod_check`)
+      and schedules a shutdown when a subscribed item was updated since the
+      server last came up.
 
-    mod-update / countdown detected  ->  announce + (optionally) defer
+This cog watches the chat log over SFTP and reacts to the countdown:
+
     "Server will restart in 2m"     ->  RCON `save`
     "Server will restart in 1m"     ->  RCON `kickuser` + "restarting" banner
 
 Deferral: when a restart is signalled, `_is_event_blocking_restart()` checks the
 horde / supply / air-drop status files (ported from Jeeves's horde guard). If an
 event is in progress and the `restart_defer` feature is enabled, the bot cancels
-PhunServer's in-flight shutdown via `setlua`, disables the cron jobs in
+PhunServer's in-flight shutdown via `setlua`, disables the `shutdown` cron job in
 `PhunServer2Cron.json`, announces the deferral, then polls until the event
 clears (or `DEFER_TIMEOUT`) and re-schedules the restart.
 
@@ -26,6 +31,8 @@ Config (config.env):
     RESTART_KICK_AT_SECONDS=60       (countdown mark at which to kick players + banner — 1 min)
     DEFER_TIMEOUT=10800              (max seconds to hold a restart for an event)
     DEFER_POLL=60                    (seconds between deferral re-checks)
+    MOD_CHECK_INTERVAL_SECONDS=300   (seconds between Steam Workshop polls)
+    MOD_CHECK_RESTART_DELAY_SECONDS=300  (countdown length for a mod-update restart)
 """
 
 import os
@@ -41,9 +48,6 @@ from discord.ext import commands, tasks
 import sftp_client
 import lua_bridge
 import server_config
-
-# PhunServer 2 "Outdated workshop items detected, restarting in N minute(s)" (server log).
-MOD_UPDATE_RE = re.compile(r"Outdated workshop items? detected", re.IGNORECASE)
 
 # PhunServer 2 countdown "Server will restart in N minutes/seconds" (chat).
 COUNTDOWN_RE = re.compile(
@@ -80,7 +84,7 @@ _CRON_JSON_FILE = "PhunServer2Cron.json"
 DEFAULT_DEFER_TIMEOUT = 3 * 60 * 60      # seconds (3 hours, matching Jeeves)
 DEFAULT_DEFER_POLL = 60                  # seconds
 
-# Mod update checker (replaces PhunServer 2's modcheck cron action).
+# Mod update checker (Steam Workshop polling).
 DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
 DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart
 
@@ -98,8 +102,6 @@ class RestartWatch(commands.Cog):
 
         self._chat_file = None
         self._chat_pos = 0
-        self._dbg_file = None
-        self._dbg_pos = 0
 
         self._announced = False
         self._saved = False
@@ -240,8 +242,8 @@ class RestartWatch(commands.Cog):
         return f"{self._lua_dir.rstrip('/')}/{_CRON_JSON_FILE}"
 
     async def _set_cron_jobs_enabled(self, enabled: bool) -> bool:
-        """Toggle the shutdown/modcheck cron jobs so they don't re-trigger a
-        restart mid-deferral. Returns True on success (or no-op)."""
+        """Toggle the shutdown cron job so it doesn't re-trigger a restart
+        mid-deferral. Returns True on success (or no-op)."""
         if not self._lua_dir:
             return False
         sftp = sftp_client.get()
@@ -254,7 +256,7 @@ class RestartWatch(commands.Cog):
         data = cron.get("data", {})
         changed = False
         for job in data.values():
-            if isinstance(job, dict) and job.get("action") in ("shutdown", "modcheck"):
+            if isinstance(job, dict) and job.get("action") == "shutdown":
                 if job.get("enabled") != enabled:
                     job["enabled"] = enabled
                     changed = True
@@ -320,7 +322,7 @@ class RestartWatch(commands.Cog):
             self._saved = False
             self._kicked = False
 
-    # ---- Mod update checker (replaces PhunServer 2's modcheck) -----------------
+    # ---- Mod update checker (Steam Workshop polling) -----------------
 
     async def _query_workshop_updates(self, ids: list) -> dict:
         """Query the Steam API for each item's `time_updated`. Returns {id: epoch}."""
@@ -348,8 +350,8 @@ class RestartWatch(commands.Cog):
         return updated
 
     async def _schedule_mod_shutdown(self, seconds: int) -> bool:
-        """Schedule PhunServer's shutdown for a mod update (runIfEmpty, like the
-        original modcheck)."""
+        """Schedule PhunServer's shutdown for a mod update (runIfEmpty, so it
+        fires even if the server empties mid-countdown)."""
         stmt = (f'require("PhunServer2/core").scheduleShutdown(getTimestamp() + {seconds}, '
                 f'{{reason="outdated workshop items", runIfEmpty=true}})')
         return await self._phun_lua(stmt)
@@ -418,14 +420,12 @@ class RestartWatch(commands.Cog):
     # ---- Line handling --------------------------------------------------------
 
     async def _handle_line(self, line: str) -> None:
-        is_mod = bool(MOD_UPDATE_RE.search(line))
         m = COUNTDOWN_RE.search(line)
-
-        if not is_mod and not m:
+        if not m:
             return
 
-        # Mid-deferral: keep cancelling any re-triggered shutdown (e.g. modcheck
-        # re-running) and skip the normal save/kick.
+        # Mid-deferral: keep cancelling any re-triggered shutdown and skip the
+        # normal save/kick.
         if self._deferring:
             await self._cancel_shutdown("still deferred")
             return
@@ -445,18 +445,12 @@ class RestartWatch(commands.Cog):
                     return
 
             if self.bot.features.is_enabled("restart"):
-                if is_mod:
-                    await self._announce_banner(
-                        self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
-                        "🔧 Mod update detected — the server will restart to apply it.",
-                    )
-                elif m:
-                    num = m.group(1)
-                    unit = m.group(2).lower()
-                    await self._announce_banner(
-                        self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                        f"🔄 Server restarting in {num} {unit}.",
-                    )
+                num = m.group(1)
+                unit = m.group(2).lower()
+                await self._announce_banner(
+                    self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                    f"🔄 Server restarting in {num} {unit}.",
+                )
 
         # Countdown save/kick. These run as background tasks so the tail loop is
         # never blocked by a slow RCON save/response. If the `save` were awaited
@@ -528,21 +522,6 @@ class RestartWatch(commands.Cog):
                     except sftp_client.SftpError:
                         pass
 
-            # Debug log ("Outdated workshop items detected")
-            dbg = await sftp.newest_matching(self._log_dir, "*DebugLog*.txt")
-            if dbg:
-                if dbg != self._dbg_file:
-                    self._dbg_file = dbg
-                    st = await sftp.stat(dbg)
-                    self._dbg_pos = st[0] if st else 0
-                else:
-                    try:
-                        text, self._dbg_pos = await sftp.tail(dbg, self._dbg_pos)
-                        for line in text.splitlines():
-                            await self._handle_line(line)
-                    except sftp_client.SftpError:
-                        pass
-
         except Exception as e:
             print(f"[RestartWatch] tail error: {e}")
 
@@ -555,11 +534,6 @@ class RestartWatch(commands.Cog):
             st = await sftp.stat(chat)
             self._chat_pos = st[0] if st else 0
             self._chat_file = chat
-        dbg = await sftp.newest_matching(self._log_dir, "*DebugLog*.txt")
-        if dbg:
-            st = await sftp.stat(dbg)
-            self._dbg_pos = st[0] if st else 0
-            self._dbg_file = dbg
         print("[RestartWatch] tail positions set")
 
 
