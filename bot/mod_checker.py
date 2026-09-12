@@ -267,19 +267,25 @@ class ModChecker:
             if info["time"] > base:
                 updated.append(info.get("title") or mod_id)
 
-        self._save_state(current)
-        if updated:
-            print(f"[ModCheck] 🚨 {len(updated)} update(s): {', '.join(updated)}")
-        else:
+        if not updated:
+            # Advance the baseline only when nothing is pending. If we saved here
+            # with a pending update, a deferral would silently "consume" it and the
+            # next poll would never re-detect it.
+            self._save_state(current)
             print(f"[ModCheck] ✅ {len(current)} mod(s) current.")
+        else:
+            print(f"[ModCheck] 🚨 {len(updated)} update(s) pending: {', '.join(updated)}")
         return updated
 
-    async def seed_state(self) -> None:
-        """Snapshot current timestamps as the baseline (called on server start)."""
+    async def seed_state(self) -> bool:
+        """Snapshot current timestamps as the baseline (called on server start /
+        after a restart). Returns True if the baseline was written."""
         ids = await self.get_workshop_ids()
         if not ids:
-            return
+            return False
         state = await self._fetch_workshop_state(ids)
         if state:
             self._save_state(state)
             print(f"[ModCheck] Seeded {len(state)} mod(s).")
+            return True
+        return False

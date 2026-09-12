@@ -213,6 +213,10 @@ class RestartWatch(commands.Cog):
         """Start the restart sequence. Immediate if no players online, otherwise a
         countdown (kick-notification T-2min, save T-1:30, kick T-1min)."""
         self.bot.state.expect_restart()
+        # The pending update is only "applied" once the server actually restarts.
+        # Mark the baseline stale so the next poll re-seeds against the applied
+        # state instead of re-announcing the same update.
+        self._seeded = False
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
@@ -237,10 +241,11 @@ class RestartWatch(commands.Cog):
             return
 
         # Seed the baseline once on startup so an update applied while the bot
-        # was down isn't re-announced as if it just happened.
+        # was down isn't re-announced as if it just happened. Also re-seeds after
+        # a restart (marked by _start_restart resetting _seeded) so applied
+        # updates become the new baseline instead of being re-detected.
         if not self._seeded:
-            await self._checker.seed_state()
-            self._seeded = True
+            self._seeded = await self._checker.seed_state()
 
         updated = await self._checker.check_for_updates()
         if not updated:
