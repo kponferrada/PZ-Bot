@@ -24,15 +24,17 @@ _DEATH_LOG_NAME = "player-death-logging.log"
 # A block in player-death-logging.log looks like:
 #
 #   Username: foo
-#   Steam Name: bar
+#   SteamID: 76561198252998080
 #   Character Name: baz
-#   Death Cause: Zombie
-#   Zombie Kills: 147
-#   Survived Time: 23 days, 5 hours
-#   Favorite Weapon: Axe
-#   Position: X: 12345, Y: 67890, Z: 0
-#   Game Date Time: 1993-7-22 14:32
+#   Gender: Male
+#   Profession: Unemployed
 #   Infected: true
+#   Cause of Death: Zombie
+#   Injuries: Torso: Bitten
+#   Zombie Kills: 147
+#   Survival Time: 23 days, 5 hours
+#   Location: X: 12345, Y: 67890, Z: 0
+#   Game Date Time: 1993-7-22 14:32
 #   =================================
 
 
@@ -93,11 +95,11 @@ class DeathLogCog(commands.Cog):
             return  # not a death block
 
         character_name = d.get("character name") or ""
-        cause = d.get("death cause") or "Unknown"
-        injuries = d.get("last injuries") or "None"
-        survived = d.get("survived time") or ""
+        cause = d.get("cause of death") or "Unknown"
+        injuries = d.get("injuries") or "None"
+        survived = d.get("survival time") or ""
         kills = d.get("zombie kills") or "0"
-        position = self._simplify_position(d.get("position") or "")
+        position = self._simplify_position(d.get("location") or "")
         game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
 
@@ -110,22 +112,22 @@ class DeathLogCog(commands.Cog):
         if not channel:
             return
 
-        lines = [f"Survivor: {survivor}"]
+        lines = [f"👤 Survivor: {survivor}"]
         if character_name:
-            lines.append(f"Character Name: {character_name}")
+            lines.append(f"🎭 Character Name: {character_name}")
         lines += [
-            f"Infected: {'true' if infected else 'false'}",
-            f"Death Cause: {cause}",
-            f"Last Injuries: {injuries}",
-            f"Zombie Kills: {kills}",
-            f"Survived Time: {survived}",
-            f"Position: {position}",
-            f"Game Date Time: {game_date_time}",
-            f"Death Counter: {death_count}",
+            f"🦠 Infected: {'true' if infected else 'false'}",
+            f"💀 Cause of Death: {cause}",
+            f"🩸 Injuries: {injuries}",
+            f"🧟 Zombie Kills: {kills}",
+            f"⏳ Survival Time: {survived}",
+            f"📍 Location: {position}",
+            f"📅 Game Date Time: {game_date_time}",
+            f"☠️ Death Counter: {death_count}",
         ]
 
         embed = discord.Embed(
-            title="\u2620\ufe0f Death Notification",
+            title="☠️ Death Notification",
             description="\n".join(lines),
             colour=discord.Colour.red(),
         )
