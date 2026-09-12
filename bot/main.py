@@ -190,6 +190,7 @@ class ServerState:
         self.restart_expected_until = 0.0
         self.restart_shutdown_started = False  # set True once players are kicked (real shutdown)
         self.death_log_active = False  # True once the Death Log mod's file is seen
+        self.server_started_at = 0.0  # epoch time the server last came up (mod-check baseline)
 
     def mark_alive(self, source: str) -> None:
         """Record that the server was observably alive just now."""
@@ -494,6 +495,7 @@ class PZBot(commands.Bot):
                     self._offline_since = None
                     self.state.expecting_restart = False
                     self.state.restart_shutdown_started = False
+                    self.state.server_started_at = now  # mod-check baseline
             elif not online and prev:
                 # Just went offline — don't announce yet; it may be a restart.
                 self._offline_since = now
@@ -548,6 +550,10 @@ async def on_ready() -> None:
     # Set the online baseline silently — no startup message or up/down banner here.
     # Real up/down transitions are announced by monitor_server_state after startup.
     bot._was_online = bot.rcon.is_server_online(timeout=10)
+    if bot._was_online:
+        # Server was already up at boot — we can't know its exact start time, so
+        # baseline the mod-check from now.
+        bot.state.server_started_at = time.time()
     print(f"[Startup] Bot started up OK — server {'online' if bot._was_online else 'offline'} (baseline set; no Discord message sent)")
 
 

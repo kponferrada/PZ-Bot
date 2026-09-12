@@ -19,6 +19,7 @@ FEATURES = {
     "airdrop": "Air drop & supply event notifications (Discord + in-game)",
     "restart": "Restart & mod-update notifications (Discord + in-game save/kick)",
     "restart_defer": "Restart deferral during horde / air-drop / supply events",
+    "mod_check": "Bot-driven workshop mod update checker (replaces PhunServer modcheck)",
     "server_status": "Server up/down notifications",
     "chat_relay": "In-game \u2194 Discord chat relay",
 }

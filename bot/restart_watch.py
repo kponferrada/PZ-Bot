@@ -34,11 +34,13 @@ import json
 import time
 import asyncio
 from pathlib import Path
+import aiohttp
 import discord
 from discord.ext import commands, tasks
 
 import sftp_client
 import lua_bridge
+import server_config
 
 # PhunServer 2 "Outdated workshop items detected, restarting in N minute(s)" (server log).
 MOD_UPDATE_RE = re.compile(r"Outdated workshop items? detected", re.IGNORECASE)
@@ -78,6 +80,10 @@ _CRON_JSON_FILE = "PhunServer2Cron.json"
 DEFAULT_DEFER_TIMEOUT = 3 * 60 * 60      # seconds (3 hours, matching Jeeves)
 DEFAULT_DEFER_POLL = 60                  # seconds
 
+# Mod update checker (replaces PhunServer 2's modcheck cron action).
+DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
+DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart
+
 
 class RestartWatch(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -101,18 +107,22 @@ class RestartWatch(commands.Cog):
         self._deferring = False
         self._defer_timeout = int(os.getenv("DEFER_TIMEOUT", str(DEFAULT_DEFER_TIMEOUT)) or DEFAULT_DEFER_TIMEOUT)
         self._defer_poll = int(os.getenv("DEFER_POLL", str(DEFAULT_DEFER_POLL)) or DEFAULT_DEFER_POLL)
+        self._mod_check_interval = int(os.getenv("MOD_CHECK_INTERVAL_SECONDS", str(DEFAULT_MOD_CHECK_INTERVAL)) or DEFAULT_MOD_CHECK_INTERVAL)
+        self._mod_restart_delay = int(os.getenv("MOD_CHECK_RESTART_DELAY_SECONDS", str(DEFAULT_MOD_RESTART_DELAY)) or DEFAULT_MOD_RESTART_DELAY)
 
         self._active = bool(self._log_dir)
         if not self._active:
             print("[RestartWatch] Disabled (SFTP_LOGS_DIR not set).")
         else:
             self._tail.start()
+            self._mod_check.start()
             print(f"[RestartWatch] Watching logs; announce ch={self._channel_id or 'notification'}, "
                   f"role={self._role_id or 'none'}, save at T-{self._save_at}s")
 
     def cog_unload(self):
         if self._active:
             self._tail.cancel()
+            self._mod_check.cancel()
 
     def _channel(self):
         if self._channel_id:
@@ -309,6 +319,101 @@ class RestartWatch(commands.Cog):
             self._announced = False
             self._saved = False
             self._kicked = False
+
+    # ---- Mod update checker (replaces PhunServer 2's modcheck) -----------------
+
+    async def _query_workshop_updates(self, ids: list) -> dict:
+        """Query the Steam API for each item's `time_updated`. Returns {id: epoch}."""
+        if not ids:
+            return {}
+        url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+        form = aiohttp.FormData()
+        form.add_field("itemcount", str(len(ids)))
+        for i, wid in enumerate(ids):
+            form.add_field(f"publishedfileids[{i}]", wid)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=form,
+                                        timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    data = await resp.json()
+        except Exception as e:
+            print(f"[RestartWatch] Steam API query failed: {e}")
+            return {}
+        updated = {}
+        for details in data.get("response", {}).get("publishedfiledetails", []):
+            wid = str(details.get("publishedfileid", ""))
+            ts = details.get("time_updated")
+            if wid and ts:
+                updated[wid] = int(ts)
+        return updated
+
+    async def _schedule_mod_shutdown(self, seconds: int) -> bool:
+        """Schedule PhunServer's shutdown for a mod update (runIfEmpty, like the
+        original modcheck)."""
+        stmt = (f'require("PhunServer2/core").scheduleShutdown(getTimestamp() + {seconds}, '
+                f'{{reason="outdated workshop items", runIfEmpty=true}})')
+        return await self._phun_lua(stmt)
+
+    async def _run_mod_check(self) -> None:
+        if not self.bot.features.is_enabled("mod_check"):
+            return
+        started = self.bot.state.server_started_at
+        if not started:
+            return  # no server-start baseline yet
+
+        ids = await server_config.read_workshop_items(self.bot)
+        if not ids:
+            return
+
+        updated = await self._query_workshop_updates(ids)
+        if not updated:
+            return
+
+        outdated = [wid for wid, ts in updated.items() if ts >= started]
+        if not outdated:
+            return
+
+        print(f"[RestartWatch] {len(outdated)} outdated workshop item(s): {', '.join(outdated)}")
+
+        # Deferral during critical activities (horde / air-drop / supply).
+        if self.bot.features.is_enabled("restart_defer"):
+            blocked, reason = await self._is_event_blocking_restart()
+            if blocked:
+                print(f"[RestartWatch] Mod update deferred: {reason}")
+                await self._announce(
+                    f"🔧 Mod update detected but deferred — {reason}. Will retry on the next check.",
+                    discord.Colour.orange(),
+                )
+                return
+
+        if self.bot.features.is_enabled("restart"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
+                "🔧 Mod update detected — server will restart to apply it.",
+            )
+
+        # Mirror _handle_line's "first sight" state so the countdown still runs its
+        # save/kick but doesn't re-announce a "scheduled restart" banner.
+        self._announced = True
+        self._saved = False
+        self._kicked = False
+        self.bot.state.expect_restart()
+
+        ok = await self._schedule_mod_shutdown(self._mod_restart_delay)
+        if not ok:
+            print("[RestartWatch] Failed to schedule mod-update shutdown")
+
+    @tasks.loop(seconds=300.0)
+    async def _mod_check(self):
+        try:
+            await self._run_mod_check()
+        except Exception as e:
+            print(f"[RestartWatch] mod check error: {e}")
+
+    @_mod_check.before_loop
+    async def _before_mod_check(self):
+        await self.bot.wait_until_ready()
+        self._mod_check.change_interval(seconds=self._mod_check_interval)
 
     # ---- Line handling --------------------------------------------------------
 

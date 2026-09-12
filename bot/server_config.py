@@ -113,3 +113,28 @@ async def read_server_name(bot, fallback: str = "PZ TAMBAYAN") -> str:
     _server_name_cache["ts"] = now
     return value
 
+
+# --- Workshop items ---------------------------------------------------------
+
+
+async def read_workshop_items(bot) -> list[str]:
+    """Read the server's `WorkshopItems` list (workshop item IDs) from the .ini.
+
+    Returns the numeric workshop IDs, tolerating both `123456` and
+    `modid=123456` forms (the mod-id side is ignored).
+    """
+    try:
+        text = await read_ini(bot)
+        if not text:
+            return []
+        ids = []
+        for v in ini_value(text, "WorkshopItems"):
+            for part in v.split("="):
+                part = part.strip()
+                if part.isdigit():
+                    ids.append(part)
+        return ids
+    except sftp_client.SftpError as e:
+        print(f"[ServerConfig] Could not read WorkshopItems: {e}")
+        return []
+
