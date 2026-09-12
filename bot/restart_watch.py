@@ -13,6 +13,7 @@ subscribed item is updated, it announces the update, checks the horde-night guar
 import os
 import time
 import asyncio
+import datetime
 from pathlib import Path
 
 import discord
@@ -38,6 +39,8 @@ DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the resta
 DEFAULT_KICK_NOTIFY_AT = 120             # seconds-remaining at which to announce the kick (2 min)
 DEFAULT_SAVE_AT = 90                     # seconds-remaining at which to RCON `save` (1:30)
 DEFAULT_KICK_AT = 60                     # seconds-remaining at which to kick players (1 min)
+DEFAULT_SCHEDULE_HOURS = [4, 10, 16, 22] # UTC restart hours (fallback if RESTART_SCHEDULE_UTC unset)
+DEFAULT_SCHEDULED_WARN = 300             # advance warning (seconds) before a scheduled restart (5 min)
 
 
 class RestartWatch(commands.Cog):
@@ -51,16 +54,22 @@ class RestartWatch(commands.Cog):
         self._kick_notify_at = int(os.getenv("RESTART_KICK_NOTIFY_AT_SECONDS", str(DEFAULT_KICK_NOTIFY_AT)) or DEFAULT_KICK_NOTIFY_AT)
         self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", str(DEFAULT_SAVE_AT)) or DEFAULT_SAVE_AT)
         self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", str(DEFAULT_KICK_AT)) or DEFAULT_KICK_AT)
+        self._schedule_hours = self._parse_schedule_hours()
+        self._scheduled_warn = int(os.getenv("SCHEDULED_RESTART_WARN_SECONDS", str(DEFAULT_SCHEDULED_WARN)) or DEFAULT_SCHEDULED_WARN)
+        self._scheduled_announced_key = None
 
         self._checker = ModChecker(bot)
         self._seeded = False
         self._mod_check.start()
+        self._scheduled_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
               f"countdown {self._restart_delay}s (notify T-{self._kick_notify_at}s, save T-{self._save_at}s, kick T-{self._kick_at}s); "
+              f"scheduled restarts @ {self._schedule_hours} UTC (warn {self._scheduled_warn}s); "
               f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
         self._mod_check.cancel()
+        self._scheduled_check.cancel()
 
     def _channel(self):
         if self._channel_id:
@@ -263,6 +272,61 @@ class RestartWatch(commands.Cog):
     async def _before_mod_check(self):
         await self.bot.wait_until_ready()
         self._mod_check.change_interval(seconds=self._mod_check_interval)
+
+    # ---- Scheduled restart announcement --------------------------------------
+
+    def _parse_schedule_hours(self) -> list:
+        """Parse RESTART_SCHEDULE_UTC into sorted unique hours (UTC)."""
+        raw = os.environ.get("RESTART_SCHEDULE_UTC", "")
+        if raw:
+            try:
+                hours = [int(x.strip()) for x in raw.split(",") if x.strip()]
+                if hours:
+                    return sorted(set(hours))
+            except ValueError:
+                pass
+        return list(DEFAULT_SCHEDULE_HOURS)
+
+    def _next_scheduled_restart(self) -> datetime.datetime:
+        """Return the next scheduled restart time (UTC, top of the hour)."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        candidates = []
+        for h in self._schedule_hours:
+            t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+            if t <= now:
+                t += datetime.timedelta(days=1)
+            candidates.append(t)
+        return min(candidates)
+
+    async def _run_scheduled_check(self) -> None:
+        """Announce an upcoming scheduled restart once, inside the warning window."""
+        if not self.bot.features.is_enabled("restart"):
+            return
+        nxt = self._next_scheduled_restart()
+        delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        if delta > self._scheduled_warn:
+            return
+        key = int(nxt.timestamp())
+        if self._scheduled_announced_key == key:
+            return
+        self._scheduled_announced_key = key
+        minutes = max(1, int(delta // 60))
+        await self._announce(
+            f"🔧 Scheduled restart in ~{minutes} minute{'s' if minutes != 1 else ''}.",
+            discord.Colour.orange(),
+        )
+        print(f"[RestartWatch] Scheduled restart announced (~{minutes}m)")
+
+    @tasks.loop(seconds=60.0)
+    async def _scheduled_check(self):
+        try:
+            await self._run_scheduled_check()
+        except Exception as e:
+            print(f"[RestartWatch] scheduled check error: {e}")
+
+    @_scheduled_check.before_loop
+    async def _before_scheduled_check(self):
+        await self.bot.wait_until_ready()
 
     # ---- Slash command -------------------------------------------------------
 
