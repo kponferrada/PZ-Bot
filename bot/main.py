@@ -132,6 +132,10 @@ class Config:
         self.SFTP_SERVER_DB = _env("SFTP_SERVER_DB") or _join(self.SFTP_ZOMBOID_ROOT, "db/pzserver.db")
         self.SFTP_MODS_DIR = _env("SFTP_MODS_DIR")
 
+        # Mod update checker (Steam Workshop) — optional key for unlisted items.
+        self.STEAM_API_KEY = _env("STEAM_API_KEY", "")
+        self.MOD_UPDATE_STATE_PATH = _env("MOD_UPDATE_STATE_PATH", "mod_update_state.json")
+
         print(f"Config loaded: RCON={self.RCON_HOST}:{self.RCON_PORT} "
               f"Guild={self.GUILD_ID} Channel={self.CHANNEL_ID} "
               f"SFTP={self.SFTP_HOST}:{self.SFTP_PORT}")

@@ -1,66 +1,21 @@
-"""restart_watch.py — coordinates server restarts, save/kick, and the bot-driven
-mod update checker, and can defer restarts while horde / air-drop / supply
-events are in progress.
+"""restart_watch.py — bot-driven workshop mod update checker and controlled restart.
 
-PhunServer 2 (Workshop 3792193021) drives scheduled restarts via the `shutdown`
-cron action in `/Lua/PhunServer2Cron.json`. It triggers a countdown, then `save`
-+ `quit`; bringing the server back up is the host's job.
-
-Two restart sources:
-    - Scheduled:  PhunServer 2's `shutdown` cron action starts a countdown.
-    - Mod update: this cog polls the Steam Workshop itself (see `_mod_check`)
-      and schedules a shutdown when a subscribed item was updated since the
-      server last came up.
-
-This cog watches the chat log over SFTP and reacts to the countdown:
-
-    "Server will restart in 2m"     ->  RCON `save`
-    "Server will restart in 1m"     ->  RCON `kickuser` + "restarting" banner
-
-Deferral: when a restart is signalled, `_is_event_blocking_restart()` checks the
-horde / supply / air-drop status files (ported from Jeeves's horde guard). If an
-event is in progress and the `restart_defer` feature is enabled, the bot cancels
-PhunServer's in-flight shutdown via `setlua`, disables the `shutdown` cron job in
-`PhunServer2Cron.json`, announces the deferral, then polls until the event
-clears (or `DEFER_TIMEOUT`) and re-schedules the restart.
-
-Config (config.env):
-    SERVER_NOTIFICATION_CHANNEL_ID=  (channel for restart banners — same as server up/down)
-    NOTIFY_ROLE_ID=                  (role to @mention — same as server up/down)
-    RESTART_SAVE_AT_SECONDS=120      (countdown mark at which to RCON `save` — 2 min)
-    RESTART_KICK_AT_SECONDS=60       (countdown mark at which to kick players + banner — 1 min)
-    DEFER_TIMEOUT=10800              (max seconds to hold a restart for an event)
-    DEFER_POLL=60                    (seconds between deferral re-checks)
-    MOD_CHECK_INTERVAL_SECONDS=300   (seconds between Steam Workshop polls)
-    MOD_CHECK_RESTART_DELAY_SECONDS=300  (countdown length for a mod-update restart)
+Polls the Steam Workshop (see mod_checker.ModChecker) on an interval. When any
+subscribed item is updated, it announces the update, checks the horde /
+air-drop / supply guard (if `restart_defer` is on), then stops the server cleanly
+over RCON (save → kick players → quit) so the host applies the update and brings
+it back up.
 """
 
 import os
-import re
-import json
 import time
-import asyncio
 from pathlib import Path
-import aiohttp
+
 import discord
 from discord.ext import commands, tasks
 
-import sftp_client
 import lua_bridge
-import server_config
-
-# PhunServer 2 countdown "Server will restart in N minutes/seconds" (chat).
-COUNTDOWN_RE = re.compile(
-    r"Server will restart in\s+(\d+|one)\s+(minute|minutes|second|seconds)", re.IGNORECASE
-)
-
-
-def _fmt_seconds(seconds: int) -> str:
-    """Human-readable countdown label, e.g. 120 -> '2 minutes', 60 -> '1 minute'."""
-    if seconds >= 60 and seconds % 60 == 0:
-        mins = seconds // 60
-        return f"{mins} minute{'s' if mins != 1 else ''}"
-    return f"{seconds} second{'s' if seconds != 1 else ''}"
+from mod_checker import ModChecker
 
 # ---- Deferral guard constants (ported from Jeeves) ---------------------------
 
@@ -79,14 +34,7 @@ _SUPPLY_ACTIVE_PHASES = ("active", "materialized")
 # crates are on the ground and a restart would destroy them.
 _DROP_ACTIVE_GRACE = 24 * 60 * 60        # seconds
 
-_CRON_JSON_FILE = "PhunServer2Cron.json"
-
-DEFAULT_DEFER_TIMEOUT = 3 * 60 * 60      # seconds (3 hours, matching Jeeves)
-DEFAULT_DEFER_POLL = 60                  # seconds
-
-# Mod update checker (Steam Workshop polling).
 DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
-DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart
 
 
 class RestartWatch(commands.Cog):
@@ -95,36 +43,16 @@ class RestartWatch(commands.Cog):
         # Restart/mod-update announcements use the same channel + @role as server up/down.
         self._channel_id = int(getattr(bot.config, "SERVER_NOTIFICATION_CHANNEL_ID", 0) or 0)
         self._role_id = int(getattr(bot.config, "NOTIFY_ROLE_ID", 0) or 0)
-        self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "120") or "120")
-        self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", "60") or "60")
-        self._log_dir = getattr(bot.config, "SFTP_LOGS_DIR", None) or os.getenv("SFTP_LOGS_DIR")
-        self._lua_dir = getattr(bot.config, "SFTP_LUA_DIR", None)
-
-        self._chat_file = None
-        self._chat_pos = 0
-
-        self._announced = False
-        self._saved = False
-        self._kicked = False
-        self._deferring = False
-        self._defer_timeout = int(os.getenv("DEFER_TIMEOUT", str(DEFAULT_DEFER_TIMEOUT)) or DEFAULT_DEFER_TIMEOUT)
-        self._defer_poll = int(os.getenv("DEFER_POLL", str(DEFAULT_DEFER_POLL)) or DEFAULT_DEFER_POLL)
         self._mod_check_interval = int(os.getenv("MOD_CHECK_INTERVAL_SECONDS", str(DEFAULT_MOD_CHECK_INTERVAL)) or DEFAULT_MOD_CHECK_INTERVAL)
-        self._mod_restart_delay = int(os.getenv("MOD_CHECK_RESTART_DELAY_SECONDS", str(DEFAULT_MOD_RESTART_DELAY)) or DEFAULT_MOD_RESTART_DELAY)
 
-        self._active = bool(self._log_dir)
-        if not self._active:
-            print("[RestartWatch] Disabled (SFTP_LOGS_DIR not set).")
-        else:
-            self._tail.start()
-            self._mod_check.start()
-            print(f"[RestartWatch] Watching logs; announce ch={self._channel_id or 'notification'}, "
-                  f"role={self._role_id or 'none'}, save at T-{self._save_at}s")
+        self._checker = ModChecker(bot)
+        self._seeded_started_at = None
+        self._mod_check.start()
+        print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
+              f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
-        if self._active:
-            self._tail.cancel()
-            self._mod_check.cancel()
+        self._mod_check.cancel()
 
     def _channel(self):
         if self._channel_id:
@@ -221,161 +149,36 @@ class RestartWatch(commands.Cog):
 
         return False, ""
 
-    # ---- PhunServer control via RCON setlua -----------------------------------
+    # ---- Restart (RCON) -------------------------------------------------------
 
-    async def _phun_lua(self, statement: str) -> bool:
-        resp = await self.bot.rcon.send_command(f"setlua {statement}")
-        return resp is not None
+    async def _restart_server(self) -> None:
+        """Stop the server cleanly so the host applies the update and restarts:
+        save the world, kick players, then quit."""
+        await self.bot.rcon.send_command("save")
+        if self.bot.features.is_enabled("restart"):
+            await self.bot.rcon.send_command('servermsg "World saved. Server restarting to apply updates."')
+        await self._kick_all_players()
+        await self.bot.rcon.send_command("quit")
 
-    async def _cancel_shutdown(self, reason: str) -> bool:
-        stmt = f'require("PhunServer2/core").cancelShutdown({json.dumps(reason)})'
-        return await self._phun_lua(stmt)
-
-    async def _schedule_shutdown(self, seconds: int, reason: str) -> bool:
-        stmt = (f'require("PhunServer2/core").scheduleShutdown(getTimestamp() + {seconds}, '
-                f'{{reason={json.dumps(reason)}, countdown="600;300;60;30;10;5"}})')
-        return await self._phun_lua(stmt)
-
-    # ---- Cron JSON helpers ----------------------------------------------------
-
-    def _cron_path(self) -> str:
-        return f"{self._lua_dir.rstrip('/')}/{_CRON_JSON_FILE}"
-
-    async def _set_cron_jobs_enabled(self, enabled: bool) -> bool:
-        """Toggle the shutdown cron job so it doesn't re-trigger a restart
-        mid-deferral. Returns True on success (or no-op)."""
-        if not self._lua_dir:
-            return False
-        sftp = sftp_client.get()
-        try:
-            raw = await sftp.read_text(self._cron_path())
-            cron = json.loads(raw)
-        except Exception as e:
-            print(f"[RestartWatch] cron read failed: {e}")
-            return False
-        data = cron.get("data", {})
-        changed = False
-        for job in data.values():
-            if isinstance(job, dict) and job.get("action") == "shutdown":
-                if job.get("enabled") != enabled:
-                    job["enabled"] = enabled
-                    changed = True
-        if not changed:
-            return True
-        try:
-            await sftp.write_text(self._cron_path(), json.dumps(cron, indent=2))
-        except Exception as e:
-            print(f"[RestartWatch] cron write failed: {e}")
-            return False
-        await self._phun_lua('require("PhunServer2Cron/core").reloadJobs()')
-        return True
-
-    # ---- Deferral flow --------------------------------------------------------
-
-    async def _defer_restart(self, reason: str) -> None:
-        """Cancel the in-flight shutdown, disable cron re-triggers, announce, and
-        poll for the event to clear in the background."""
-        await self._cancel_shutdown(reason)
-        await self._set_cron_jobs_enabled(False)
-        await self._announce(
-            f"⏸️ Scheduled restart deferred — {reason}. Will restart after the event.",
-            discord.Colour.orange(),
-        )
-        await self.bot.rcon.send_command(
-            f'servermsg "Restart deferred — {reason}. Server will restart after the event."'
-        )
-        print(f"[RestartWatch] Restart deferred: {reason}")
-        asyncio.create_task(self._wait_and_reschedule())
-
-    async def _wait_and_reschedule(self) -> None:
-        try:
-            waited = 0
-            cleared = True
-            while True:
-                blocked, reason = await self._is_event_blocking_restart()
-                if not blocked:
-                    break
-                if waited >= self._defer_timeout:
-                    cleared = False
-                    break
-                await asyncio.sleep(self._defer_poll)
-                waited += self._defer_poll
-
-            await self._set_cron_jobs_enabled(True)
-            await self._schedule_shutdown(600, "deferred restart (post-event)")
-
-            msg = ("Event concluded — server restarting in 10 minutes."
-                   if cleared else
-                   f"Defer window exceeded {self._defer_timeout // 3600}h — restarting anyway in 10 minutes.")
-            await self._announce(f"🔁 {msg}", discord.Colour.yellow())
-            await self.bot.rcon.send_command(f'servermsg "{msg}"')
-
-            # Reset so the new countdown is announced/handled fresh.
-            self._deferring = False
-            self._announced = False
-            self._saved = False
-            self._kicked = False
-        except Exception as e:
-            print(f"[RestartWatch] defer wait error: {e}")
-            self._deferring = False
-            self._announced = False
-            self._saved = False
-            self._kicked = False
-
-    # ---- Mod update checker (Steam Workshop polling) -----------------
-
-    async def _query_workshop_updates(self, ids: list) -> dict:
-        """Query the Steam API for each item's `time_updated`. Returns {id: epoch}."""
-        if not ids:
-            return {}
-        url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
-        form = aiohttp.FormData()
-        form.add_field("itemcount", str(len(ids)))
-        for i, wid in enumerate(ids):
-            form.add_field(f"publishedfileids[{i}]", wid)
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=form,
-                                        timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                    data = await resp.json()
-        except Exception as e:
-            print(f"[RestartWatch] Steam API query failed: {e}")
-            return {}
-        updated = {}
-        for details in data.get("response", {}).get("publishedfiledetails", []):
-            wid = str(details.get("publishedfileid", ""))
-            ts = details.get("time_updated")
-            if wid and ts:
-                updated[wid] = int(ts)
-        return updated
-
-    async def _schedule_mod_shutdown(self, seconds: int) -> bool:
-        """Schedule PhunServer's shutdown for a mod update (runIfEmpty, so it
-        fires even if the server empties mid-countdown)."""
-        stmt = (f'require("PhunServer2/core").scheduleShutdown(getTimestamp() + {seconds}, '
-                f'{{reason="outdated workshop items", runIfEmpty=true}})')
-        return await self._phun_lua(stmt)
+    # ---- Mod update checker ---------------------------------------------------
 
     async def _run_mod_check(self) -> None:
         if not self.bot.features.is_enabled("mod_check"):
             return
+
+        # Re-seed the baseline whenever the server (re)starts, so an update that
+        # was already applied while the bot was down isn't re-announced.
         started = self.bot.state.server_started_at
-        if not started:
-            return  # no server-start baseline yet
+        if started and started != self._seeded_started_at:
+            await self._checker.seed_state()
+            self._seeded_started_at = started
 
-        ids = await server_config.read_workshop_items(self.bot)
-        if not ids:
-            return
-
-        updated = await self._query_workshop_updates(ids)
+        updated = await self._checker.check_for_updates()
         if not updated:
             return
 
-        outdated = [wid for wid, ts in updated.items() if ts >= started]
-        if not outdated:
-            return
-
-        print(f"[RestartWatch] {len(outdated)} outdated workshop item(s): {', '.join(outdated)}")
+        names = ", ".join(updated)
+        print(f"[RestartWatch] {len(updated)} outdated workshop item(s): {names}")
 
         # Deferral during critical activities (horde / air-drop / supply).
         if self.bot.features.is_enabled("restart_defer"):
@@ -391,19 +194,11 @@ class RestartWatch(commands.Cog):
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
-                "🔧 Mod update detected — server will restart to apply it.",
+                f"🔧 Mod update detected — server restarting to apply it ({names}).",
             )
 
-        # Mirror _handle_line's "first sight" state so the countdown still runs its
-        # save/kick but doesn't re-announce a "scheduled restart" banner.
-        self._announced = True
-        self._saved = False
-        self._kicked = False
         self.bot.state.expect_restart()
-
-        ok = await self._schedule_mod_shutdown(self._mod_restart_delay)
-        if not ok:
-            print("[RestartWatch] Failed to schedule mod-update shutdown")
+        await self._restart_server()
 
     @tasks.loop(seconds=300.0)
     async def _mod_check(self):
@@ -416,125 +211,6 @@ class RestartWatch(commands.Cog):
     async def _before_mod_check(self):
         await self.bot.wait_until_ready()
         self._mod_check.change_interval(seconds=self._mod_check_interval)
-
-    # ---- Line handling --------------------------------------------------------
-
-    async def _handle_line(self, line: str) -> None:
-        m = COUNTDOWN_RE.search(line)
-        if not m:
-            return
-
-        # Mid-deferral: keep cancelling any re-triggered shutdown and skip the
-        # normal save/kick.
-        if self._deferring:
-            await self._cancel_shutdown("still deferred")
-            return
-
-        # First sight of a restart: run the defer guard before announcing.
-        if not self._announced:
-            self._announced = True
-            self._saved = False
-            self._kicked = False
-            self.bot.state.expect_restart()
-
-            if self.bot.features.is_enabled("restart_defer"):
-                blocked, reason = await self._is_event_blocking_restart()
-                if blocked:
-                    self._deferring = True
-                    await self._defer_restart(reason)
-                    return
-
-            if self.bot.features.is_enabled("restart"):
-                num = m.group(1)
-                unit = m.group(2).lower()
-                await self._announce_banner(
-                    self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                    f"🔄 Server restarting in {num} {unit}.",
-                )
-
-        # Countdown save/kick. These run as background tasks so the tail loop is
-        # never blocked by a slow RCON save/response. If the `save` were awaited
-        # here, the final "5 seconds" line would only be read after the save
-        # finished (i.e. after the server had already quit), so the T-5s
-        # "restarting now" banner would never be sent.
-        if m:
-            num = m.group(1)
-            unit = m.group(2).lower()
-            if num.lower() == "one":
-                seconds = 60
-            else:
-                n = int(num)
-                seconds = n * 60 if unit.startswith("minute") else n
-
-            if seconds <= self._save_at and not self._saved:
-                self._saved = True
-                asyncio.create_task(self._save_world(seconds))
-
-            if seconds <= self._kick_at and not self._kicked:
-                self._kicked = True
-                self.bot.state.restart_shutdown_started = True  # real shutdown imminent
-                asyncio.create_task(self._kick_players())
-
-    async def _save_world(self, seconds: int) -> None:
-        await self.bot.rcon.send_command("save")
-        if self.bot.features.is_enabled("restart"):
-            await self.bot.rcon.send_command(
-                'servermsg "World saved. Server restarting — players will be kicked shortly."'
-            )
-            await self._announce(
-                f"💾 World saved ({_fmt_seconds(seconds)} before restart).",
-                discord.Colour.green(),
-            )
-
-    async def _kick_players(self) -> None:
-        # Post the "restarting" banner immediately, then kick. Kicking every
-        # player is several RCON round-trips and must not delay the Discord
-        # signal the user asked to see at the 1-minute mark.
-        if self.bot.features.is_enabled("restart"):
-            await self._announce_banner(
-                self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                "🔄 Server restarting — kicking players.",
-            )
-        await self._kick_all_players()
-
-    @tasks.loop(seconds=2.0)
-    async def _tail(self):
-        if not self._active:
-            return
-        try:
-            sftp = sftp_client.get()
-
-            # Chat log (countdown messages)
-            chat = await sftp.newest_matching(self._log_dir, "*chat*.txt")
-            if chat:
-                if chat != self._chat_file:
-                    self._chat_file = chat
-                    st = await sftp.stat(chat)
-                    self._chat_pos = st[0] if st else 0
-                    self._announced = False  # new server session
-                    self._saved = False
-                    self._kicked = False
-                else:
-                    try:
-                        text, self._chat_pos = await sftp.tail(chat, self._chat_pos)
-                        for line in text.splitlines():
-                            await self._handle_line(line)
-                    except sftp_client.SftpError:
-                        pass
-
-        except Exception as e:
-            print(f"[RestartWatch] tail error: {e}")
-
-    @_tail.before_loop
-    async def _before_tail(self):
-        await self.bot.wait_until_ready()
-        sftp = sftp_client.get()
-        chat = await sftp.newest_matching(self._log_dir, "*chat*.txt")
-        if chat:
-            st = await sftp.stat(chat)
-            self._chat_pos = st[0] if st else 0
-            self._chat_file = chat
-        print("[RestartWatch] tail positions set")
 
 
 async def setup(bot: commands.Bot):
