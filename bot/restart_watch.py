@@ -35,7 +35,8 @@ _HORDE_TAIL_GRACE = 20 * 60              # seconds
 
 DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
 DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart (5 min)
-DEFAULT_SAVE_AT = 120                    # seconds-remaining at which to RCON `save` (2 min)
+DEFAULT_KICK_NOTIFY_AT = 120             # seconds-remaining at which to announce the kick (2 min)
+DEFAULT_SAVE_AT = 90                     # seconds-remaining at which to RCON `save` (1:30)
 DEFAULT_KICK_AT = 60                     # seconds-remaining at which to kick players (1 min)
 
 
@@ -47,6 +48,7 @@ class RestartWatch(commands.Cog):
         self._role_id = int(getattr(bot.config, "NOTIFY_ROLE_ID", 0) or 0)
         self._mod_check_interval = int(os.getenv("MOD_CHECK_INTERVAL_SECONDS", str(DEFAULT_MOD_CHECK_INTERVAL)) or DEFAULT_MOD_CHECK_INTERVAL)
         self._restart_delay = int(os.getenv("MOD_CHECK_RESTART_DELAY_SECONDS", str(DEFAULT_MOD_RESTART_DELAY)) or DEFAULT_MOD_RESTART_DELAY)
+        self._kick_notify_at = int(os.getenv("RESTART_KICK_NOTIFY_AT_SECONDS", str(DEFAULT_KICK_NOTIFY_AT)) or DEFAULT_KICK_NOTIFY_AT)
         self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", str(DEFAULT_SAVE_AT)) or DEFAULT_SAVE_AT)
         self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", str(DEFAULT_KICK_AT)) or DEFAULT_KICK_AT)
 
@@ -54,7 +56,7 @@ class RestartWatch(commands.Cog):
         self._seeded = False
         self._mod_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
-              f"countdown {self._restart_delay}s (save T-{self._save_at}s, kick T-{self._kick_at}s); "
+              f"countdown {self._restart_delay}s (notify T-{self._kick_notify_at}s, save T-{self._save_at}s, kick T-{self._kick_at}s); "
               f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
@@ -178,26 +180,29 @@ class RestartWatch(commands.Cog):
         await self._quit_server()
 
     async def _run_countdown(self) -> None:
-        """Countdown: kick-notification at T-2min, kick+save at T-1min, save+quit at T-0."""
+        """Countdown: kick-notification T-2min, save T-1:30, kick T-1min, save+quit T-0."""
         remaining = self._restart_delay
         notified = False
+        saved = False
         kicked = False
         while remaining > 0:
             await asyncio.sleep(1)
             remaining -= 1
-            if not notified and remaining <= self._save_at:
+            if not notified and remaining <= self._kick_notify_at:
                 notified = True
                 await self._announce_kick_notification()
+            if not saved and remaining <= self._save_at:
+                saved = True
+                await self._save_world()
             if not kicked and remaining <= self._kick_at:
                 kicked = True
                 self.bot.state.restart_shutdown_started = True
                 await self._kick_players()
-                await self._save_world()
         await self._quit_server()
 
     async def _start_restart(self, reason: str) -> None:
         """Start the restart sequence. Immediate if no players online, otherwise a
-        countdown (kick-notification T-2min, kick+save T-1min)."""
+        countdown (kick-notification T-2min, save T-1:30, kick T-1min)."""
         self.bot.state.expect_restart()
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
