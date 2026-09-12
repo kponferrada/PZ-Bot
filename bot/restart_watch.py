@@ -32,6 +32,7 @@ import os
 import re
 import json
 import time
+import asyncio
 from pathlib import Path
 import discord
 from discord.ext import commands, tasks
@@ -344,7 +345,11 @@ class RestartWatch(commands.Cog):
                         f"🔄 Server restarting in {num} {unit}.",
                     )
 
-        # Countdown save/kick.
+        # Countdown save/kick. These run as background tasks so the tail loop is
+        # never blocked by a slow RCON save/response. If the `save` were awaited
+        # here, the final "5 seconds" line would only be read after the save
+        # finished (i.e. after the server had already quit), so the T-5s
+        # "restarting now" banner would never be sent.
         if m:
             num = m.group(1)
             unit = m.group(2).lower()
@@ -356,25 +361,34 @@ class RestartWatch(commands.Cog):
 
             if seconds <= self._save_at and not self._saved:
                 self._saved = True
-                await self.bot.rcon.send_command("save")
-                if self.bot.features.is_enabled("restart"):
-                    await self.bot.rcon.send_command(
-                        'servermsg "World saved. Server restarting — players will be kicked shortly."'
-                    )
-                    await self._announce(
-                        f"💾 World saved (T-{seconds}s before restart).",
-                        discord.Colour.green(),
-                    )
+                asyncio.create_task(self._save_world(seconds))
 
             if seconds <= self._kick_at and not self._kicked:
                 self._kicked = True
                 self.bot.state.restart_shutdown_started = True  # real shutdown imminent
-                kicked = await self._kick_all_players()
-                if self.bot.features.is_enabled("restart"):
-                    await self._announce_banner(
-                        self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                        f"🔄 Server restarting now — {kicked} player(s) kicked.",
-                    )
+                asyncio.create_task(self._kick_players())
+
+    async def _save_world(self, seconds: int) -> None:
+        await self.bot.rcon.send_command("save")
+        if self.bot.features.is_enabled("restart"):
+            await self.bot.rcon.send_command(
+                'servermsg "World saved. Server restarting — players will be kicked shortly."'
+            )
+            await self._announce(
+                f"💾 World saved (T-{seconds}s before restart).",
+                discord.Colour.green(),
+            )
+
+    async def _kick_players(self) -> None:
+        # Post the "restarting now" banner immediately, then kick. Kicking every
+        # player is several RCON round-trips and must not delay the Discord
+        # signal the user asked to see at the 5-second mark.
+        if self.bot.features.is_enabled("restart"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                "🔄 Server restarting now.",
+            )
+        await self._kick_all_players()
 
     @tasks.loop(seconds=2.0)
     async def _tail(self):
