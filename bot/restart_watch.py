@@ -9,8 +9,8 @@ PhunServer 2 (Workshop 3792193021) drives restarts via cron jobs in
 This cog watches the logs over SFTP and reacts:
 
     mod-update / countdown detected  ->  announce + (optionally) defer
-    "Server will restart in 10s"    ->  RCON `save`
-    "Server will restart in 5s"     ->  RCON `kickuser` for every player
+    "Server will restart in 2m"     ->  RCON `save`
+    "Server will restart in 1m"     ->  RCON `kickuser` + "restarting" banner
 
 Deferral: when a restart is signalled, `_is_event_blocking_restart()` checks the
 horde / supply / air-drop status files (ported from Jeeves's horde guard). If an
@@ -22,8 +22,8 @@ clears (or `DEFER_TIMEOUT`) and re-schedules the restart.
 Config (config.env):
     SERVER_NOTIFICATION_CHANNEL_ID=  (channel for restart banners — same as server up/down)
     NOTIFY_ROLE_ID=                  (role to @mention — same as server up/down)
-    RESTART_SAVE_AT_SECONDS=10       (countdown mark at which to RCON `save`)
-    RESTART_KICK_AT_SECONDS=5        (countdown mark at which to kick remaining players)
+    RESTART_SAVE_AT_SECONDS=120      (countdown mark at which to RCON `save` — 2 min)
+    RESTART_KICK_AT_SECONDS=60       (countdown mark at which to kick players + banner — 1 min)
     DEFER_TIMEOUT=10800              (max seconds to hold a restart for an event)
     DEFER_POLL=60                    (seconds between deferral re-checks)
 """
@@ -47,6 +47,14 @@ MOD_UPDATE_RE = re.compile(r"Outdated workshop items? detected", re.IGNORECASE)
 COUNTDOWN_RE = re.compile(
     r"Server will restart in\s+(\d+|one)\s+(minute|minutes|second|seconds)", re.IGNORECASE
 )
+
+
+def _fmt_seconds(seconds: int) -> str:
+    """Human-readable countdown label, e.g. 120 -> '2 minutes', 60 -> '1 minute'."""
+    if seconds >= 60 and seconds % 60 == 0:
+        mins = seconds // 60
+        return f"{mins} minute{'s' if mins != 1 else ''}"
+    return f"{seconds} second{'s' if seconds != 1 else ''}"
 
 # ---- Deferral guard constants (ported from Jeeves) ---------------------------
 
@@ -77,8 +85,8 @@ class RestartWatch(commands.Cog):
         # Restart/mod-update announcements use the same channel + @role as server up/down.
         self._channel_id = int(getattr(bot.config, "SERVER_NOTIFICATION_CHANNEL_ID", 0) or 0)
         self._role_id = int(getattr(bot.config, "NOTIFY_ROLE_ID", 0) or 0)
-        self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "10") or "10")
-        self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", "5") or "5")
+        self._save_at = int(os.getenv("RESTART_SAVE_AT_SECONDS", "120") or "120")
+        self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", "60") or "60")
         self._log_dir = getattr(bot.config, "SFTP_LOGS_DIR", None) or os.getenv("SFTP_LOGS_DIR")
         self._lua_dir = getattr(bot.config, "SFTP_LUA_DIR", None)
 
@@ -375,18 +383,18 @@ class RestartWatch(commands.Cog):
                 'servermsg "World saved. Server restarting — players will be kicked shortly."'
             )
             await self._announce(
-                f"💾 World saved (T-{seconds}s before restart).",
+                f"💾 World saved ({_fmt_seconds(seconds)} before restart).",
                 discord.Colour.green(),
             )
 
     async def _kick_players(self) -> None:
-        # Post the "restarting now" banner immediately, then kick. Kicking every
+        # Post the "restarting" banner immediately, then kick. Kicking every
         # player is several RCON round-trips and must not delay the Discord
-        # signal the user asked to see at the 5-second mark.
+        # signal the user asked to see at the 1-minute mark.
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                "🔄 Server restarting now.",
+                "🔄 Server restarting — kicking players.",
             )
         await self._kick_all_players()
 
