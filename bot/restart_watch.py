@@ -51,7 +51,7 @@ class RestartWatch(commands.Cog):
         self._kick_at = int(os.getenv("RESTART_KICK_AT_SECONDS", str(DEFAULT_KICK_AT)) or DEFAULT_KICK_AT)
 
         self._checker = ModChecker(bot)
-        self._seeded_started_at = None
+        self._seeded = False
         self._mod_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
               f"countdown {self._restart_delay}s (save T-{self._save_at}s, kick T-{self._kick_at}s); "
@@ -214,12 +214,11 @@ class RestartWatch(commands.Cog):
         if not self.bot.features.is_enabled("mod_check"):
             return
 
-        # Re-seed the baseline whenever the server (re)starts, so an update that
-        # was already applied while the bot was down isn't re-announced.
-        started = self.bot.state.server_started_at
-        if started and started != self._seeded_started_at:
+        # Seed the baseline once on startup so an update applied while the bot
+        # was down isn't re-announced as if it just happened.
+        if not self._seeded:
             await self._checker.seed_state()
-            self._seeded_started_at = started
+            self._seeded = True
 
         updated = await self._checker.check_for_updates()
         if not updated:

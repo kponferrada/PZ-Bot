@@ -126,6 +126,7 @@ async def read_workshop_items(bot) -> list[str]:
     try:
         text = await read_ini(bot)
         if not text:
+            print("[ServerConfig] Could not read server INI (no WorkshopItems).")
             return []
         ids = []
         for v in ini_value(text, "WorkshopItems"):
@@ -133,6 +134,10 @@ async def read_workshop_items(bot) -> list[str]:
                 part = part.strip()
                 if part.isdigit():
                     ids.append(part)
+        if ids:
+            print(f"[ServerConfig] WorkshopItems = {', '.join(ids)}")
+        else:
+            print("[ServerConfig] WorkshopItems key missing or empty in server INI.")
         return ids
     except sftp_client.SftpError as e:
         print(f"[ServerConfig] Could not read WorkshopItems: {e}")
