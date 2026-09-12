@@ -151,16 +151,8 @@ class RestartWatch(commands.Cog):
 
     async def _save_world(self) -> None:
         await self.bot.rcon.send_command("save")
-        if self.bot.features.is_enabled("restart"):
-            await self.bot.rcon.send_command('servermsg "World saved. Server restarting — players will be kicked shortly."')
-            await self._announce("💾 World saved.", discord.Colour.green())
 
     async def _kick_players(self) -> None:
-        if self.bot.features.is_enabled("restart"):
-            await self._announce_banner(
-                self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                "🔔 Kicking players for restart.",
-            )
         await self._kick_all_players()
 
     async def _quit_server(self) -> None:
@@ -197,20 +189,14 @@ class RestartWatch(commands.Cog):
         """Start the restart sequence. Immediate if no players online, otherwise a
         countdown (save at T-2min, kick at T-1min)."""
         self.bot.state.expect_restart()
-        if await self._get_player_count() <= 0:
-            if self.bot.features.is_enabled("restart"):
-                await self._announce_banner(
-                    self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
-                    f"🔧 {reason} — server restarting now (no players online).",
-                )
-            await self._restart_server()
-            return
-        minutes = self._restart_delay // 60
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
-                f"🔧 {reason} — server restarting in {minutes} minute(s).",
+                f"🔧 {reason}.",
             )
+        if await self._get_player_count() <= 0:
+            await self._restart_server()
+            return
         asyncio.create_task(self._run_countdown())
 
     # ---- Mod update checker --------------------------------------------------
