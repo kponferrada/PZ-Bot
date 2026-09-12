@@ -161,10 +161,10 @@ class RestartWatch(commands.Cog):
     # ---- Restart (RCON) ------------------------------------------------------
 
     async def _servermsg(self, message: str) -> None:
-        """Send an in-game server announcement (red text) to all players."""
+        """Send a red-alert server announcement + alert sound to all players."""
         clean = message.replace('"', "'")
         try:
-            await self.bot.rcon.send_command(f'servermsg "{clean}"')
+            await self.bot.rcon.broadcast(clean)
         except Exception as e:
             print(f"[RestartWatch] servermsg error: {e}")
 
