@@ -351,7 +351,9 @@ class PlayerTrackerCog(commands.Cog):
                         if m.group(2) is not None:
                             details["location"] = f"X: {m.group(2)}, Y: {m.group(3)}"
                         if m.group(5) is not None:
-                            details["pvp"] = "pvp" in m.group(5).lower()
+                            # PZ writes either "(pvp)" or "(non pvp)". Match the whole
+                            # token, not a substring, or "non pvp" reads as a player kill.
+                            details["pvp"] = m.group(5).strip().lower() == "pvp"
                         asyncio.ensure_future(self._handle_death(name, details))
                         continue
                     if "died" in line.lower():
