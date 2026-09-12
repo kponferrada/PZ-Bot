@@ -17,7 +17,7 @@ import discord
 from discord.ext import commands, tasks
 
 import sftp_client
-from player_tracker import record_death, is_known_player
+from player_tracker import record_death
 
 _DEATH_LOG_NAME = "player-death-logging.log"
 
@@ -77,9 +77,6 @@ class DeathLogCog(commands.Cog):
                 or d.get("steam name"))
         if not name:
             return  # not a death block
-        if not is_known_player(name):
-            print(f"[DeathLog] Skipping death for unknown entity {name!r} (vanilla-bug false positive)")
-            return
 
         cause = d.get("death cause") or None
         survived = d.get("survived time") or None
