@@ -41,4 +41,4 @@ VPS can deploy a specific, known-good version instead of "whatever is on main".
 
 ## Current version
 
-`v0.2.2`
+`v0.3.1`
