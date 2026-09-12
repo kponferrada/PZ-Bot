@@ -73,50 +73,66 @@ class DeathLogCog(commands.Cog):
                     d[key] = value.strip()
         return d
 
+    @staticmethod
+    def _simplify_position(position: str) -> str:
+        """Round the X/Y/Z floats in a position string to whole numbers."""
+        m = re.search(
+            r"X:\s*(-?\d+(?:\.\d+)?)\s*,\s*Y:\s*(-?\d+(?:\.\d+)?)\s*,\s*Z:\s*(-?\d+(?:\.\d+)?)",
+            position,
+        )
+        if m:
+            x, y, z = (round(float(v)) for v in m.groups())
+            return f"X: {x}, Y: {y}, Z: {z}"
+        return position
+
     async def _handle_block(self, d: dict) -> None:
-        name = (d.get("character name") or d.get("username")
-                or d.get("steam name"))
-        if not name:
+        # "Survivor" is the stable Steam username — that's what the death
+        # counter keys on, since the character name changes each run.
+        survivor = d.get("username") or d.get("character name") or d.get("steam name")
+        if not survivor:
             return  # not a death block
 
-        cause = d.get("death cause") or None
-        survived = d.get("survived time") or None
-        position = d.get("position") or None
-        kills = d.get("zombie kills") or None
-        weapon = d.get("favorite weapon") or None
+        character_name = d.get("character name") or ""
+        cause = d.get("death cause") or "Unknown"
+        survived = d.get("survived time") or ""
+        kills = d.get("zombie kills") or "0"
+        position = self._simplify_position(d.get("position") or "")
+        game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
 
-        death_count = record_death(name, cause)
+        death_count = record_death(survivor, cause)
         if not self.bot.features.is_enabled("deaths"):
-            print(f"[DeathLog] Death -> {name} (#{death_count}) (notifications disabled)")
+            print(f"[DeathLog] Death -> {survivor} (#{death_count}) (notifications disabled)")
             return
 
         channel = self.bot.get_death_logs_channel()
         if not channel:
             return
 
+        lines = [f"Survivor: {survivor}"]
+        if character_name:
+            lines.append(f"Character Name: {character_name}")
+        lines += [
+            f"Infected: {'true' if infected else 'false'}",
+            f"Death Cause: {cause}",
+            f"Zombie Kills: {kills}",
+            f"Survived Time: {survived}",
+            f"Position: {position}",
+            f"Game Date Time: {game_date_time}",
+            f"Death Counter: {death_count}",
+        ]
+
         embed = discord.Embed(
-            title=f"\u2620\ufe0f **{name}** has died! (death #{death_count})",
+            title="\u2620\ufe0f Death Notification",
+            description="\n".join(lines),
             colour=discord.Colour.red(),
         )
-        if cause:
-            embed.add_field(name="Cause of Death", value=cause, inline=True)
-        if survived:
-            embed.add_field(name="Survived", value=survived, inline=True)
-        if position:
-            embed.add_field(name="Location", value=position, inline=True)
-        if kills is not None and kills != "":
-            embed.add_field(name="Zombie Kills", value=kills, inline=True)
-        if weapon:
-            embed.add_field(name="Favorite Weapon", value=weapon, inline=True)
-        if infected:
-            embed.add_field(name="Infected", value="\u26a0\ufe0f Yes", inline=True)
 
         try:
             await channel.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException) as e:
             print(f"[DeathLog] Failed to send death log: {e}")
-        print(f"[DeathLog] Death -> {name} (#{death_count}) cause={cause}")
+        print(f"[DeathLog] Death -> {survivor} (#{death_count}) cause={cause}")
 
     @tasks.loop(seconds=2.0)
     async def _tail(self):
