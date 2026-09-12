@@ -94,6 +94,7 @@ class DeathLogCog(commands.Cog):
 
         character_name = d.get("character name") or ""
         cause = d.get("death cause") or "Unknown"
+        injuries = d.get("last injuries") or "None"
         survived = d.get("survived time") or ""
         kills = d.get("zombie kills") or "0"
         position = self._simplify_position(d.get("position") or "")
@@ -115,6 +116,7 @@ class DeathLogCog(commands.Cog):
         lines += [
             f"Infected: {'true' if infected else 'false'}",
             f"Death Cause: {cause}",
+            f"Last Injuries: {injuries}",
             f"Zombie Kills: {kills}",
             f"Survived Time: {survived}",
             f"Position: {position}",
