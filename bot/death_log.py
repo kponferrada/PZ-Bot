@@ -43,6 +43,7 @@ class DeathLogCog(commands.Cog):
         self._file: Optional[str] = None
         self._pos = 0
         self._buffer = ""
+        self._saw_absent = False  # True once we've observed the file missing
         self._active = bool(self._lua_dir)
         if not self._active:
             print("[DeathLog] Disabled (SFTP_LUA_DIR not set).")
@@ -131,18 +132,24 @@ class DeathLogCog(commands.Cog):
                 self._file = None
                 self._pos = 0
                 self._buffer = ""
+                self._saw_absent = True
                 return
 
             size = st[0]
             self.bot.state.death_log_active = True
 
-            if path != self._file or size < self._pos:
-                # First sight, rotation, or server restart (file truncated) —
-                # skip historical/partial content and resume at the end.
+            if self._file is None:
+                # File just appeared. If we had seen it missing (it was freshly
+                # created by a death), read from the start so that first death
+                # isn't dropped; on startup with an already-populated log, skip
+                # historical entries instead.
+                self._pos = 0 if self._saw_absent else size
                 self._file = path
-                self._pos = size
                 self._buffer = ""
-                return
+            elif size < self._pos:
+                # File truncated (server restart / rotation) — start over.
+                self._pos = 0
+                self._buffer = ""
 
             text, self._pos = await sftp.tail(path, self._pos)
             if not text:
