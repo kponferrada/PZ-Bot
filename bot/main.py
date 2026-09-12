@@ -304,6 +304,7 @@ class PZBot(commands.Bot):
         self._was_online = None
         self._offline_since = None
         self._down_announced = False
+        self._restart_announced = False
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.config.GUILD_ID)
@@ -501,17 +502,27 @@ class PZBot(commands.Bot):
                     self.state.restart_shutdown_started = False
                     self.state.server_started_at = now  # mod-check baseline
             elif not online and prev:
-                # Just went offline — don't announce yet; it may be a restart.
+                # Just went offline — debounce first (filters brief RCON blips),
+                # then announce "restarting" once it's clearly a real offline.
                 self._offline_since = now
                 self._down_announced = False
-                print("[Announce] Server offline (waiting to see if it's a restart)")
+                self._restart_announced = False
+                print("[Announce] Server offline (debouncing)")
             elif not online and not prev:
-                # Still offline — only announce "down" after the grace period,
-                # and never while a restart is expected.
+                # Still offline. After the blip debounce, announce "restarting";
+                # after the longer grace period, correct it to a real "down".
+                offline_duration = (now - self._offline_since) if self._offline_since else 0
+                if (not self._restart_announced
+                        and offline_duration > UP_DEBOUNCE_SECONDS):
+                    if self.features.is_enabled("server_status"):
+                        await self.send_banner(self.config.ANNOUNCE_RESTART_IMAGE,
+                                               "🔄 Server is restarting...")
+                    self._restart_announced = True
+                    print("[Announce] Server restarting banner sent")
                 if (not self._down_announced
                         and not self.state.restart_expected()
                         and self._offline_since is not None
-                        and (now - self._offline_since) > RESTART_GRACE_SECONDS):
+                        and offline_duration > RESTART_GRACE_SECONDS):
                     if self.features.is_enabled("server_status"):
                         await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE,
                                                f"{Emojis.PANIC} Server went offline!")
