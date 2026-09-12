@@ -95,11 +95,13 @@ class DeathLogCog(commands.Cog):
             return  # not a death block
 
         character_name = d.get("character name") or ""
-        cause = d.get("cause of death") or "Unknown"
-        injuries = d.get("injuries") or "None"
-        survived = d.get("survival time") or ""
+        # Read both the current field names (post-rename) and the pre-rename
+        # names, so deaths logged by an old mod build don't render as "Unknown".
+        cause = d.get("cause of death") or d.get("death cause") or "Unknown"
+        injuries = d.get("injuries") or d.get("last injuries") or "None"
+        survived = d.get("survival time") or d.get("survived time") or ""
         kills = d.get("zombie kills") or "0"
-        position = self._simplify_position(d.get("location") or "")
+        position = self._simplify_position(d.get("location") or d.get("position") or "")
         game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
 
