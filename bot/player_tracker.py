@@ -23,6 +23,7 @@ the tail loop is source-agnostic so pointing it at that file is a one-line chang
 
 import asyncio
 import datetime
+import io
 import os
 import re
 import sqlite3
@@ -33,6 +34,7 @@ from typing import Optional
 import discord
 from discord.ext import commands, tasks
 
+import player_banner
 import sftp_client
 
 _DEFAULT_LOG_DIR = "Logs"
@@ -252,6 +254,16 @@ class PlayerTrackerCog(commands.Cog):
                 print(f"[PlayerTracker] Failed to send death log: {e}")
         print(f"[PlayerTracker] Death -> {name} (#{death_count})")
 
+    async def _send_player_banner(self, channel, kind: str, name: str) -> None:
+        """Render and send a red/green signal banner to the join/leave channel."""
+        if not channel:
+            return
+        try:
+            data = player_banner.render_banner(kind, name)
+            await channel.send(file=discord.File(io.BytesIO(data), filename="signal.png"))
+        except (discord.Forbidden, discord.HTTPException) as e:
+            print(f"[PlayerTracker] Failed to send {kind} banner: {e}")
+
     async def _delayed_leave(self, name: str) -> None:
         """Send a leave notification after the respawn window, unless the player
         rejoined in the meantime (an immediate leave-then-join is a death respawn)."""
@@ -260,10 +272,8 @@ class PlayerTrackerCog(commands.Cog):
             if self._pending_leave.pop(name, None) is None:
                 return  # a join followed -> respawn, leave notification suppressed
             if self.bot.features.is_enabled("join_leave"):
-                await self.bot.send_notification_to(
-                    self.bot.get_join_leave_channel(),
-                    f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was lost.",
-                    discord.Colour.dark_grey(),
+                await self._send_player_banner(
+                    self.bot.get_join_leave_channel(), "disconnect", name
                 )
             print(f"[PlayerTracker] Leave -> {name}")
         except Exception as e:
@@ -324,10 +334,8 @@ class PlayerTrackerCog(commands.Cog):
                             )
                     else:
                         if self.bot.features.is_enabled("join_leave"):
-                            await self.bot.send_notification_to(
-                                self.bot.get_join_leave_channel(),
-                                f"{self.bot.Emojis.HAPPY} **{name}**'s signal is back.",
-                                discord.Colour.green(),
+                            await self._send_player_banner(
+                                self.bot.get_join_leave_channel(), "connect", name
                             )
                     print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
                     continue
