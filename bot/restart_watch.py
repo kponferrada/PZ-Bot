@@ -155,7 +155,17 @@ class RestartWatch(commands.Cog):
     async def _kick_players(self) -> None:
         await self._kick_all_players()
 
+    async def _announce_kick_notification(self) -> None:
+        """Announce that players will be kicked (no server-restarting image)."""
+        if self.bot.features.is_enabled("restart"):
+            await self._announce(
+                "🔔 Kicking players in 1 minute.",
+                discord.Colour.orange(),
+            )
+
     async def _quit_server(self) -> None:
+        """Save, announce the restart, then quit over RCON."""
+        await self._save_world()
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_RESTART_IMAGE,
@@ -164,30 +174,30 @@ class RestartWatch(commands.Cog):
         await self.bot.rcon.send_command("quit")
 
     async def _restart_server(self) -> None:
-        """Immediate restart (no players online): save then quit."""
-        await self._save_world()
+        """Immediate restart (no players online): save, announce, quit."""
         await self._quit_server()
 
     async def _run_countdown(self) -> None:
-        """Bot-managed countdown: save at T-2min, kick at T-1min, quit at T-0."""
+        """Countdown: kick-notification at T-2min, kick+save at T-1min, save+quit at T-0."""
         remaining = self._restart_delay
-        saved = False
+        notified = False
         kicked = False
         while remaining > 0:
             await asyncio.sleep(1)
             remaining -= 1
-            if not saved and remaining <= self._save_at:
-                saved = True
-                await self._save_world()
+            if not notified and remaining <= self._save_at:
+                notified = True
+                await self._announce_kick_notification()
             if not kicked and remaining <= self._kick_at:
                 kicked = True
                 self.bot.state.restart_shutdown_started = True
                 await self._kick_players()
+                await self._save_world()
         await self._quit_server()
 
     async def _start_restart(self, reason: str) -> None:
         """Start the restart sequence. Immediate if no players online, otherwise a
-        countdown (save at T-2min, kick at T-1min)."""
+        countdown (kick-notification T-2min, kick+save T-1min)."""
         self.bot.state.expect_restart()
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
@@ -203,6 +213,13 @@ class RestartWatch(commands.Cog):
 
     async def _run_mod_check(self) -> None:
         if not self.bot.features.is_enabled("mod_check"):
+            return
+
+        # Pause while a restart is in progress (forced or detected), so a
+        # recurring check can't fire a second restart mid-countdown. The flag is
+        # cleared by monitor_server_state on the next server-up transition.
+        if self.bot.state.restart_expected():
+            print("[RestartWatch] Mod check paused (restart in progress).")
             return
 
         # Seed the baseline once on startup so an update applied while the bot
