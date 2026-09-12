@@ -513,6 +513,7 @@ class PZBot(commands.Bot):
                 # after the longer grace period, correct it to a real "down".
                 offline_duration = (now - self._offline_since) if self._offline_since else 0
                 if (not self._restart_announced
+                        and not self.state.restart_expected()
                         and offline_duration > UP_DEBOUNCE_SECONDS):
                     if self.features.is_enabled("server_status"):
                         await self.send_banner(self.config.ANNOUNCE_RESTART_IMAGE,

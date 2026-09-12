@@ -159,11 +159,16 @@ class RestartWatch(commands.Cog):
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                "🔄 Server restarting — kicking players.",
+                "🔔 Kicking players for restart.",
             )
         await self._kick_all_players()
 
     async def _quit_server(self) -> None:
+        if self.bot.features.is_enabled("restart"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                "🔄 Server is restarting...",
+            )
         await self.bot.rcon.send_command("quit")
 
     async def _restart_server(self) -> None:
