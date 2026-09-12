@@ -39,24 +39,22 @@ _BANNERS = {
     "disconnect": {
         "path": _ASSET_DIR / "player-disconnect.png",
         "accent": (255, 100, 102),          # red
-        "accent_x0": 388,
-        "accent_x1": 996,                   # right edge of the "{PLAYER_NAME}'" accent
-        "accent_y0": 135,
-        "accent_y1": 199,
-        "bg_y": 130,                        # text-free row used to rebuild the gradient
-        "baseline_y": 189,
-        "suffix": (1002, 134, 1554, 207),   # "s signal was lost." crop (x0,y0,x1,y1)
+        "accent_x0": 364,
+        "accent_y0": 76,
+        "accent_y1": 140,
+        "bg_y": 71,                         # text-free row used to rebuild the gradient
+        "baseline_y": 130,
+        "suffix": (978, 75, 1530, 148),     # "s signal was lost." crop (x0,y0,x1,y1)
     },
     "connect": {
         "path": _ASSET_DIR / "player-connect.png",
         "accent": (12, 255, 169),           # green
-        "accent_x0": 388,
-        "accent_x1": 997,
-        "accent_y0": 82,
-        "accent_y1": 146,
-        "bg_y": 77,
-        "baseline_y": 136,
-        "suffix": (1005, 81, 1500, 154),    # "s signal is back." crop
+        "accent_x0": 363,
+        "accent_y0": 70,
+        "accent_y1": 134,
+        "bg_y": 65,
+        "baseline_y": 124,
+        "suffix": (980, 69, 1475, 142),     # "s signal is back." crop
     },
 }
 
@@ -95,7 +93,7 @@ def _crop_suffix(im: Image.Image, cfg) -> Image.Image:
 def render_banner(kind: str, name: str) -> bytes:
     """Return a PNG (bytes) of the given banner with `name` substituted."""
     cfg = _BANNERS[kind]
-    im = Image.open(cfg["path"]).convert("RGB")
+    im = Image.open(cfg["path"]).convert("RGBA")
     px = im.load()
 
     suffix = _crop_suffix(im, cfg)
