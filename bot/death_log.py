@@ -10,6 +10,7 @@ When the Death Log file is present this cog is the authoritative death source;
 `ServerState.death_log_active`, so you never get a duplicate announcement.
 """
 
+import io
 import re
 from typing import Optional
 
@@ -17,6 +18,7 @@ import discord
 from discord.ext import commands, tasks
 
 import sftp_client
+from death_card import render_death_card
 from player_tracker import record_death
 
 _DEATH_LOG_NAME = "player-death-logging.log"
@@ -128,16 +130,42 @@ class DeathLogCog(commands.Cog):
             f"☠️ Death Counter: {death_count}",
         ]
 
-        embed = discord.Embed(
-            title="☠️ Death Notification",
-            description="\n".join(lines),
-            colour=discord.Colour.red(),
-        )
+        # Render the death card image; fall back to the text embed on failure.
+        data = {
+            "survivor": survivor,
+            "character_name": character_name,
+            "infected": "true" if infected else "false",
+            "survival_time": survived,
+            "zombie_kills": kills,
+            "cause": cause,
+            "injuries": injuries,
+            "location": position,
+            "game_date_time": game_date_time,
+            "death_count": death_count,
+        }
 
         try:
-            await channel.send(embed=embed)
+            card = render_death_card(data)
+            buf = io.BytesIO()
+            card.save(buf, format="PNG")
+            buf.seek(0)
+            await channel.send(
+                content=f"☠️ **{survivor}** has died.",
+                file=discord.File(buf, filename="death-notification.png"),
+            )
         except (discord.Forbidden, discord.HTTPException) as e:
             print(f"[DeathLog] Failed to send death log: {e}")
+        except Exception as e:
+            print(f"[DeathLog] Card render failed ({e}); falling back to embed.")
+            embed = discord.Embed(
+                title="☠️ Death Notification",
+                description="\n".join(lines),
+                colour=discord.Colour.red(),
+            )
+            try:
+                await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException) as e:
+                print(f"[DeathLog] Failed to send death log: {e}")
         print(f"[DeathLog] Death -> {survivor} (#{death_count}) cause={cause}")
 
     @tasks.loop(seconds=2.0)
