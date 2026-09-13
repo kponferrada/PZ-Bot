@@ -110,6 +110,11 @@ class Config:
         # Dedicated channel for join/leave notifications (0 = fall back to DISCORD_CHANNEL_ID)
         self.JOIN_LEAVE_CHANNEL_ID = _env_int("JOIN_LEAVE_CHANNEL_ID", 0)
 
+        # Whitelist request system
+        self.WHITELIST_CHANNEL_ID = _env_int("WHITELIST_CHANNEL_ID", 0)
+        self.WHITELIST_APPROVAL_CHANNEL_ID = _env_int("WHITELIST_APPROVAL_CHANNEL_ID", 0)
+        self.WHITELIST_CSV_PATH = _env("WHITELIST_CSV_PATH", "whitelist_requests.csv")
+
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
         self.DASHBOARD_ICON_URL = _env("DASHBOARD_ICON_URL", "")
@@ -321,7 +326,7 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "horde_events",
                     "jeeves_drops", "jeeves_modmanager", "server_status", "horde_leaderboard",
-                    "restart_watch", "feature_controls"):
+                    "restart_watch", "feature_controls", "whitelist"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")

@@ -20,6 +20,7 @@ dashboard_assets.json
 status_card.png
 feature_state.json
 mod_update_state.json
+whitelist_requests.csv
 
 # Runtime lock file (bot PID)
 *.lock
