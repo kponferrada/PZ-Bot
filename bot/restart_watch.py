@@ -8,6 +8,9 @@ subscribed item is updated, it announces the update, checks the horde-night guar
     players online      ->  countdown: save at T-2min, kick at T-1min, quit at T-0
 
 `/forcemodupdate` forces the same sequence and bypasses the horde deferral.
+
+Scheduled restarts (RESTART_SCHEDULE_UTC) run the exact same countdown + kick +
+quit flow, timed so the quit lands on the scheduled hour.
 """
 
 import os
@@ -57,6 +60,7 @@ class RestartWatch(commands.Cog):
         self._schedule_hours = self._parse_schedule_hours()
         self._scheduled_warn = int(os.getenv("SCHEDULED_RESTART_WARN_SECONDS", str(DEFAULT_SCHEDULED_WARN)) or DEFAULT_SCHEDULED_WARN)
         self._scheduled_announced_key = None
+        self._scheduled_trigger_key = None
 
         self._checker = ModChecker(bot)
         self._seeded = False
@@ -197,9 +201,12 @@ class RestartWatch(commands.Cog):
         """Immediate restart (no players online): save, announce, quit."""
         await self._quit_server()
 
-    async def _run_countdown(self) -> None:
-        """Countdown: kick-notification T-2min, save T-1:30, kick T-1min, save+quit T-0."""
-        remaining = self._restart_delay
+    async def _run_countdown(self, duration=None) -> None:
+        """Countdown: kick-notification T-2min, save T-1:30, kick T-1min, save+quit T-0.
+
+        `duration` (seconds) overrides the default restart delay; scheduled
+        restarts pass the exact time remaining so the quit lands on schedule."""
+        remaining = self._restart_delay if duration is None else duration
         notified = False
         saved = False
         kicked = False
@@ -220,9 +227,14 @@ class RestartWatch(commands.Cog):
                 await self._kick_players()
         await self._quit_server()
 
-    async def _start_restart(self, reason: str) -> None:
+    async def _start_restart(self, reason: str, image: str = None, duration=None) -> None:
         """Start the restart sequence. Immediate if no players online, otherwise a
-        countdown (kick-notification T-2min, save T-1:30, kick T-1min)."""
+        countdown (kick-notification T-2min, save T-1:30, kick T-1min).
+
+        `image` overrides the announcement banner (defaults to the mod-update
+        banner; scheduled restarts pass the generic restart banner).
+        `duration` (seconds) overrides the countdown length so scheduled
+        restarts finish (quit) exactly at the scheduled time."""
         self.bot.state.expect_restart()
         # The pending update is only "applied" once the server actually restarts.
         # Mark the baseline stale so the next poll re-seeds against the applied
@@ -230,14 +242,14 @@ class RestartWatch(commands.Cog):
         self._seeded = False
         if self.bot.features.is_enabled("restart"):
             await self._announce_banner(
-                self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
+                image or self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
                 f"🔧 {reason}.",
             )
             await self._servermsg(f"{reason} — server will restart.")
         if await self._get_player_count() <= 0:
             await self._restart_server()
             return
-        asyncio.create_task(self._run_countdown())
+        asyncio.create_task(self._run_countdown(duration))
 
     # ---- Mod update checker --------------------------------------------------
 
@@ -316,14 +328,34 @@ class RestartWatch(commands.Cog):
         return min(candidates)
 
     async def _run_scheduled_check(self) -> None:
-        """Announce an upcoming scheduled restart once, inside the warning window."""
+        """At the scheduled time, run the full restart sequence (countdown + kick +
+        quit) — the same flow a workshop update uses. An advance warning is posted
+        first if the warning window is longer than the restart countdown."""
         if not self.bot.features.is_enabled("restart"):
+            return
+        # Don't stack a scheduled restart on top of one already in progress.
+        if self.bot.state.restart_expected():
             return
         nxt = self._next_scheduled_restart()
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        key = int(nxt.timestamp())
+
+        # Within the countdown window -> run the same restart sequence as a
+        # workshop update (announce, countdown, save, kick, quit).
+        if delta <= self._restart_delay:
+            if self._scheduled_trigger_key != key:
+                self._scheduled_trigger_key = key
+                await self._start_restart(
+                    "Scheduled restart",
+                    image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                    duration=max(1, int(delta)),
+                )
+            return
+
+        # Advance warning (only reached when the warning window exceeds the
+        # restart countdown, e.g. warn 10 min out, restart 5 min out).
         if delta > self._scheduled_warn:
             return
-        key = int(nxt.timestamp())
         if self._scheduled_announced_key == key:
             return
         self._scheduled_announced_key = key
