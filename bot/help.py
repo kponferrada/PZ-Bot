@@ -16,6 +16,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "🔧 Server Control": [
         ("/stop", "Graceful shutdown (RCON save + quit). [admin]"),
+        ("/restart", "Force a server restart (in-game announcement + kick in 1 min). [admin]"),
         ("/msg <message>", "Broadcast a red-alert message to all players in-game. [admin]"),
         ("/announce <kind>", "Post a server banner (up / restarting / down / modupdate). [admin]"),
         ("/playsound <sound> [message]", "Trigger a Jeeves Alerts sound on all players. [admin]"),

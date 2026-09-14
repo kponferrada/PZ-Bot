@@ -344,6 +344,22 @@ class RestartWatch(commands.Cog):
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
         await self._start_restart("Mod update forced by admin")
 
+    @app_commands.command(name="restart", description="Force a server restart now (in-game announcement + countdown).")
+    async def cmd_restart(self, interaction: discord.Interaction) -> None:
+        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
+        if role is None or role not in interaction.user.roles:
+            await interaction.response.send_message(embed=discord.Embed(
+                title="Permission Denied",
+                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        await interaction.response.send_message("⏳ Forcing server restart...", ephemeral=True)
+        await self._start_restart(
+            "Restart forced by admin",
+            image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+        )
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(RestartWatch(bot))
