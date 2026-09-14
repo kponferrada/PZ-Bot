@@ -39,7 +39,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "🌙 Siege Night (Siege Night mod)": [
         ("/siegestatus", "Show current Siege Night status. [admin]"),
-        ("/siegestart", "Force a siege night today (warning signs, siege at nightfall). [admin]"),
+        ("/siegestart", "Force a siege night to start immediately. [admin]"),
         ("/siegestop", "Stop the active siege. [admin]"),
         ("/siegeschedule <day>", "Change the next siege night day. [admin]"),
     ],

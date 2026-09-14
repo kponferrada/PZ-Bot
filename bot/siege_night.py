@@ -99,6 +99,10 @@ class SiegeNightCog(commands.Cog):
                     self._announced_active_sieges.add(siege_count)
                     target = status.get("targetZombies", "?")
                     players = status.get("playerCount", "?")
+                    # In-game red-alert (servermsg + alert sound) — fires once per siege.
+                    await self.bot.rcon.broadcast(
+                        "SIEGE NIGHT HAS BEGUN! Zombies are attacking. Hold the line!"
+                    )
                     embed = discord.Embed(
                         title="\U0001f9df Siege Night Has Begun!",
                         description=(
@@ -228,7 +232,7 @@ class SiegeNightCog(commands.Cog):
 
     # ── /siegestart ─────────────────────────────────────────────────────
 
-    @app_commands.command(name="siegestart", description="Force a siege night today (warning signs now, siege at nightfall).")
+    @app_commands.command(name="siegestart", description="Force a siege night to start immediately.")
     async def cmd_siegestart(self, interaction: discord.Interaction) -> None:
         if not self._check_role(interaction):
             await interaction.response.send_message(embed=discord.Embed(
@@ -243,13 +247,13 @@ class SiegeNightCog(commands.Cog):
         success = await lua_bridge.siege_start()
         if success:
             await interaction.followup.send(embed=discord.Embed(
-                title="\U0001f319 Siege Night Scheduled!",
+                title="\U0001f6e1\ufe0f Siege Night Started!",
                 description=(
                     f"Triggered by **{interaction.user.display_name}**\n\n"
-                    "A siege is now scheduled for **today**. Warning signs will "
-                    "appear during the day, and the siege begins at nightfall."
+                    "A siege night has been forced. Zombies will begin "
+                    "spawning against the players **now**."
                 ),
-                colour=discord.Colour.dark_red(),
+                colour=discord.Colour.red(),
             ))
         else:
             await interaction.followup.send(embed=discord.Embed(
