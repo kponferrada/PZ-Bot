@@ -114,7 +114,6 @@ class Config:
         self.WHITELIST_CHANNEL_ID = _env_int("WHITELIST_CHANNEL_ID", 0)
         self.WHITELIST_APPROVAL_CHANNEL_ID = _env_int("WHITELIST_APPROVAL_CHANNEL_ID", 0)
         self.WHITELIST_CSV_PATH = _env("WHITELIST_CSV_PATH", "whitelist_requests.csv")
-        self.WHITELIST_DB_PATH = _env("WHITELIST_DB_PATH", "/server-data/Saves/Multiplayer/pzserver/players.db")
 
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")

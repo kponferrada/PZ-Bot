@@ -8,21 +8,19 @@ Flow:
   3. On submit the request is appended to a CSV on the bot host and forwarded to
      the approval channel (WHITELIST_APPROVAL_CHANNEL_ID) with Approve/Deny
      buttons.
-  4. Approve → inserts the user into the server's players.db whitelist table over
-     SFTP. Deny → asks the admin for a reason and records it in the CSV row.
+  4. Approve → adds the user over RCON (`adduser` + `addSteamID` so the account
+     is bound to a single SteamID). Deny → asks the admin for a reason and
+     records it in the CSV row.
 
 Config (see config.env.example):
   WHITELIST_CHANNEL_ID          — channel that holds the request button.
   WHITELIST_APPROVAL_CHANNEL_ID — channel that receives new requests.
   WHITELIST_CSV_PATH            — where requests are stored (default whitelist_requests.csv).
-  WHITELIST_DB_PATH             — server players.db (whitelist table) to write on approval.
 """
 from __future__ import annotations
 
 import csv
 import datetime
-import hashlib
-import sqlite3
 import uuid
 from pathlib import Path
 
@@ -30,10 +28,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import sftp_client
-
 _DEFAULT_CSV = "whitelist_requests.csv"
-_DEFAULT_DB = "/server-data/Saves/Multiplayer/pzserver/players.db"
 
 _CSV_HEADERS = ["request_id", "timestamp", "discord_username", "discord_id",
                 "username", "password", "steam_id", "status", "reason"]
@@ -146,7 +141,6 @@ class WhitelistCog(commands.Cog):
         self.bot = bot
         self._channel_id = int(getattr(bot.config, "WHITELIST_CHANNEL_ID", 0) or 0)
         self._approval_channel_id = int(getattr(bot.config, "WHITELIST_APPROVAL_CHANNEL_ID", 0) or 0)
-        self._db_path = getattr(bot.config, "WHITELIST_DB_PATH", "") or _DEFAULT_DB
 
         csv_path = getattr(bot.config, "WHITELIST_CSV_PATH", "") or _DEFAULT_CSV
         self._csv_path = Path(csv_path)
@@ -160,7 +154,7 @@ class WhitelistCog(commands.Cog):
 
         print(f"[Whitelist] channel={self._channel_id or 'unset'} "
               f"approval={self._approval_channel_id or 'unset'} "
-              f"csv={self._csv_path} db={self._db_path}")
+              f"csv={self._csv_path}")
 
     # ---- helpers -------------------------------------------------------------
 
@@ -259,69 +253,41 @@ class WhitelistCog(commands.Cog):
         except discord.HTTPException as e:
             print(f"[Whitelist] Failed to update approval message: {e}")
 
-    # ---- players.db write --------------------------------------------------
+    # ---- RCON whitelist -----------------------------------------------------
 
-    async def _insert_whitelist_user(self, username: str, password: str, steam_id: str) -> str:
-        """Insert a user into the server's players.db whitelist table over SFTP.
+    async def _add_whitelist_user_rcon(self, username: str, password: str, steam_id: str) -> str:
+        """Add a whitelist account + bind its SteamID over RCON.
 
-        PZ stores whitelist passwords as an MD5 hex digest, so the plaintext the
-        user submitted is hashed before insert. Returns "" on success or an
-        error message on failure.
+        Uses the server's own `adduser` command (which hashes the password
+        correctly server-side) and `addSteamID` to lock the account to a single
+        SteamID. Returns "" on success or an error message on failure.
         """
-        sftp = sftp_client.get()
-        try:
-            data = await sftp.read_bytes(self._db_path)
-        except sftp_client.SftpError as e:
-            return f"failed to read players.db: {e}"
+        rcon = self.bot.rcon
+        u = username.replace('"', "").strip()
+        p = password.replace('"', "").strip()
+        s = steam_id.replace('"', "").strip()
 
-        try:
-            conn = sqlite3.connect(":memory:")
-            conn.deserialize(data)
-            tables = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-            wl = next((t for t in tables if t.lower() == "whitelist"), None)
-            if wl is None:
-                conn.close()
-                return "whitelist table not found in players.db"
-            cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{wl}")').fetchall()]
-            col_lower = {c.lower(): c for c in cols}
-            if "username" not in col_lower:
-                conn.close()
-                return "whitelist table is missing the 'username' column"
+        if not rcon.is_server_online():
+            return "server is offline (RCON unreachable)"
 
-            # Duplicate guard — don't double-insert the same account.
-            uname_col = col_lower["username"]
-            if conn.execute(
-                    f'SELECT 1 FROM "{wl}" WHERE "{uname_col}" = ?', (username,)).fetchone():
-                conn.close()
-                return f"'{username}' is already whitelisted"
+        resp = await rcon.send_command(f'adduser "{u}" "{p}"')
+        if resp is not None:
+            low = resp.lower()
+            if "already" in low or "exist" in low:
+                return f"'{u}' may already be whitelisted: {resp.strip()}"
+            print(f"[Whitelist] adduser resp: {resp!r}")
+        elif not rcon.is_server_online():
+            # None usually means an empty success response, but if the server
+            # dropped mid-command, surface that as a real failure.
+            return "RCON `adduser` failed (connection lost)"
 
-            md5pw = hashlib.md5(password.encode("utf-8")).hexdigest()
-            insert_cols = [uname_col]
-            insert_vals = [username]
-            for key, val in (("password", md5pw), ("steamid", steam_id)):
-                col = col_lower.get(key)
-                if col:
-                    insert_cols.append(col)
-                    insert_vals.append(val)
+        if s:
+            resp2 = await rcon.send_command(f'addSteamID {s}')
+            if resp2 is not None:
+                print(f"[Whitelist] addSteamID resp: {resp2!r}")
+            elif not rcon.is_server_online():
+                return "account added, but `addSteamID` failed (connection lost)"
 
-            cols_sql = ",".join(f'"{c}"' for c in insert_cols)
-            placeholders = ",".join("?" * len(insert_cols))
-            conn.execute(f'INSERT INTO "{wl}" ({cols_sql}) VALUES ({placeholders})', insert_vals)
-            conn.commit()
-            out = conn.serialize()
-            conn.close()
-        except Exception as e:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            return f"players.db update error: {e}"
-
-        try:
-            await sftp.write_bytes(self._db_path, out)
-        except sftp_client.SftpError as e:
-            return f"failed to upload players.db: {e}"
         return ""
 
     # ---- request handling ----------------------------------------------------
@@ -374,7 +340,7 @@ class WhitelistCog(commands.Cog):
                 "\u274c You don't have permission to approve requests.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        err = await self._insert_whitelist_user(view.username, view.password, view.steam_id)
+        err = await self._add_whitelist_user_rcon(view.username, view.password, view.steam_id)
         if err:
             await interaction.followup.send(f"\u274c Approval failed: {err}", ephemeral=True)
             return

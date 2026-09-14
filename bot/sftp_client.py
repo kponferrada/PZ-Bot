@@ -174,16 +174,6 @@ class SftpClient:
         except Exception as exc:
             raise SftpError(f"write_text({path}): {exc}") from exc
 
-    async def write_bytes(self, path: str, data: bytes) -> bool:
-        """Write raw `data` to `path` directly (for binary files like players.db)."""
-        await self._ensure()
-        try:
-            async with self._sftp.open(path, "wb") as f:
-                await f.write(data)
-            return True
-        except Exception as exc:
-            raise SftpError(f"write_bytes({path}): {exc}") from exc
-
 
 # ---- module-level singleton ---------------------------------------------------
 
