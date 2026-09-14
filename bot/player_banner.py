@@ -65,14 +65,15 @@ _BANNERS = {
     },
     "new": {
         "path": _ASSET_DIR / "new-player-connect.png",
-        "accent": (0, 206, 202),            # cyan
-        "accent_x0": 315,
-        "accent_y0": 90,
-        "accent_y1": 152,
-        "bg_y": 85,
-        "baseline_y": 147,
-        "suffix": (874, 90, 1569, 157),     # "joined the apocalypse." crop
+        "accent": (0, 199, 253),            # sky blue
+        "accent_x0": 339,
+        "accent_y0": 72,
+        "accent_y1": 134,
+        "bg_y": 65,
+        "baseline_y": 124,
+        "suffix": (898, 71, 1623, 139),     # "has joined the apocalypse." crop
         "apostrophe": False,
+        "suffix_gap": 18,                   # space between name and suffix (no apostrophe)
     },
 }
 
@@ -136,10 +137,11 @@ def render_banner(kind: str, name: str) -> bytes:
     font_path = _resolve_font()
     font = ImageFont.truetype(font_path, _FONT_SIZE)
     text = f"{name}'" if cfg.get("apostrophe", True) else name
+    gap = cfg.get("suffix_gap", _SUFFIX_GAP)
 
     # Auto-shrink long names so they never overlap the white suffix.
     size = _FONT_SIZE
-    available = cfg["suffix"][0] - cfg["accent_x0"] - _SUFFIX_GAP
+    available = cfg["suffix"][0] - cfg["accent_x0"] - gap
     while size > 24:
         font = ImageFont.truetype(font_path, size)
         w = draw.textlength(text, font=font)
@@ -151,7 +153,7 @@ def render_banner(kind: str, name: str) -> bytes:
               font=font, fill=cfg["accent"], anchor="ls")
     w = draw.textlength(text, font=font)
 
-    paste_x = cfg["accent_x0"] + int(w) + _SUFFIX_GAP
+    paste_x = cfg["accent_x0"] + int(w) + gap
     im.paste(suffix, (paste_x, cfg["suffix"][1]), suffix)
 
     bg = px[im.width // 2, int(im.height * 0.85)]  # background colour for padding
