@@ -2,8 +2,9 @@
 
 The card is a dark "DEATH NOTIFICATION" template with ghost `{placeholder}` text
 slots. This module covers each slot and draws the real value, truncating anything
-that would overflow its slot, then draws coloured injury markers onto the paper-
-doll silhouette from the parsed `Injuries:` list.
+that would overflow its slot, then pastes the matching injury icon (droplet /
+slash / scratch / bite) onto the paper-doll silhouette from the parsed
+`Injuries:` list.
 """
 
 from pathlib import Path
@@ -56,16 +57,54 @@ _BODY_PARTS: Dict[str, Tuple[int, int]] = {
     "foot_r":      (910, 948),
 }
 
-# Injury condition -> marker colour.
-_CONDITION_COLORS = {
-    "bitten":     (228, 32, 32),
-    "bleeding":   (150, 12, 12),
-    "deep wound": (160, 34, 150),
-    "scratched":  (232, 205, 58),
-    "cut":        (235, 130, 30),
+# Injury icons live in the template's legend (bottom-right "Injury Overview").
+# Each condition maps to one of the four legend icons, which we crop out of the
+# template and paste onto the paper doll at the matching body part.
+_ICON_SOURCES = {
+    "bleeding":  (988, 632, 1024, 682),   # red droplet
+    "cut":       (985, 690, 1033, 743),   # 3 deep-red slanted lines
+    "scratched": (987, 754, 1028, 801),   # 3 light-red lines
+    "bitten":    (987, 811, 1032, 859),   # bite mark
 }
 
-_MARKER_RADIUS = 6
+# Injury condition -> legend icon key.
+_CONDITION_ICONS = {
+    "bitten":     "bitten",
+    "bleeding":   "bleeding",
+    "deep wound": "cut",
+    "scratched":  "scratched",
+    "cut":        "cut",
+}
+
+_ICON_SIZE = 14  # marker height on the paper doll (px)
+
+_icons_cache: Optional[Dict[str, Image.Image]] = None
+
+
+def _load_icons() -> Dict[str, Image.Image]:
+    """Crop the four injury icons out of the template legend (transparent bg)."""
+    global _icons_cache
+    if _icons_cache is not None:
+        return _icons_cache
+    template = Image.open(_CARD_PATH).convert("RGB")
+    icons: Dict[str, Image.Image] = {}
+    for name, box in _ICON_SOURCES.items():
+        icon = template.crop(box).convert("RGBA")
+        ip = icon.load()
+        for y in range(icon.height):
+            for x in range(icon.width):
+                r, g, b, _a = ip[x, y]
+                # Keep red-dominant icon pixels and bright white (bite-mark
+                # teeth); make the dark card background transparent.
+                if (r > 40 and r > g * 1.2 and r > b * 1.2) or (r > 150 and g > 150 and b > 150):
+                    ip[x, y] = (r, g, b, 255)
+                else:
+                    ip[x, y] = (0, 0, 0, 0)
+        scale = _ICON_SIZE / icon.height
+        icon = icon.resize((max(1, round(icon.width * scale)), _ICON_SIZE), Image.LANCZOS)
+        icons[name] = icon
+    _icons_cache = icons
+    return icons
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -145,7 +184,7 @@ def render_death_card(data: Dict) -> Image.Image:
     zombie_kills, cause, injuries, location, game_date_time, death_count.
     Returns a new PIL Image (the original template is never mutated).
     """
-    img = Image.open(_CARD_PATH).convert("RGB")
+    img = Image.open(_CARD_PATH).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
     # 1. Fill each value slot: cover the ghost placeholder, draw the value.
@@ -169,26 +208,22 @@ def render_death_card(data: Dict) -> Image.Image:
         count = _truncate(draw, count, cfont, r - l - 16)
         _draw_centered(draw, ((l + r) // 2, (t + b) // 2), count, cfont, _COUNT_TEXT)
 
-    # 3. Injury markers on the paper doll.
+    # 3. Injury markers on the paper doll (legend icons).
+    icons = _load_icons()
+    spacing = _ICON_SIZE + 3
     for key, conds in _parse_injuries(str(data.get("injuries", "") or "")):
         pos = _BODY_PARTS.get(key)
         if pos is None:
             continue
-        # Stack multiple conditions on the same part vertically.
-        offsets = []
         n = len(conds) or 1
-        for i in range(n):
-            offsets.append((pos[0], pos[1] + (i - (n - 1) / 2) * (_MARKER_RADIUS * 2 + 2)))
         for i, cond in enumerate(conds):
-            colour = _CONDITION_COLORS.get(cond)
-            if colour is None:
-                # Unknown condition — fall back to a neutral marker.
-                colour = (200, 200, 200)
-            cx, cy = offsets[i]
-            draw.ellipse(
-                [cx - _MARKER_RADIUS, cy - _MARKER_RADIUS,
-                 cx + _MARKER_RADIUS, cy + _MARKER_RADIUS],
-                fill=colour, outline=(255, 255, 255), width=2,
-            )
+            icon = icons.get(_CONDITION_ICONS.get(cond, ""))
+            if icon is None:
+                continue  # unknown condition — no icon to draw
+            # Stack multiple conditions on the same part vertically, centred.
+            cy = pos[1] + (i - (n - 1) / 2) * spacing
+            px = pos[0] - icon.width // 2
+            py = int(cy) - icon.height // 2
+            img.paste(icon, (px, py), icon)
 
     return img

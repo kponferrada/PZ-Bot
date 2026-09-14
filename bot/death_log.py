@@ -150,7 +150,6 @@ class DeathLogCog(commands.Cog):
             card.save(buf, format="PNG")
             buf.seek(0)
             await channel.send(
-                content=f"☠️ **{survivor}** has died.",
                 file=discord.File(buf, filename="death-notification.png"),
             )
         except (discord.Forbidden, discord.HTTPException) as e:
