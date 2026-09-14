@@ -300,10 +300,9 @@ def _horde_fields(horde):
     event_count = horde.get("eventCount")
     next_day = horde.get("nextHordeDay")
 
-    # Horde day — the Lua scheduler's day counter runs 1 ahead of what
-    # players see in-game. Subtract 1 to match the in-game display.
+    # Horde day — nextHordeDay is already the in-game horde day (no offset).
     if next_day is not None:
-        horde_day = f"Day {next_day - 1}"
+        horde_day = f"Day {next_day}"
     else:
         horde_day = "—"
 
@@ -387,7 +386,7 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     next_day = horde.get("nextHordeDay")
     phase = horde.get("phase", "")
     if next_day is not None:
-        fields.append(("HORDE", f"Day {next_day - 1}", phase.capitalize() if phase else "None detected"))
+        fields.append(("HORDE", f"Day {next_day}", phase.capitalize() if phase else "None detected"))
     else:
         fields.append(("HORDE", "\u2014", "None detected"))
 

@@ -137,7 +137,7 @@ class JeevesHordesCog(commands.Cog):
                 next_day = status.get("nextHordeDay")
                 desc = "The horde has been defeated. The night is quiet once more."
                 if next_day:
-                    desc += f"\n\nNext horde night: **Day {next_day - 1}**"
+                    desc += f"\n\nNext horde night: **Day {next_day}**"
                 embed = discord.Embed(
                     title="\u2705 Horde Night Has Ended",
                     description=desc,
@@ -333,7 +333,7 @@ class JeevesHordesCog(commands.Cog):
             state,
             "",
             f"\U0001f4c5 Current Day: **{day}**",
-            f"\U0001f319 Next Horde Night: **Day {next_day - 1}**" if next_day else "\U0001f319 Next Horde Night: **Not scheduled**",
+            f"\U0001f319 Next Horde Night: **Day {next_day}**" if next_day else "\U0001f319 Next Horde Night: **Not scheduled**",
             f"\U0001f4ca Hordes Completed: **{event_count}**",
         ]
 
