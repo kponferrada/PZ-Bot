@@ -1,20 +1,19 @@
 """restart_watch.py — bot-driven workshop mod update checker and controlled restart.
 
 Polls the Steam Workshop (see mod_checker.ModChecker) on an interval. When any
-subscribed item is updated, it announces the update, checks the horde-night guard
-(if `restart_defer` is on), then stops the server cleanly over RCON:
+subscribed item is updated, it announces the update and stops the server cleanly
+over RCON (no horde-night deferral):
 
     no players online   ->  restart immediately (save, quit)
     players online      ->  countdown: save at T-2min, kick at T-1min, quit at T-0
 
-`/forcemodupdate` forces the same sequence and bypasses the horde deferral.
+`/forcemodupdate` forces the same sequence immediately.
 
 Scheduled restarts (RESTART_SCHEDULE_UTC) run the exact same countdown + kick +
 quit flow, timed so the quit lands on the scheduled hour.
 """
 
 import os
-import time
 import asyncio
 import datetime
 from pathlib import Path
@@ -23,19 +22,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-import lua_bridge
 from mod_checker import ModChecker
-
-# ---- Horde guard constants (ported from Jeeves) -----------------------------
-
-# A horde runs ~2 in-game hours; a file older than this stuck on "active" is not
-# a live horde, it's one nobody is updating. Without this cap a stale file would
-# block every future restart silently.
-_HORDE_ACTIVE_MAX_AGE = 45 * 60          # seconds
-# Phases that mean the horde is over but its tail (lure window) is not. They
-# block for a bounded grace period measured from the status file's timestamp.
-_HORDE_TAIL_PHASES = ("ended", "dropped", "expired")
-_HORDE_TAIL_GRACE = 20 * 60              # seconds
 
 DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
 DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart (5 min)
@@ -136,28 +123,6 @@ class RestartWatch(commands.Cog):
             _, count = self.bot.rcon.parse_players(resp)
             return count
         return self.bot.state.player_count
-
-    # ---- Horde guard ---------------------------------------------------------
-
-    async def _is_event_blocking_restart(self):
-        """Return (blocked, reason) if a horde night should block a restart."""
-        horde = await lua_bridge.read_horde_status()
-        if horde:
-            phase = horde.get("phase", "")
-            written = horde.get("timestamp")
-            age = int(time.time()) - int(written) if isinstance(written, (int, float)) else None
-
-            if phase == "active" or horde.get("active") is True:
-                if not (phase == "active" and age is not None and age > _HORDE_ACTIVE_MAX_AGE):
-                    return True, "Horde night is currently active"
-            if horde.get("lurePhase") is True:
-                return True, "Horde lure window still running"
-            if phase in _HORDE_TAIL_PHASES:
-                if age is None or age <= _HORDE_TAIL_GRACE:
-                    return True, f"Horde aftermath still settling (phase {phase})"
-            # A merely *scheduled* (future) horde no longer blocks — only an
-            # active/lure/tail horde does, so a mod update proceeds on schedule.
-        return False, ""
 
     # ---- Restart (RCON) ------------------------------------------------------
 
@@ -275,16 +240,6 @@ class RestartWatch(commands.Cog):
         names = ", ".join(updated)
         print(f"[RestartWatch] {len(updated)} outdated workshop item(s): {names}")
 
-        if self.bot.features.is_enabled("restart_defer"):
-            blocked, reason = await self._is_event_blocking_restart()
-            if blocked:
-                print(f"[RestartWatch] Mod update deferred: {reason}")
-                await self._announce(
-                    f"🔧 Mod update detected but deferred — {reason}. Will retry on the next check.",
-                    discord.Colour.orange(),
-                )
-                return
-
         await self._start_restart(f"Mod update detected ({names})")
 
     @tasks.loop(seconds=300.0)
@@ -376,7 +331,7 @@ class RestartWatch(commands.Cog):
 
     # ---- Slash command -------------------------------------------------------
 
-    @app_commands.command(name="forcemodupdate", description="Force a mod update restart now, bypassing the horde deferral.")
+    @app_commands.command(name="forcemodupdate", description="Force a mod update restart now.")
     async def cmd_force_mod_update(self, interaction: discord.Interaction) -> None:
         role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
         if role is None or role not in interaction.user.roles:

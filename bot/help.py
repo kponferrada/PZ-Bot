@@ -20,7 +20,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/announce <kind>", "Post a server banner (up / restarting / down / modupdate). [admin]"),
         ("/playsound <sound> [message]", "Trigger a Jeeves Alerts sound on all players. [admin]"),
         ("/teleport <player1> <player2>", "Teleport player1 to player2's location. [admin]"),
-        ("/forcemodupdate", "Force a mod-update restart now (bypasses horde deferral). [admin]"),
+        ("/forcemodupdate", "Force a mod-update restart now. [admin]"),
     ],
     "👥 Players & Ranks": [
         ("/setaccesslevel <player> <level>", "Set a player's server access level. [admin]"),
