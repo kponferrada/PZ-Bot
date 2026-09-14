@@ -2,7 +2,7 @@
 
 Polls the Steam Workshop (see mod_checker.ModChecker) on an interval. When any
 subscribed item is updated, it announces the update and stops the server cleanly
-over RCON (no horde-night deferral):
+over RCON (no event deferral):
 
     no players online   ->  restart immediately (save, quit)
     players online      ->  countdown: save at T-2min, kick at T-1min, quit at T-0

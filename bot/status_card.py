@@ -39,7 +39,7 @@ ICONS = {
     "WEATHER": ("\u2600", AMBER),
     "WIND": ("\U0001f4a8", BLUE),
     "CYCLE": ("\U0001f317", AMBER),
-    "HORDE": ("\U0001f480", WHITE),
+    "SIEGE": ("\U0001f6e1\ufe0f", WHITE),
     "RESTART": ("\U0001f504", RED),
     "STATUS": ("\U0001f4cb", ORANGE),
     "COMPLETED": ("\U0001f3c6", GOLD),

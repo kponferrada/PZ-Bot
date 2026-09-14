@@ -8,15 +8,15 @@ Maintains a single auto-updating Discord embed in a dedicated channel showing:
   - In-game time and date with day/night indicator
   - Server age (day count)
   - Weather conditions, wind, and temperature
-  - Next horde night (days remaining)
+  - Next siege night (days remaining)
 
 Resilience features:
   - Grace period: 3 consecutive RCON failures before showing offline
   - Lua file freshness: treats recently-written bridge files as a secondary
     online signal even if RCON is momentarily unresponsive
-  - Last-known-good data: retains and displays cached world/horde data during
+  - Last-known-good data: retains and displays cached world/siege data during
     brief outages instead of blanking the panel
-  - Horde status: shows event count and current day alongside next horde info
+  - Siege status: shows completed count and current day alongside next siege info
 
 Config:
   STATUS_CHANNEL_ID=  (Discord channel ID for the status embed)
@@ -35,7 +35,7 @@ from discord.ext import commands, tasks
 import lua_bridge
 import status_card
 import server_config
-from game_calendar import horde_date_string
+from game_calendar import siege_date_string
 
 # ============================================================================
 # Constants
@@ -187,10 +187,10 @@ def _bridge_file_is_fresh(data, max_age=BRIDGE_FRESHNESS_SECONDS):
 # Embed builder
 # ============================================================================
 
-def build_embed(server_online, world, horde, skip_active, stale=False, max_players=32):
+def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32):
     """Build the PZ Tambayan status embed (copyable text + PZ aesthetic)."""
     world = world or {}
-    horde = horde or {}
+    siege = siege or {}
 
     if server_online and not stale:
         colour = 0x00E676
@@ -269,14 +269,14 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
         cyc_icon = "\U0001f319" if is_night else "\u2600\ufe0f"
         embed.add_field(name=f"{cyc_icon} Cycle", value="Night" if is_night else "Day", inline=True)
 
-        horde_day, horde_status, horde_completed = _horde_fields(horde, world)
-        embed.add_field(name="\U0001f480 Horde", value=horde_day, inline=True)
+        siege_day, siege_status, siege_completed = _siege_fields(siege, world)
+        embed.add_field(name="\U0001f6e1\ufe0f Siege", value=siege_day, inline=True)
         restart_cd, restart_tm = _next_restart()
         embed.add_field(name="\U0001f504 Restart", value=f"{restart_cd} · {restart_tm}", inline=True)
 
         # Row 4
-        embed.add_field(name="\U0001f4cb Status", value=horde_status, inline=True)
-        embed.add_field(name="\U0001f3c6 Completed", value=horde_completed, inline=True)
+        embed.add_field(name="\U0001f4cb Status", value=siege_status, inline=True)
+        embed.add_field(name="\U0001f3c6 Completed", value=siege_completed, inline=True)
 
         raw_players = str(world.get("players", "") or "")
         names = [n.strip() for n in raw_players.split(",") if n.strip()]
@@ -292,52 +292,52 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
     return embed
 
 
-def _horde_fields(horde, world=None):
-    """Return (horde_day, horde_status, completed) for three inline fields."""
-    if not horde:
+def _siege_fields(siege, world=None):
+    """Return (siege_day, siege_status, completed) for three inline fields."""
+    if not siege:
         return ("—", "Idle", "0")
 
-    phase = horde.get("phase", "")
-    event_count = horde.get("eventCount")
-    next_day = horde.get("nextHordeDay")
+    phase = siege.get("phase", "")
+    completed = siege.get("totalSiegesCompleted")
+    next_day = siege.get("nextSiegeDay")
 
-    # Horde day — nextHordeDay is already the in-game horde day (no offset).
+    # Siege day — nextSiegeDay is already the in-game siege day.
     if next_day is not None:
-        horde_day = f"Day {next_day}"
-        date_str = horde_date_string(world, horde)
+        siege_day = f"Day {next_day}"
+        date_str = siege_date_string(world, siege)
         if date_str:
-            horde_day += f"\n({date_str})"
+            siege_day += f"\n({date_str})"
     else:
-        horde_day = "—"
+        siege_day = "—"
 
     # Status
     if phase == "active":
-        horde_status = "\u26a0\ufe0f **ACTIVE**"
-    elif phase == "ended":
-        horde_status = "Idle"
-    elif phase == "scheduled":
-        horde_status = "Scheduled"
-    elif phase == "status":
-        horde_status = "Idle"
+        siege_status = "\u26a0\ufe0f **ACTIVE**"
+    elif phase == "warning":
+        siege_status = "\u26a0\ufe0f **Tonight**"
+    elif phase == "dawn":
+        siege_status = "Winding down"
+    elif phase == "idle":
+        siege_status = "Idle"
     elif phase:
-        horde_status = phase.capitalize()
+        siege_status = phase.capitalize()
     else:
-        horde_status = "Idle"
+        siege_status = "Idle"
 
     # Completed count
-    horde_completed = str(event_count) if event_count is not None else "0"
+    siege_completed = str(completed) if completed is not None else "0"
 
-    return (horde_day, horde_status, horde_completed)
+    return (siege_day, siege_status, siege_completed)
 
 
 # ============================================================================
 # Discord Cog
 # ============================================================================
 
-def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int) -> list:
-    """Map world/horde data into (label, value, subtext) tuples for the card."""
+def _build_card_fields(world: dict, siege: dict, online: bool, max_players: int) -> list:
+    """Map world/siege data into (label, value, subtext) tuples for the card."""
     world = world or {}
-    horde = horde or {}
+    siege = siege or {}
     fields = []
 
     hour = world.get("hour", 0)
@@ -387,14 +387,14 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     is_night = world.get("isNight", False)
     fields.append(("CYCLE", "Night" if is_night else "Day", f"Day {age}"))
 
-    next_day = horde.get("nextHordeDay")
-    phase = horde.get("phase", "")
+    next_day = siege.get("nextSiegeDay")
+    phase = siege.get("phase", "")
     if next_day is not None:
-        date_str = horde_date_string(world, horde)
+        date_str = siege_date_string(world, siege)
         label = f"Day {next_day}" + (f" · {date_str}" if date_str else "")
-        fields.append(("HORDE", label, phase.capitalize() if phase else "None detected"))
+        fields.append(("SIEGE", label, phase.capitalize() if phase else "None detected"))
     else:
-        fields.append(("HORDE", "\u2014", "None detected"))
+        fields.append(("SIEGE", "\u2014", "None detected"))
 
     restart_cd, restart_tm = _next_restart()
     fields.append(("RESTART", restart_cd, restart_tm))
@@ -402,12 +402,12 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     h_status = "Idle"
     if phase == "active":
         h_status = "ACTIVE"
-    elif phase == "scheduled":
-        h_status = "Scheduled"
+    elif phase == "warning":
+        h_status = "Tonight"
     fields.append(("STATUS", h_status, "Running smoothly" if online else "Offline"))
 
-    event_count = horde.get("eventCount")
-    fields.append(("COMPLETED", str(event_count) if event_count is not None else "0", "Events"))
+    completed = siege.get("totalSiegesCompleted")
+    fields.append(("COMPLETED", str(completed) if completed is not None else "0", "Events"))
 
     return fields
 
@@ -431,7 +431,7 @@ class ServerStatusCog(commands.Cog):
 
         # Last known good data (retained across brief outages)
         self._last_world = None
-        self._last_horde = None
+        self._last_siege = None
 
         if not self._channel_id:
             print("[ServerStatus] WARNING: STATUS_CHANNEL_ID not set. Dashboard disabled.")
@@ -525,7 +525,7 @@ class ServerStatusCog(commands.Cog):
         try:
             rcon_ok = self.bot.rcon.is_server_online()
             world, world_age = await lua_bridge.read_world_status_with_age()
-            horde = await lua_bridge.read_horde_status()
+            siege = await lua_bridge.read_siege_status()
 
             if world_age is not None:
                 d = world or {}
@@ -535,8 +535,8 @@ class ServerStatusCog(commands.Cog):
 
             # online determination with grace period
             world_fresh = _bridge_file_is_fresh(world)
-            horde_fresh = _bridge_file_is_fresh(horde)
-            bridge_fresh = world_fresh or horde_fresh
+            siege_fresh = _bridge_file_is_fresh(siege)
+            bridge_fresh = world_fresh or siege_fresh
 
             if rcon_ok or bridge_fresh:
                 self._rcon_fail_count = 0
@@ -547,16 +547,16 @@ class ServerStatusCog(commands.Cog):
 
             if world:
                 self._last_world = world
-            if horde:
-                self._last_horde = horde
+            if siege:
+                self._last_siege = siege
             world = world or self._last_world or {}
-            horde = horde or self._last_horde or {}
+            siege = siege or self._last_siege or {}
 
             max_players = await server_config.read_max_players(self.bot, getattr(self.bot.config, "MAX_PLAYERS", 32))
 
             if self._mode == "image":
                 pc = world.get("playerCount", 0)
-                fields = _build_card_fields(world, horde, server_online, max_players)
+                fields = _build_card_fields(world, siege, server_online, max_players)
                 now = datetime.datetime.now().strftime("%b %d, %I:%M %p")
                 status_card.render_status_card(
                     self._image_path,
@@ -570,7 +570,7 @@ class ServerStatusCog(commands.Cog):
                 await self._send_or_edit_image()
             else:
                 stale = server_online and not rcon_ok
-                embed = build_embed(server_online, world, horde, False,
+                embed = build_embed(server_online, world, siege, False,
                                     stale=stale, max_players=max_players)
                 await self._send_or_edit_embed(embed)
 

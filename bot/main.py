@@ -10,7 +10,7 @@ same-server operations that stay on the host panel. The bot monitors, reports,
 and drives the Jeeves mod bridge.
 
 Retained features: player tracking + welcome/death notes, the world/player
-status dashboard, chat relay, rank sync, horde/drop events, playsound, and
+status dashboard, chat relay, rank sync, siege/drop events, playsound, and
 /modlist. Removed: server lifecycle, auto-restart, SteamCMD /update, mod
 add/remove, and crash-recovery.
 """
@@ -105,8 +105,8 @@ class Config:
         self.DEATH_LOGS_CHANNEL_ID = _env_int("DEATH_LOGS_CHANNEL_ID", 0)
         self.AIRDROP_CHANNEL_ID = _env_int("AIRDROP_CHANNEL_ID", 0)
         self.AIRDROP_ROLE_ID = _env_int("AIRDROP_ROLE_ID", 0)
-        self.HORDE_CHANNEL_ID = _env_int("HORDE_CHANNEL_ID", 0)
-        self.HORDE_ROLE_ID = _env_int("HORDE_ROLE_ID", 0)
+        self.SIEGE_CHANNEL_ID = _env_int("SIEGE_CHANNEL_ID", 0)
+        self.SIEGE_ROLE_ID = _env_int("SIEGE_ROLE_ID", 0)
         # Dedicated channel for join/leave notifications (0 = fall back to DISCORD_CHANNEL_ID)
         self.JOIN_LEAVE_CHANNEL_ID = _env_int("JOIN_LEAVE_CHANNEL_ID", 0)
 
@@ -324,8 +324,8 @@ class PZBot(commands.Bot):
         )
         lua_bridge.init(self)
 
-        for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "horde_events",
-                    "jeeves_drops", "jeeves_modmanager", "server_status", "horde_leaderboard",
+        for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
+                    "jeeves_drops", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "help"):
             try:
                 await self.load_extension(ext)
@@ -364,9 +364,9 @@ class PZBot(commands.Bot):
         ch_id = self.config.AIRDROP_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
-    def get_horde_channel(self) -> Optional[discord.TextChannel]:
-        """Channel for horde-event notifications (dedicated if configured, else the main channel)."""
-        ch_id = self.config.HORDE_CHANNEL_ID or self.config.CHANNEL_ID
+    def get_siege_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for siege-night notifications (dedicated if configured, else the main channel)."""
+        ch_id = self.config.SIEGE_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
     def get_join_leave_channel(self) -> Optional[discord.TextChannel]:

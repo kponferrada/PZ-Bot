@@ -5,17 +5,15 @@ from the game server. The Jeeves mods read/write these files in `Zomboid/Lua/`;
 they cannot tell whether the bytes arrived from a local process or over SFTP.
 
 Files:
-  bot -> mod (commands) : jeeves_commands.txt, jeeves_chat.txt
-  mod -> bot (status)   : jeeves_world_status.txt, jeeves_horde_status.txt,
-                          jeeves_drops_status.txt, jeeves_supply_event_status.txt,
-                          jeeves_horde_survivors.txt
+  bot -> mod (commands) : jeeves_commands.txt, jeeves_chat.txt, siege_night_commands.txt
+  mod -> bot (status)   : jeeves_world_status.txt, jeeves_drops_status.txt,
+                          jeeves_supply_event_status.txt, siege_night_status.txt
 
 > These are `.txt`, not `.lua` — Build 42.20 restricted which extensions
 > `getFileWriter` accepts. Requires the current Workshop versions of the Jeeves mods.
 """
 
 import os
-import re
 import time
 import asyncio
 from pathlib import PurePosixPath
@@ -27,16 +25,18 @@ import sftp_client
 _lua_dir: str | None = None   # remote path, e.g. /home/pz/Zomboid/Lua
 _command_id: int = 0
 _chat_id: int = 0
+_siege_command_id: int = 0
 _write_lock = asyncio.Lock()
 _chat_lock = asyncio.Lock()
+_siege_write_lock = asyncio.Lock()
 
 COMMAND_FILE = "jeeves_commands.txt"
 CHAT_FILE = "jeeves_chat.txt"
-HORDE_STATUS_FILE = "jeeves_horde_status.txt"
 DROPS_STATUS_FILE = "jeeves_drops_status.txt"
 WORLD_STATUS_FILE = "jeeves_world_status.txt"
 SUPPLY_EVENT_STATUS_FILE = "jeeves_supply_event_status.txt"
-SURVIVOR_FILE = "jeeves_horde_survivors.txt"
+SIEGE_STATUS_FILE = "siege_night_status.txt"
+SIEGE_COMMAND_FILE = "siege_night_commands.txt"
 
 
 def init(bot) -> str:
@@ -175,35 +175,27 @@ async def rank_push() -> bool:
     return await write_command("rankpush")
 
 
-async def horde(count: int) -> bool:
-    return await write_command("horde", count=count)
+async def write_siege_command(command: str, **kwargs) -> bool:
+    if _lua_dir is None:
+        print("[LuaBridge] ERROR: Not initialized! Call lua_bridge.init(bot) first.")
+        return False
+    global _siege_command_id
+    _siege_command_id += 1
+    content = _build_lua_table(command, _siege_command_id, **kwargs)
+    return await _write_file(_path(SIEGE_COMMAND_FILE), _siege_write_lock, content,
+                             f"siege command '{command}' (id={_siege_command_id})")
 
 
-async def horde_stop() -> bool:
-    return await write_command("hordestop")
+async def siege_start() -> bool:
+    return await write_siege_command("siegestart")
 
 
-async def horde_status() -> bool:
-    return await write_command("hordestatus")
+async def siege_stop() -> bool:
+    return await write_siege_command("siegestop")
 
 
-async def horde_night() -> bool:
-    return await write_command("hordenight")
-
-
-async def horde_reset() -> bool:
-    return await write_command("hordereset")
-
-
-async def horde_clear(username: str | None = None) -> bool:
-    kwargs = {}
-    if username:
-        kwargs["targetPlayer"] = username
-    return await write_command("hordeclear", **kwargs)
-
-
-async def horde_change(day: int) -> bool:
-    return await write_command("hordechange", targetDay=day)
+async def siege_schedule(day: int) -> bool:
+    return await write_siege_command("siegeschedule", targetDay=day)
 
 
 async def airdrop(target_player: str | None = None, crate_type: str | None = None) -> bool:
@@ -282,8 +274,8 @@ async def _read_status(filename: str) -> dict | None:
         return None
 
 
-async def read_horde_status() -> dict | None:
-    return await _read_status(HORDE_STATUS_FILE)
+async def read_siege_status() -> dict | None:
+    return await _read_status(SIEGE_STATUS_FILE)
 
 
 async def read_drops_status() -> dict | None:
@@ -314,104 +306,3 @@ async def read_world_status_with_age() -> tuple[dict | None, float | None]:
         return None, None
     age = max(0.0, time.time() - st[1])
     return await read_world_status(), age
-
-
-async def read_survivor_data() -> dict | None:
-    """Read the horde survivor data file. Returns { username: {mult, survived, ...} }."""
-    if _lua_dir is None:
-        return None
-    sftp = sftp_client.get()
-    path = _path(SURVIVOR_FILE)
-    if not await sftp.exists(path):
-        return None
-    try:
-        text = (await sftp.read_text(path)).strip()
-        if not text:
-            return None
-
-        # Parse: return { ["name"] = { mult = 0.3, survived = 3 }, ... }
-        inner = text
-        if inner.startswith("return"):
-            inner = inner[6:].strip()
-        if inner.startswith("{"):
-            inner = inner[1:]
-        if inner.rstrip().endswith("}"):
-            inner = inner.rstrip()[:-1]
-
-        result = {}
-        pattern = re.compile(r'\["([^"]+)"\]\s*=\s*\{([^}]*)\}', re.DOTALL)
-        for match in pattern.finditer(inner):
-            username = match.group(1)
-            entry = {}
-            for field in match.group(2).split(","):
-                field = field.strip()
-                if "=" not in field:
-                    continue
-                k, _, v = field.partition("=")
-                k = k.strip()
-                v = v.strip()
-                if v == "true":
-                    entry[k] = True
-                elif v == "false":
-                    entry[k] = False
-                else:
-                    try:
-                        entry[k] = float(v)
-                    except ValueError:
-                        entry[k] = v
-            result[username] = entry
-        return result if result else None
-    except Exception as exc:
-        print(f"[LuaBridge] Failed to read survivor data: {exc}")
-        return None
-
-
-async def reset_player_survivor(username: str) -> bool:
-    """Reset a single player's horde survivor data (mult=0, survived=0)."""
-    if _lua_dir is None:
-        return False
-    sftp = sftp_client.get()
-    path = _path(SURVIVOR_FILE)
-    if not await sftp.exists(path):
-        print(f"[LuaBridge] Survivor file not found: {path}")
-        return False
-    try:
-        data = await read_survivor_data()
-        if not data:
-            return False
-
-        key = username.lower()
-        if key not in data:
-            for k in data:
-                if k.lower() == key:
-                    key = k
-                    break
-        if key not in data:
-            print(f"[LuaBridge] Player '{username}' not found in survivor data")
-            return False
-
-        data[key] = {"mult": 0.0, "survived": 0}
-
-        lines = ["return {"]
-        for name, entry in data.items():
-            parts = [
-                f"mult = {entry.get('mult', 0):.1f}",
-                f"survived = {int(entry.get('survived', 0))}",
-            ]
-            for field in ("immune", "immuneDay", "fragranceBuffDay", "lastStewDay",
-                          "lastFragranceDay", "stewStreak", "fragranceStreak"):
-                val = entry.get(field)
-                if val is not None and val is not False and val != 0:
-                    if isinstance(val, bool):
-                        parts.append(f"{field} = true")
-                    elif isinstance(val, (int, float)):
-                        parts.append(f"{field} = {int(val)}")
-            lines.append(f'  ["{name}"] = {{ {", ".join(parts)} }},')
-        lines.append("}")
-
-        await sftp.write_text(path, "\n".join(lines) + "\n")
-        print(f"[LuaBridge] Reset survivor data for '{username}' (key='{key}')")
-        return True
-    except Exception as exc:
-        print(f"[LuaBridge] Failed to reset player survivor data: {exc}")
-        return False

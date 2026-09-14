@@ -1,11 +1,11 @@
 """game_calendar.py — map Project Zomboid world-day numbers to calendar dates.
 
 PZ tracks time as (year, month, day-of-month) plus a "world age" day counter.
-The Jeeves horde mod reports `eventDay` (current world day) and `nextHordeDay`
-(next horde night's world day) on its own counter. Their *difference* is the
-number of days until the next horde — anchoring that difference to the world's
-current in-game date yields a real calendar date, independent of any offset
-between the two counters.
+The Siege Night bridge reports `eventDay` (current world day) and `nextSiegeDay`
+(next siege night's world day) on the same world-age counter. Their *difference*
+is the number of days until the next siege — anchoring that difference to the
+world's current in-game date yields a real calendar date, independent of any
+offset between the two counters.
 """
 
 from datetime import date, timedelta
@@ -16,17 +16,17 @@ _MONTH_NAMES = [
 ]
 
 
-def horde_date_string(world: dict | None, horde: dict | None) -> str | None:
-    """Return the in-game calendar date of the next horde night (e.g. "Nov 5, 2026"),
-    or None if it can't be determined from the given world/horde data.
+def siege_date_string(world: dict | None, siege: dict | None) -> str | None:
+    """Return the in-game calendar date of the next siege night (e.g. "Nov 5, 2026"),
+    or None if it can't be determined from the given world/siege data.
 
     `world` needs `year`, `month` (0-indexed) and `day` (0-indexed day-of-month);
-    `horde` needs `eventDay` and `nextHordeDay`.
+    `siege` needs `eventDay` and `nextSiegeDay`.
     """
-    if not world or not horde:
+    if not world or not siege:
         return None
-    next_day = horde.get("nextHordeDay")
-    event_day = horde.get("eventDay")
+    next_day = siege.get("nextSiegeDay")
+    event_day = siege.get("eventDay")
     if next_day is None or event_day is None:
         return None
     year = world.get("year")

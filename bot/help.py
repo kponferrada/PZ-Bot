@@ -37,15 +37,11 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/whitelistsetup", "Post the whitelist application button into the whitelist channel. [admin]"),
         ("/whitelist", "Open the whitelist request form."),
     ],
-    "🌙 Horde Events (Jeeve's Hordes)": [
-        ("/horde [count]", "Trigger a casual horde event."),
-        ("/hordeoff", "Stop an active horde."),
-        ("/hordestatus", "Show current horde status."),
-        ("/hordenight", "Simulate a scheduled horde night."),
-        ("/hordereset", "Reset horde progression."),
-        ("/hordeclear [player]", "Clear a player's horde survivor data."),
-        ("/hordechange <day>", "Change the horde night day."),
-        ("/playerreset <player>", "Reset a player's horde survivor multiplier."),
+    "🌙 Siege Night (Siege Night mod)": [
+        ("/siegestatus", "Show current Siege Night status. [admin]"),
+        ("/siegestart", "Force a siege night today (warning signs, siege at nightfall). [admin]"),
+        ("/siegestop", "Stop the active siege. [admin]"),
+        ("/siegeschedule <day>", "Change the next siege night day. [admin]"),
     ],
     "📦 Airdrops & Events (Jeeve's Drops)": [
         ("/airdrop [player] [crate]", "Trigger an airdrop."),

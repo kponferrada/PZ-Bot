@@ -15,7 +15,7 @@ from pathlib import Path
 FEATURES = {
     "join_leave": "Player join/leave notifications",
     "deaths": "Player death notifications",
-    "horde": "Horde night notifications (Discord + in-game)",
+    "siege": "Siege night notifications (Discord + in-game)",
     "airdrop": "Air drop & supply event notifications (Discord + in-game)",
     "restart": "Restart & mod-update notifications (Discord + in-game save/kick)",
     "mod_check": "Bot-driven workshop mod update checker",

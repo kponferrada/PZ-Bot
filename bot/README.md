@@ -26,8 +26,7 @@ unchanged from a remote VPS.
 | World & player status dashboard | `server_status.py` |
 | Chat relay (in-game ↔ Discord) | `chat_relay.py` |
 | Rank sync (Discord roles → in-game name colours) | `rank_sync.py` |
-| Horde events | `horde_events.py` |
-| Horde survivor leaderboard | `horde_leaderboard.py` |
+| Siege Night events | `siege_night.py` |
 | Airdrop / supply events | `jeeves_drops.py` |
 | Sound alerts | `/playsound` |
 | Mod list (read-only) | `/modlist` |
@@ -52,7 +51,8 @@ unchanged from a remote VPS.
 
 - A Project Zomboid dedicated server (Build 42) with **RCON enabled** and **Jeeve's
   Integration** installed (required for the world dashboard, chat relay, rank sync).
-- Jeeve's Hordes / Jeeve's Drops (only if you want those features).
+- **Siege Night** (Workshop 3669589584) + the `siege-night-bridge` companion mod, and
+  Jeeve's Drops (only if you want those features).
 - A separate Linux VPS for the bot, with Python 3.10+.
 - SFTP access to the game server (`Zomboid/Lua/` read+write for the bridge features;
   `Zomboid/Logs/` read for tracking).
@@ -124,7 +124,7 @@ Admin commands require the role named by `DEFAULT_ROLE` (default `Admin`).
 | `/myrank` | Show your rank (everyone) |
 | `/linkme`, `/unlinkme` | Link your Discord to your PZ name |
 | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname` | Rank admin |
-| `/horde`, `/hordeoff`, `/hordestatus`, … | Horde events (needs Jeeve's Hordes) |
+| `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule` | Siege Night control (needs Siege Night + bridge) |
 | `/airdrop`, `/airdropstatus`, … | Airdrops (needs Jeeve's Drops) |
 
 ---
@@ -188,7 +188,7 @@ WantedBy=multi-user.target
 - SFTP host-key checking is disabled (`known_hosts=None`) in `sftp_client.py`. For
   production, pin the server's host key instead.
 - The SFTP account must have **write** access to `Zomboid/Lua/` for chat relay, rank
-  sync, horde/drop events and sound alerts. Without it, only the read-only features
+  sync, siege/drop events and sound alerts. Without it, only the read-only features
   (dashboard, tracking) work.
 
 ---
@@ -204,8 +204,7 @@ bot/
 ├── server_status.py      # world/player dashboard (SFTP status reads + RCON)
 ├── chat_relay.py         # in-game <-> Discord chat (SFTP tail + bridge write)
 ├── rank_sync.py          # Discord roles -> in-game colours (SFTP write)
-├── horde_events.py       # horde event control (via lua_bridge)
-├── horde_leaderboard.py  # survivor leaderboard (via lua_bridge)
+├── siege_night.py        # Siege Night control + notifications (via lua_bridge)
 ├── jeeves_drops.py       # airdrop/supply events (via lua_bridge)
 ├── jeeves_modmanager.py  # /modlist (SFTP ini read)
 ├── config.env.example
