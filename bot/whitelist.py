@@ -1,31 +1,42 @@
-"""whitelist.py — whitelist request form (button → modal → CSV → approval channel).
+"""whitelist.py — whitelist request form (button → modal → CSV → approval → players.db).
 
 Flow:
   1. An admin runs `/whitelistsetup`, which posts a persistent "Apply for
      Whitelist" button into the whitelist channel (WHITELIST_CHANNEL_ID).
   2. A user clicks the button → a modal opens asking for username, password and
      SteamID.
-  3. On submit the request is appended to a CSV on the bot host (the VPS) and
-     forwarded to the approval channel (WHITELIST_APPROVAL_CHANNEL_ID).
+  3. On submit the request is appended to a CSV on the bot host and forwarded to
+     the approval channel (WHITELIST_APPROVAL_CHANNEL_ID) with Approve/Deny
+     buttons.
+  4. Approve → inserts the user into the server's players.db whitelist table over
+     SFTP. Deny → asks the admin for a reason and records it in the CSV row.
 
 Config (see config.env.example):
   WHITELIST_CHANNEL_ID          — channel that holds the request button.
   WHITELIST_APPROVAL_CHANNEL_ID — channel that receives new requests.
   WHITELIST_CSV_PATH            — where requests are stored (default whitelist_requests.csv).
+  WHITELIST_DB_PATH             — server players.db (whitelist table) to write on approval.
 """
 from __future__ import annotations
 
 import csv
 import datetime
+import hashlib
+import sqlite3
+import uuid
 from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+import sftp_client
+
 _DEFAULT_CSV = "whitelist_requests.csv"
-_CSV_HEADERS = ["timestamp", "discord_username", "discord_id",
-                "username", "password", "steam_id"]
+_DEFAULT_DB = "/server-data/Saves/Multiplayer/pzserver/players.db"
+
+_CSV_HEADERS = ["request_id", "timestamp", "discord_username", "discord_id",
+                "username", "password", "steam_id", "status", "reason"]
 
 _APPLY_CUSTOM_ID = "whitelist:apply"
 
@@ -82,11 +93,60 @@ class WhitelistView(discord.ui.View):
         await interaction.response.send_modal(WhitelistModal(self.cog))
 
 
+class DenyReasonModal(discord.ui.Modal, title="Deny Whitelist Request"):
+    """Asks the approving admin why a request is being denied."""
+
+    reason = discord.ui.TextInput(
+        label="Reason for denial",
+        style=discord.TextStyle.paragraph,
+        placeholder="Why is this request being denied?",
+        required=True,
+        max_length=1024,
+    )
+
+    def __init__(self, cog: "WhitelistCog", request_id: str, message: discord.Message):
+        super().__init__()
+        self.cog = cog
+        self.request_id = request_id
+        self.message = message
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.complete_denial(
+            interaction, self.request_id, self.message, self.reason.value.strip())
+
+
+class WhitelistApprovalView(discord.ui.View):
+    """Approve/Deny buttons attached to each approval message (not persistent)."""
+
+    def __init__(self, cog: "WhitelistCog", request_id: str,
+                 username: str, password: str, steam_id: str):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.request_id = request_id
+        self.username = username
+        self.password = password
+        self.steam_id = steam_id
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="\u2705")
+    async def approve(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        await self.cog.approve_request(interaction, self)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, emoji="\u274c")
+    async def deny(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not self.cog._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to deny requests.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            DenyReasonModal(self.cog, self.request_id, interaction.message))
+
+
 class WhitelistCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._channel_id = int(getattr(bot.config, "WHITELIST_CHANNEL_ID", 0) or 0)
         self._approval_channel_id = int(getattr(bot.config, "WHITELIST_APPROVAL_CHANNEL_ID", 0) or 0)
+        self._db_path = getattr(bot.config, "WHITELIST_DB_PATH", "") or _DEFAULT_DB
 
         csv_path = getattr(bot.config, "WHITELIST_CSV_PATH", "") or _DEFAULT_CSV
         self._csv_path = Path(csv_path)
@@ -100,7 +160,7 @@ class WhitelistCog(commands.Cog):
 
         print(f"[Whitelist] channel={self._channel_id or 'unset'} "
               f"approval={self._approval_channel_id or 'unset'} "
-              f"csv={self._csv_path}")
+              f"csv={self._csv_path} db={self._db_path}")
 
     # ---- helpers -------------------------------------------------------------
 
@@ -114,6 +174,34 @@ class WhitelistCog(commands.Cog):
             return self.bot.get_channel(self._approval_channel_id)
         return None
 
+    def _is_admin(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
+        return role is not None and role in interaction.user.roles
+
+    # ---- CSV -------------------------------------------------------------
+
+    def _read_csv(self) -> list:
+        if not self._csv_path.is_file():
+            return []
+        try:
+            with self._csv_path.open("r", newline="", encoding="utf-8") as fh:
+                return list(csv.DictReader(fh))
+        except OSError as e:
+            print(f"[Whitelist] Failed to read CSV {self._csv_path}: {e}")
+            return []
+
+    def _write_csv(self, rows: list) -> None:
+        self._csv_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with self._csv_path.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=_CSV_HEADERS)
+                writer.writeheader()
+                writer.writerows(rows)
+        except OSError as e:
+            print(f"[Whitelist] Failed to write CSV {self._csv_path}: {e}")
+
     def _append_csv(self, row: dict) -> None:
         self._csv_path.parent.mkdir(parents=True, exist_ok=True)
         new_file = not self._csv_path.is_file()
@@ -125,6 +213,17 @@ class WhitelistCog(commands.Cog):
                 writer.writerow(row)
         except OSError as e:
             print(f"[Whitelist] Failed to write CSV {self._csv_path}: {e}")
+
+    def _update_csv_status(self, request_id: str, status: str, reason: str = "") -> None:
+        rows = self._read_csv()
+        for row in rows:
+            if row.get("request_id") == request_id:
+                row["status"] = status
+                row["reason"] = reason
+                break
+        self._write_csv(rows)
+
+    # ---- approval message --------------------------------------------------
 
     def _build_approval_embed(self, username: str, password: str, steam_id: str,
                               user: discord.User, timestamp: str) -> discord.Embed:
@@ -138,8 +237,92 @@ class WhitelistCog(commands.Cog):
         embed.add_field(name="Password", value=f"`{password}`", inline=False)
         embed.add_field(name="SteamID", value=f"`{steam_id}`", inline=False)
         embed.add_field(name="Submitted at", value=timestamp, inline=False)
-        embed.set_footer(text="Review and add to the server whitelist.")
+        embed.set_footer(text="Approve to add to the server whitelist, or Deny with a reason.")
         return embed
+
+    async def _mark_approval_message(self, message, status: str,
+                                     admin: discord.User, reason: str = "") -> None:
+        if message is None or not message.embeds:
+            return
+        embed = discord.Embed.from_dict(message.embeds[0].to_dict())
+        if status == "approved":
+            embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
+            embed.colour = discord.Colour.green()
+        elif status == "denied":
+            value = f"\u274c Denied by {admin.mention}"
+            if reason:
+                value += f" — {reason}"
+            embed.add_field(name="Status", value=value, inline=False)
+            embed.colour = discord.Colour.red()
+        try:
+            await message.edit(embed=embed, view=None)
+        except discord.HTTPException as e:
+            print(f"[Whitelist] Failed to update approval message: {e}")
+
+    # ---- players.db write --------------------------------------------------
+
+    async def _insert_whitelist_user(self, username: str, password: str, steam_id: str) -> str:
+        """Insert a user into the server's players.db whitelist table over SFTP.
+
+        PZ stores whitelist passwords as an MD5 hex digest, so the plaintext the
+        user submitted is hashed before insert. Returns "" on success or an
+        error message on failure.
+        """
+        sftp = sftp_client.get()
+        try:
+            data = await sftp.read_bytes(self._db_path)
+        except sftp_client.SftpError as e:
+            return f"failed to read players.db: {e}"
+
+        try:
+            conn = sqlite3.connect(":memory:")
+            conn.deserialize(data)
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            wl = next((t for t in tables if t.lower() == "whitelist"), None)
+            if wl is None:
+                conn.close()
+                return "whitelist table not found in players.db"
+            cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{wl}")').fetchall()]
+            col_lower = {c.lower(): c for c in cols}
+            if "username" not in col_lower:
+                conn.close()
+                return "whitelist table is missing the 'username' column"
+
+            # Duplicate guard — don't double-insert the same account.
+            uname_col = col_lower["username"]
+            if conn.execute(
+                    f'SELECT 1 FROM "{wl}" WHERE "{uname_col}" = ?', (username,)).fetchone():
+                conn.close()
+                return f"'{username}' is already whitelisted"
+
+            md5pw = hashlib.md5(password.encode("utf-8")).hexdigest()
+            insert_cols = [uname_col]
+            insert_vals = [username]
+            for key, val in (("password", md5pw), ("steamid", steam_id)):
+                col = col_lower.get(key)
+                if col:
+                    insert_cols.append(col)
+                    insert_vals.append(val)
+
+            cols_sql = ",".join(f'"{c}"' for c in insert_cols)
+            placeholders = ",".join("?" * len(insert_cols))
+            conn.execute(f'INSERT INTO "{wl}" ({cols_sql}) VALUES ({placeholders})', insert_vals)
+            conn.commit()
+            out = conn.serialize()
+            conn.close()
+        except Exception as e:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return f"players.db update error: {e}"
+
+        try:
+            await sftp.write_bytes(self._db_path, out)
+        except sftp_client.SftpError as e:
+            return f"failed to upload players.db: {e}"
+        return ""
 
     # ---- request handling ----------------------------------------------------
 
@@ -149,24 +332,30 @@ class WhitelistCog(commands.Cog):
         now = datetime.datetime.now(datetime.timezone.utc)
         timestamp = now.strftime("%Y-%m-%d %H:%M UTC")
         user = interaction.user
+        request_id = uuid.uuid4().hex
 
-        row = {
+        self._append_csv({
+            "request_id": request_id,
             "timestamp": now.isoformat(),
             "discord_username": str(user),
             "discord_id": str(user.id),
             "username": username,
             "password": password,
             "steam_id": steam_id,
-        }
-        self._append_csv(row)
+            "status": "pending",
+            "reason": "",
+        })
 
         channel = self._approval_channel()
         if channel is None:
             print("[Whitelist] Approval channel not configured/found; request saved to CSV only.")
         else:
+            view = WhitelistApprovalView(self, request_id, username, password, steam_id)
             try:
-                await channel.send(embed=self._build_approval_embed(
-                    username, password, steam_id, user, timestamp))
+                await channel.send(
+                    embed=self._build_approval_embed(username, password, steam_id, user, timestamp),
+                    view=view,
+                )
             except discord.HTTPException as e:
                 print(f"[Whitelist] Failed to send approval message: {e}")
 
@@ -175,6 +364,33 @@ class WhitelistCog(commands.Cog):
             ephemeral=True,
         )
         print(f"[Whitelist] Request from {user} (SteamID {steam_id}) saved.")
+
+    # ---- approval actions ----------------------------------------------------
+
+    async def approve_request(self, interaction: discord.Interaction,
+                              view: WhitelistApprovalView) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to approve requests.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        err = await self._insert_whitelist_user(view.username, view.password, view.steam_id)
+        if err:
+            await interaction.followup.send(f"\u274c Approval failed: {err}", ephemeral=True)
+            return
+        self._update_csv_status(view.request_id, "approved", "")
+        await self._mark_approval_message(interaction.message, "approved", interaction.user)
+        await interaction.followup.send(
+            f"\u2705 Approved **{view.username}** and added to the whitelist.", ephemeral=True)
+        print(f"[Whitelist] Approved {view.username} (SteamID {view.steam_id})")
+
+    async def complete_denial(self, interaction: discord.Interaction,
+                              request_id: str, message, reason: str) -> None:
+        self._update_csv_status(request_id, "denied", reason)
+        await self._mark_approval_message(message, "denied", interaction.user, reason)
+        await interaction.response.send_message(
+            f"\u274c Denied. Reason recorded in the CSV.", ephemeral=True)
+        print(f"[Whitelist] Denied request {request_id}: {reason}")
 
     # ---- commands ------------------------------------------------------------
 
