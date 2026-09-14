@@ -93,11 +93,12 @@ class JeevesHordesCog(commands.Cog):
                 # Notify once when a horde night is scheduled for the CURRENT
                 # in-game day, so players get the whole day to prepare. The mod
                 # also writes "scheduled" on every server boot (with a future
-                # nextHordeDay) — those are skipped. nextHordeDay runs 1 ahead
-                # of the display day, so "tonight" means eventDay == nextDay-1.
+                # nextHordeDay) — those are skipped. "Tonight" is when the
+                # current day equals nextHordeDay (the display subtracts 1, but
+                # the raw field already points at the horde day).
                 event_day = status.get("eventDay", 0)
                 next_day = status.get("nextHordeDay", 0)
-                if (next_day and event_day and event_day == next_day - 1
+                if (next_day and event_day and event_day == next_day
                         and event_day not in self._announced_horde_tonight):
                     self._announced_horde_tonight.add(event_day)
                     embed = discord.Embed(
