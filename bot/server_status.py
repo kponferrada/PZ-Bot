@@ -35,6 +35,7 @@ from discord.ext import commands, tasks
 import lua_bridge
 import status_card
 import server_config
+from game_calendar import horde_date_string
 
 # ============================================================================
 # Constants
@@ -268,7 +269,7 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
         cyc_icon = "\U0001f319" if is_night else "\u2600\ufe0f"
         embed.add_field(name=f"{cyc_icon} Cycle", value="Night" if is_night else "Day", inline=True)
 
-        horde_day, horde_status, horde_completed = _horde_fields(horde)
+        horde_day, horde_status, horde_completed = _horde_fields(horde, world)
         embed.add_field(name="\U0001f480 Horde", value=horde_day, inline=True)
         restart_cd, restart_tm = _next_restart()
         embed.add_field(name="\U0001f504 Restart", value=f"{restart_cd} · {restart_tm}", inline=True)
@@ -291,7 +292,7 @@ def build_embed(server_online, world, horde, skip_active, stale=False, max_playe
     return embed
 
 
-def _horde_fields(horde):
+def _horde_fields(horde, world=None):
     """Return (horde_day, horde_status, completed) for three inline fields."""
     if not horde:
         return ("—", "Idle", "0")
@@ -303,6 +304,9 @@ def _horde_fields(horde):
     # Horde day — nextHordeDay is already the in-game horde day (no offset).
     if next_day is not None:
         horde_day = f"Day {next_day}"
+        date_str = horde_date_string(world, horde)
+        if date_str:
+            horde_day += f"\n({date_str})"
     else:
         horde_day = "—"
 
@@ -386,7 +390,9 @@ def _build_card_fields(world: dict, horde: dict, online: bool, max_players: int)
     next_day = horde.get("nextHordeDay")
     phase = horde.get("phase", "")
     if next_day is not None:
-        fields.append(("HORDE", f"Day {next_day}", phase.capitalize() if phase else "None detected"))
+        date_str = horde_date_string(world, horde)
+        label = f"Day {next_day}" + (f" · {date_str}" if date_str else "")
+        fields.append(("HORDE", label, phase.capitalize() if phase else "None detected"))
     else:
         fields.append(("HORDE", "\u2014", "None detected"))
 

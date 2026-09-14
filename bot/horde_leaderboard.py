@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands, tasks
 
 import lua_bridge
+from game_calendar import horde_date_string
 
 # ============================================================================
 # Constants
@@ -42,7 +43,8 @@ def _get_rank(survived: int) -> tuple:
     return "⚪", "Rookie"
 
 
-def _build_leaderboard_embed(survivor_data: dict | None, horde_data: dict | None) -> discord.Embed:
+def _build_leaderboard_embed(survivor_data: dict | None, horde_data: dict | None,
+                             world_data: dict | None = None) -> discord.Embed:
     """Build the leaderboard embed from survivor data."""
 
     embed = discord.Embed(
@@ -147,7 +149,10 @@ def _build_leaderboard_embed(survivor_data: dict | None, horde_data: dict | None
             stats_text += f"\n🌙 **{event_count}** horde nights completed"
         if next_day:
             # nextHordeDay is already the in-game horde day (no offset).
+            date_str = horde_date_string(world_data, horde_data)
             stats_text += f" • Next horde: **Day {next_day}**"
+            if date_str:
+                stats_text += f" ({date_str})"
 
     embed.add_field(name="📊 Stats", value=stats_text, inline=False)
 
@@ -232,7 +237,8 @@ class HordeLeaderboardCog(commands.Cog):
         try:
             survivor_data = await lua_bridge.read_survivor_data()
             horde_data = await lua_bridge.read_horde_status()
-            embed = _build_leaderboard_embed(survivor_data, horde_data)
+            world_data = await lua_bridge.read_world_status()
+            embed = _build_leaderboard_embed(survivor_data, horde_data, world_data)
             await self._send_or_edit(embed)
         except Exception as e:
             print(f"[HordeLeaderboard] Error in leaderboard loop: {e}")

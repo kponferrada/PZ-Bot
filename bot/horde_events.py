@@ -34,6 +34,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import lua_bridge
+from game_calendar import horde_date_string
 
 
 class JeevesHordesCog(commands.Cog):
@@ -101,13 +102,16 @@ class JeevesHordesCog(commands.Cog):
                 if (next_day and event_day and event_day == next_day
                         and event_day not in self._announced_horde_tonight):
                     self._announced_horde_tonight.add(event_day)
+                    world = await lua_bridge.read_world_status()
+                    date_str = horde_date_string(world, status) or ""
+                    desc = f"A horde night is scheduled for **Day {event_day}**"
+                    if date_str:
+                        desc += f" ({date_str})"
+                    desc += ("\n\nUse the daylight hours to prepare \u2014 fortify your "
+                             "base, stock up on supplies, and gather your group.")
                     embed = discord.Embed(
                         title="\U0001f319 Horde Night Is Tonight!",
-                        description=(
-                            f"A horde night is scheduled for **Day {event_day}**.\n\n"
-                            "Use the daylight hours to prepare \u2014 fortify your base, "
-                            "stock up on supplies, and gather your group."
-                        ),
+                        description=desc,
                         colour=discord.Colour.dark_red(),
                     )
                     channel = self.bot.get_horde_channel()
@@ -137,7 +141,11 @@ class JeevesHordesCog(commands.Cog):
                 next_day = status.get("nextHordeDay")
                 desc = "The horde has been defeated. The night is quiet once more."
                 if next_day:
+                    world = await lua_bridge.read_world_status()
+                    date_str = horde_date_string(world, status)
                     desc += f"\n\nNext horde night: **Day {next_day}**"
+                    if date_str:
+                        desc += f" ({date_str})"
                 embed = discord.Embed(
                     title="\u2705 Horde Night Has Ended",
                     description=desc,
@@ -318,6 +326,10 @@ class JeevesHordesCog(commands.Cog):
         next_day = status.get("nextHordeDay", 0)
         moodle = status.get("moodleActive", False)
 
+        # Resolve the next horde night to a calendar date.
+        world = await lua_bridge.read_world_status()
+        horde_date = horde_date_string(world, status)
+
         if active:
             state = "\U0001f534 **ACTIVE** — Horde in progress"
             if remaining > 0:
@@ -329,11 +341,18 @@ class JeevesHordesCog(commands.Cog):
         else:
             state = "\U0001f7e2 **Idle** — No active horde"
 
+        if next_day:
+            next_horde_line = f"\U0001f319 Next Horde Night: **Day {next_day}**"
+            if horde_date:
+                next_horde_line += f" ({horde_date})"
+        else:
+            next_horde_line = "\U0001f319 Next Horde Night: **Not scheduled**"
+
         lines = [
             state,
             "",
             f"\U0001f4c5 Current Day: **{day}**",
-            f"\U0001f319 Next Horde Night: **Day {next_day}**" if next_day else "\U0001f319 Next Horde Night: **Not scheduled**",
+            next_horde_line,
             f"\U0001f4ca Hordes Completed: **{event_count}**",
         ]
 
