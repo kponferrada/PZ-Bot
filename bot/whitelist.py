@@ -282,7 +282,7 @@ class WhitelistCog(commands.Cog):
             return "RCON `adduser` failed (connection lost)"
 
         if s:
-            resp2 = await rcon.send_command(f'addSteamID {s}')
+            resp2 = await rcon.send_command(f'addSteamID "{s}"')
             if resp2 is not None:
                 print(f"[Whitelist] addSteamID resp: {resp2!r}")
             elif not rcon.is_server_online():
