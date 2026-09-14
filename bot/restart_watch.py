@@ -155,11 +155,8 @@ class RestartWatch(commands.Cog):
             if phase in _HORDE_TAIL_PHASES:
                 if age is None or age <= _HORDE_TAIL_GRACE:
                     return True, f"Horde aftermath still settling (phase {phase})"
-            if phase == "scheduled":
-                event_day = horde.get("eventDay")
-                next_day = horde.get("nextHordeDay")
-                if event_day is not None and next_day is not None and event_day == next_day:
-                    return True, f"Horde night tonight (day {next_day})"
+            # A merely *scheduled* (future) horde no longer blocks — only an
+            # active/lure/tail horde does, so a mod update proceeds on schedule.
         return False, ""
 
     # ---- Restart (RCON) ------------------------------------------------------
