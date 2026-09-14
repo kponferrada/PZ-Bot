@@ -63,8 +63,16 @@ class HelpCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="help", description="List all bot commands and their purposes.")
+    @app_commands.command(name="help", description="List all bot commands and their purposes (admins only).")
     async def cmd_help(self, interaction: discord.Interaction) -> None:
+        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
+        if role is None or role not in interaction.user.roles:
+            await interaction.response.send_message(
+                "\u274c You need the **admin** role to use this command.",
+                ephemeral=True,
+            )
+            return
+
         embed = discord.Embed(
             title="📖 PZ Tambayan Bot — Command Guide",
             description=(

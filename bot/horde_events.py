@@ -41,6 +41,7 @@ class JeevesHordesCog(commands.Cog):
         self.bot = bot
         # Dedup: track (eventDay, phase, timestamp) tuples we've already sent
         self._sent_phases: set[tuple] = set()
+        self._announced_horde_tonight: set[int] = set()  # eventDay values already announced
         self._last_poller_key = None
 
     async def cog_load(self):
@@ -89,10 +90,29 @@ class JeevesHordesCog(commands.Cog):
             channel = self.bot.get_horde_channel()
 
             if phase == "scheduled":
-                # Don't send Discord notifications for "scheduled" — this fires
-                # on every server boot when the horde mod writes its initial status.
-                # Players get the in-game moodle on horde day. Only notify Discord
-                # for active (horde started) and ended (horde complete) events.
+                # Notify once when a horde night is scheduled for the CURRENT
+                # in-game day, so players get the whole day to prepare. The mod
+                # also writes "scheduled" on every server boot (with a future
+                # nextHordeDay) — those are skipped. nextHordeDay runs 1 ahead
+                # of the display day, so "tonight" means eventDay == nextDay-1.
+                event_day = status.get("eventDay", 0)
+                next_day = status.get("nextHordeDay", 0)
+                if (next_day and event_day and event_day == next_day - 1
+                        and event_day not in self._announced_horde_tonight):
+                    self._announced_horde_tonight.add(event_day)
+                    embed = discord.Embed(
+                        title="\U0001f319 Horde Night Is Tonight!",
+                        description=(
+                            f"A horde night is scheduled for **Day {event_day}**.\n\n"
+                            "Use the daylight hours to prepare \u2014 fortify your base, "
+                            "stock up on supplies, and gather your group."
+                        ),
+                        colour=discord.Colour.dark_red(),
+                    )
+                    channel = self.bot.get_horde_channel()
+                    if self.bot.features.is_enabled("horde"):
+                        await self.bot.send_to_channel(channel, self.bot.config.HORDE_ROLE_ID, embed)
+                    print(f"[JeevesHordes] Horde tonight announced: day {event_day}")
                 self._sent_phases.add(key)
 
             elif phase == "active":
