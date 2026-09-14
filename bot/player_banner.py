@@ -17,6 +17,9 @@ _ASSET_DIR = Path(__file__).parent / "assets"
 _FONT_SIZE = 74
 _SUFFIX_GAP = 10          # px between the name's apostrophe and the white suffix
 _SCALE = 0.5              # scale factor applied to the finished banner (0.5 = half size)
+# The "new" banner is taller than connect/disconnect because it carries the
+# extra "NEW CONTACT FOUND" line, so scale it further to match their height.
+_NEW_SCALE = _SCALE * (286 / 326)
 
 # Cross-platform bold sans-serif (Liberation Sans Bold is the free, metric
 # Arial substitute and is bundled with the repo for the Linux VPS).
@@ -69,6 +72,7 @@ _BANNERS = {
         "baseline_y": 147,
         "suffix": (874, 90, 1569, 157),     # "joined the apocalypse." crop
         "apostrophe": False,
+        "scale": _NEW_SCALE,
     },
 }
 
@@ -135,8 +139,9 @@ def render_banner(kind: str, name: str) -> bytes:
     paste_x = cfg["accent_x0"] + int(w) + _SUFFIX_GAP
     im.paste(suffix, (paste_x, cfg["suffix"][1]), suffix)
 
-    if _SCALE != 1.0:
-        im = im.resize((round(im.width * _SCALE), round(im.height * _SCALE)), Image.LANCZOS)
+    scale = cfg.get("scale", _SCALE)
+    if scale != 1.0:
+        im = im.resize((round(im.width * scale), round(im.height * scale)), Image.LANCZOS)
 
     buf = io.BytesIO()
     im.save(buf, format="PNG")
