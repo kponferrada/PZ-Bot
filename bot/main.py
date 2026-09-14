@@ -326,7 +326,7 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "horde_events",
                     "jeeves_drops", "jeeves_modmanager", "server_status", "horde_leaderboard",
-                    "restart_watch", "feature_controls", "whitelist"):
+                    "restart_watch", "feature_controls", "whitelist", "help"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
