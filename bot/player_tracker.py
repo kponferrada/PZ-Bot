@@ -327,10 +327,8 @@ class PlayerTrackerCog(commands.Cog):
                         await rank_cog.sync_by_pz_username(name)
                     if is_new:
                         if self.bot.features.is_enabled("join_leave"):
-                            await self.bot.send_notification_to(
-                                self.bot.get_join_leave_channel(),
-                                f"{self.bot.Emojis.SPIFFO_WAVE} **{name}**'s signal was found!",
-                                discord.Colour.blue(),
+                            await self._send_player_banner(
+                                self.bot.get_join_leave_channel(), "new", name
                             )
                     else:
                         if self.bot.features.is_enabled("join_leave"):

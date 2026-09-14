@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 _ASSET_DIR = Path(__file__).parent / "assets"
 _FONT_SIZE = 74
 _SUFFIX_GAP = 10          # px between the name's apostrophe and the white suffix
+_SCALE = 0.5              # scale factor applied to the finished banner (0.5 = half size)
 
 # Cross-platform bold sans-serif (Liberation Sans Bold is the free, metric
 # Arial substitute and is bundled with the repo for the Linux VPS).
@@ -45,6 +46,7 @@ _BANNERS = {
         "bg_y": 71,                         # text-free row used to rebuild the gradient
         "baseline_y": 130,
         "suffix": (978, 75, 1530, 148),     # "s signal was lost." crop (x0,y0,x1,y1)
+        "apostrophe": True,
     },
     "connect": {
         "path": _ASSET_DIR / "player-connect.png",
@@ -55,6 +57,18 @@ _BANNERS = {
         "bg_y": 65,
         "baseline_y": 124,
         "suffix": (980, 69, 1475, 142),     # "s signal is back." crop
+        "apostrophe": True,
+    },
+    "new": {
+        "path": _ASSET_DIR / "new-player-connect.png",
+        "accent": (0, 206, 202),            # cyan
+        "accent_x0": 315,
+        "accent_y0": 90,
+        "accent_y1": 152,
+        "bg_y": 85,
+        "baseline_y": 147,
+        "suffix": (874, 90, 1569, 157),     # "joined the apocalypse." crop
+        "apostrophe": False,
     },
 }
 
@@ -102,7 +116,7 @@ def render_banner(kind: str, name: str) -> bytes:
     draw = ImageDraw.Draw(im)
     font_path = _resolve_font()
     font = ImageFont.truetype(font_path, _FONT_SIZE)
-    text = f"{name}'"
+    text = f"{name}'" if cfg.get("apostrophe", True) else name
 
     # Auto-shrink long names so they never overlap the white suffix.
     size = _FONT_SIZE
@@ -120,6 +134,9 @@ def render_banner(kind: str, name: str) -> bytes:
 
     paste_x = cfg["accent_x0"] + int(w) + _SUFFIX_GAP
     im.paste(suffix, (paste_x, cfg["suffix"][1]), suffix)
+
+    if _SCALE != 1.0:
+        im = im.resize((round(im.width * _SCALE), round(im.height * _SCALE)), Image.LANCZOS)
 
     buf = io.BytesIO()
     im.save(buf, format="PNG")
