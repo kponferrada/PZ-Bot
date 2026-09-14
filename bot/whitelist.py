@@ -201,7 +201,10 @@ class WhitelistCog(commands.Cog):
             return
 
         await channel.send(
-            "Click the button below to request whitelist access to the server.",
+            "\U0001f4dd **Whitelist Application**\n\n"
+            "Click the button below to request for server whitelisting.\n"
+            "You will be asked for a `username`, `password`, and `Steam ID`\n\n"
+            "PZ Tambayan \u2022 Whitelist Request",
             view=self.view,
         )
         await interaction.response.send_message(
