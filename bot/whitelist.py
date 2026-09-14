@@ -99,28 +99,31 @@ class DenyReasonModal(discord.ui.Modal, title="Deny Whitelist Request"):
         max_length=1024,
     )
 
-    def __init__(self, cog: "WhitelistCog", request_id: str, message: discord.Message):
+    def __init__(self, cog: "WhitelistCog", view: "WhitelistApprovalView", message: discord.Message):
         super().__init__()
         self.cog = cog
-        self.request_id = request_id
+        self.view = view
         self.message = message
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await self.cog.complete_denial(
-            interaction, self.request_id, self.message, self.reason.value.strip())
+            interaction, self.view, self.message, self.reason.value.strip())
 
 
 class WhitelistApprovalView(discord.ui.View):
     """Approve/Deny buttons attached to each approval message (not persistent)."""
 
     def __init__(self, cog: "WhitelistCog", request_id: str,
-                 username: str, password: str, steam_id: str):
+                 username: str, password: str, steam_id: str,
+                 submitter: discord.User, timestamp: str):
         super().__init__(timeout=None)
         self.cog = cog
         self.request_id = request_id
         self.username = username
         self.password = password
         self.steam_id = steam_id
+        self.submitter = submitter
+        self.timestamp = timestamp
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="\u2705")
     async def approve(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
@@ -133,7 +136,7 @@ class WhitelistApprovalView(discord.ui.View):
                 "\u274c You don't have permission to deny requests.", ephemeral=True)
             return
         await interaction.response.send_modal(
-            DenyReasonModal(self.cog, self.request_id, interaction.message))
+            DenyReasonModal(self.cog, self, interaction.message))
 
 
 class WhitelistCog(commands.Cog):
@@ -234,11 +237,13 @@ class WhitelistCog(commands.Cog):
         embed.set_footer(text="Approve to add to the server whitelist, or Deny with a reason.")
         return embed
 
-    async def _mark_approval_message(self, message, status: str,
-                                     admin: discord.User, reason: str = "") -> None:
-        if message is None or not message.embeds:
+    async def _finalize_approval(self, message, view: WhitelistApprovalView,
+                                 status: str, admin: discord.User, reason: str = "") -> None:
+        """Edit the approval message to show the decision and drop the buttons."""
+        if message is None:
             return
-        embed = discord.Embed.from_dict(message.embeds[0].to_dict())
+        embed = self._build_approval_embed(
+            view.username, view.password, view.steam_id, view.submitter, view.timestamp)
         if status == "approved":
             embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
             embed.colour = discord.Colour.green()
@@ -316,7 +321,7 @@ class WhitelistCog(commands.Cog):
         if channel is None:
             print("[Whitelist] Approval channel not configured/found; request saved to CSV only.")
         else:
-            view = WhitelistApprovalView(self, request_id, username, password, steam_id)
+            view = WhitelistApprovalView(self, request_id, username, password, steam_id, user, timestamp)
             try:
                 await channel.send(
                     embed=self._build_approval_embed(username, password, steam_id, user, timestamp),
@@ -345,18 +350,18 @@ class WhitelistCog(commands.Cog):
             await interaction.followup.send(f"\u274c Approval failed: {err}", ephemeral=True)
             return
         self._update_csv_status(view.request_id, "approved", "")
-        await self._mark_approval_message(interaction.message, "approved", interaction.user)
+        await self._finalize_approval(interaction.message, view, "approved", interaction.user)
         await interaction.followup.send(
             f"\u2705 Approved **{view.username}** and added to the whitelist.", ephemeral=True)
         print(f"[Whitelist] Approved {view.username} (SteamID {view.steam_id})")
 
     async def complete_denial(self, interaction: discord.Interaction,
-                              request_id: str, message, reason: str) -> None:
-        self._update_csv_status(request_id, "denied", reason)
-        await self._mark_approval_message(message, "denied", interaction.user, reason)
+                              view: WhitelistApprovalView, message, reason: str) -> None:
+        self._update_csv_status(view.request_id, "denied", reason)
+        await self._finalize_approval(message, view, "denied", interaction.user, reason)
         await interaction.response.send_message(
             f"\u274c Denied. Reason recorded in the CSV.", ephemeral=True)
-        print(f"[Whitelist] Denied request {request_id}: {reason}")
+        print(f"[Whitelist] Denied request {view.request_id}: {reason}")
 
     # ---- commands ------------------------------------------------------------
 
