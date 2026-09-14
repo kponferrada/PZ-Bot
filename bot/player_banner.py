@@ -16,10 +16,11 @@ from PIL import Image, ImageDraw, ImageFont
 _ASSET_DIR = Path(__file__).parent / "assets"
 _FONT_SIZE = 74
 _SUFFIX_GAP = 10          # px between the name's apostrophe and the white suffix
-_SCALE = 0.5              # scale factor applied to the finished banner (0.5 = half size)
-# The "new" banner is taller than connect/disconnect because it carries the
-# extra "NEW CONTACT FOUND" line, so scale it further to match their height.
-_NEW_SCALE = _SCALE * (286 / 326)
+# Every banner is normalised to this exact rendered size (the connect banner at
+# half scale). Each banner is scaled to fit (preserving aspect ratio) and centred
+# on a canvas of this size, so all three render at the same dimensions with the
+# text fully visible and undistorted.
+_TARGET_SIZE = (1053, 143)
 
 # Cross-platform bold sans-serif (Liberation Sans Bold is the free, metric
 # Arial substitute and is bundled with the repo for the Linux VPS).
@@ -72,7 +73,6 @@ _BANNERS = {
         "baseline_y": 147,
         "suffix": (874, 90, 1569, 157),     # "joined the apocalypse." crop
         "apostrophe": False,
-        "scale": _NEW_SCALE,
     },
 }
 
@@ -108,6 +108,21 @@ def _crop_suffix(im: Image.Image, cfg) -> Image.Image:
     return suffix
 
 
+def _fit_to_target(im: Image.Image, bg_color: tuple) -> Image.Image:
+    """Scale `im` to fit within `_TARGET_SIZE` (preserving aspect ratio) and
+    centre it on an opaque canvas filled with `bg_color`. The padding fills the
+    aspect-ratio gap so every banner is the exact same rendered size."""
+    tw, th = _TARGET_SIZE
+    scale = min(tw / im.width, th / im.height)
+    nw = round(im.width * scale)
+    nh = round(im.height * scale)
+    if (nw, nh) != (im.width, im.height):
+        im = im.resize((nw, nh), Image.LANCZOS)
+    canvas = Image.new("RGBA", _TARGET_SIZE, bg_color)
+    canvas.paste(im, ((tw - nw) // 2, (th - nh) // 2), im)
+    return canvas
+
+
 def render_banner(kind: str, name: str) -> bytes:
     """Return a PNG (bytes) of the given banner with `name` substituted."""
     cfg = _BANNERS[kind]
@@ -139,9 +154,8 @@ def render_banner(kind: str, name: str) -> bytes:
     paste_x = cfg["accent_x0"] + int(w) + _SUFFIX_GAP
     im.paste(suffix, (paste_x, cfg["suffix"][1]), suffix)
 
-    scale = cfg.get("scale", _SCALE)
-    if scale != 1.0:
-        im = im.resize((round(im.width * scale), round(im.height * scale)), Image.LANCZOS)
+    bg = px[im.width // 2, int(im.height * 0.85)]  # background colour for padding
+    im = _fit_to_target(im, bg)
 
     buf = io.BytesIO()
     im.save(buf, format="PNG")
