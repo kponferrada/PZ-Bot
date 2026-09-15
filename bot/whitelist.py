@@ -9,8 +9,9 @@ Flow:
      the approval channel (WHITELIST_APPROVAL_CHANNEL_ID) with Approve/Deny
      buttons.
   4. Approve → adds the user over RCON (`adduser` + `addSteamID` so the account
-     is bound to a single SteamID). Deny → asks the admin for a reason and
-     records it in the CSV row.
+     is bound to a single SteamID) and DMs the requester a welcome message.
+     Deny → asks the admin for a reason, records it in the CSV row, and DMs
+     the requester the denial reason.
 
 Config (see config.env.example):
   WHITELIST_CHANNEL_ID          — channel that holds the request button.
@@ -258,6 +259,47 @@ class WhitelistCog(commands.Cog):
         except discord.HTTPException as e:
             print(f"[Whitelist] Failed to update approval message: {e}")
 
+    # ---- requester DMs ------------------------------------------------------
+
+    async def _dm_submitter(self, submitter: discord.User, embed: discord.Embed) -> None:
+        """DM the requester; log (don't raise) if their DMs can't be reached."""
+        try:
+            await submitter.send(embed=embed)
+        except discord.HTTPException as e:
+            print(f"[Whitelist] Could not DM {submitter} (id={submitter.id}): {e}")
+
+    async def _send_approval_dm(self, view: WhitelistApprovalView) -> None:
+        """Welcome the requester now that they've been whitelisted."""
+        submitter = view.submitter
+        embed = discord.Embed(
+            title="\u2705 Whitelist Approved",
+            description=(
+                f"Hey {submitter.display_name}, your whitelist request for "
+                f"**PZ Tambayan** has been **approved**! \U0001f389\n\n"
+                f"Welcome to the barangay! Your account is now on the server whitelist.\n\n"
+                f"- **Username:** `{view.username}`\n"
+                f"- **SteamID:** `{view.steam_id}`\n\n"
+                f"You can now join the server. See you in the apocalypse! \U0001f9df"
+            ),
+            colour=discord.Colour.green(),
+        )
+        await self._dm_submitter(submitter, embed)
+
+    async def _send_denial_dm(self, view: WhitelistApprovalView, reason: str) -> None:
+        """Tell the requester their request was denied, and why."""
+        submitter = view.submitter
+        embed = discord.Embed(
+            title="\u274c Whitelist Denied",
+            description=(
+                f"Hey {submitter.display_name}, your whitelist request for "
+                f"**PZ Tambayan** was **denied**.\n\n"
+                f"**Reason:** {reason}\n\n"
+                f"If you believe this was a mistake, please reach out to an admin."
+            ),
+            colour=discord.Colour.red(),
+        )
+        await self._dm_submitter(submitter, embed)
+
     # ---- RCON whitelist -----------------------------------------------------
 
     async def _add_whitelist_user_rcon(self, username: str, password: str, steam_id: str) -> str:
@@ -351,6 +393,7 @@ class WhitelistCog(commands.Cog):
             return
         self._update_csv_status(view.request_id, "approved", "")
         await self._finalize_approval(interaction.message, view, "approved", interaction.user)
+        await self._send_approval_dm(view)
         await interaction.followup.send(
             f"\u2705 Approved **{view.username}** and added to the whitelist.", ephemeral=True)
         print(f"[Whitelist] Approved {view.username} (SteamID {view.steam_id})")
@@ -359,6 +402,7 @@ class WhitelistCog(commands.Cog):
                               view: WhitelistApprovalView, message, reason: str) -> None:
         self._update_csv_status(view.request_id, "denied", reason)
         await self._finalize_approval(message, view, "denied", interaction.user, reason)
+        await self._send_denial_dm(view, reason)
         await interaction.response.send_message(
             f"\u274c Denied. Reason recorded in the CSV.", ephemeral=True)
         print(f"[Whitelist] Denied request {view.request_id}: {reason}")
