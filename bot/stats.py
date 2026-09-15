@@ -35,6 +35,18 @@ def _fmt(field: str, value) -> str:
     return f"{value:,}"
 
 
+# Position badges for the leaderboard: medals on the podium, keycaps after.
+_MEDALS = ("\U0001f947", "\U0001f948", "\U0001f949")  # 🥇 🥈 🥉
+_KEYCAPS = ("4\ufe0f\u20e3", "5\ufe0f\u20e3", "6\ufe0f\u20e3",
+            "7\ufe0f\u20e3", "8\ufe0f\u20e3", "9\ufe0f\u20e3", "\U0001f51f")  # 4️⃣…🔟
+
+
+def _badge(position: int) -> str:
+    if position <= 3:
+        return _MEDALS[position - 1]
+    return _KEYCAPS[position - 4]
+
+
 class StatsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -89,13 +101,21 @@ class StatsCog(commands.Cog):
             await interaction.followup.send(
                 "No data from Aegis Panel yet.", ephemeral=True)
             return
-        lines = [f"`{i}.` **{user}** \u2014 {_fmt(kind.value, value)}"
-                 for i, (user, value) in enumerate(rows, 1)]
+        lines = []
+        for i, (user, value) in enumerate(rows, 1):
+            badge = _badge(i)
+            disp = _fmt(kind.value, value)
+            if i <= 3:
+                lines.append(f"{badge} **{user}** \u2014 **{disp}**")
+            else:
+                lines.append(f"{badge} **{user}** \u2014 {disp}")
+
         embed = discord.Embed(
-            title=f"\U0001f3c6 {_FIELD_LABELS[kind.value]} Leaderboard",
+            title=f"\U0001f3c6 {_FIELD_LABELS[kind.value]} \u2014 Top 10",
             description="\n".join(lines),
             colour=discord.Colour.gold(),
         )
+        embed.set_footer(text="Stats by Aegis Panel")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
