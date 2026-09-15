@@ -17,9 +17,9 @@ from typing import Optional
 import discord
 from discord.ext import commands, tasks
 
+import aegis_stats
 import sftp_client
 from death_card import render_death_card
-from player_tracker import record_death
 
 _DEATH_LOG_NAME = "player-death-logging.log"
 
@@ -107,7 +107,10 @@ class DeathLogCog(commands.Cog):
         game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
 
-        death_count = record_death(survivor, cause)
+        # Death count comes from Aegis Panel's ledger (authoritative). Aegis
+        # flushes at most once a minute, so the just-detected death usually
+        # isn't on disk yet — add 1.
+        death_count = await aegis_stats.get_field(self.bot, survivor, "deaths", force=True) + 1
         if not self.bot.features.is_enabled("deaths"):
             print(f"[DeathLog] Death -> {survivor} (#{death_count}) (notifications disabled)")
             return

@@ -137,6 +137,10 @@ class Config:
         self.SFTP_SERVER_DB = _env("SFTP_SERVER_DB") or _join(self.SFTP_ZOMBOID_ROOT, "db/pzserver.db")
         self.SFTP_MODS_DIR = _env("SFTP_MODS_DIR")
 
+        # Aegis Panel player-stats ledger (authoritative stats source). Defaults
+        # to {SFTP_LUA_DIR}/Aegis/Player/stats.txt in aegis_stats.
+        self.AEGIS_STATS_PATH = _env("AEGIS_STATS_PATH")
+
         # Mod update checker (Steam Workshop) — optional key for unlisted items.
         self.STEAM_API_KEY = _env("STEAM_API_KEY", "")
         self.MOD_UPDATE_STATE_PATH = _env("MOD_UPDATE_STATE_PATH", "mod_update_state.json")
@@ -326,7 +330,7 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jeeves_modmanager", "server_status",
-                    "restart_watch", "feature_controls", "whitelist", "help"):
+                    "restart_watch", "feature_controls", "whitelist", "stats", "help"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
@@ -667,11 +671,12 @@ async def cmd_playerlist(interaction: discord.Interaction) -> None:
     if not players:
         await _respond(interaction, "No players recorded yet.")
         return
-    lines = [f"**{u}** — {c} session(s), {d} death(s), first seen {f[:10]}"
-             for u, f, _, c, d in players[:25]]
+    lines = [f"**{u}** — {c} session(s), first seen {f[:10]}"
+             for u, f, _, c in players[:25]]
     desc = "\n".join(lines)
     if len(players) > 25:
         desc += f"\n\n*...and {len(players) - 25} more*"
+    desc += "\n\n*Kills/deaths now come from Aegis Panel — try `/stats <name>` or `/leaderboard`.*"
     await _respond(interaction, f"Player Database ({len(players)} total)", description=desc)
 
 

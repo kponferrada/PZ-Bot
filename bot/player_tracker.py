@@ -3,8 +3,9 @@ Player Tracker Extension (SFTP).
 
 Tails the PZ server `*_user.txt` log over SFTP for join events and sends
 welcome / welcome-back messages to Discord only (in-game join/leave is handled
-by PhunServer 2). Also detects player deaths and posts a death notification +
-records it in the local SQLite DB.
+Also detects player deaths and posts a death notification. Death counts and
+all player stats come from Aegis Panel's ledger (see `aegis_stats`), not a
+local duplicate counter.
 
 Log file detection:
   - Looks in SFTP_LOGS_DIR for the newest file ending in _user.txt
@@ -34,6 +35,7 @@ from typing import Optional
 import discord
 from discord.ext import commands, tasks
 
+import aegis_stats
 import player_banner
 import sftp_client
 
@@ -60,16 +62,7 @@ def init_db():
                 username    TEXT PRIMARY KEY,
                 first_seen  TEXT NOT NULL,
                 last_seen   TEXT NOT NULL,
-                join_count  INTEGER NOT NULL DEFAULT 1,
-                death_count INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS deaths (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                username  TEXT NOT NULL,
-                died_at   TEXT NOT NULL,
-                cause     TEXT
+                join_count  INTEGER NOT NULL DEFAULT 1
             )
         """)
 
@@ -83,8 +76,8 @@ def upsert_player(username: str) -> bool:
         ).fetchone()
         if existing is None:
             conn.execute(
-                "INSERT INTO players (username, first_seen, last_seen, join_count, death_count) "
-                "VALUES (?, ?, ?, 1, 0)",
+                "INSERT INTO players (username, first_seen, last_seen, join_count) "
+                "VALUES (?, ?, ?, 1)",
                 (username, now, now),
             )
             return True
@@ -93,24 +86,6 @@ def upsert_player(username: str) -> bool:
             (now, username),
         )
         return False
-
-
-def record_death(username: str, cause: Optional[str] = None) -> int:
-    """Record a death; return the player's new death count."""
-    now = datetime.datetime.utcnow().isoformat()
-    with _db() as conn:
-        conn.execute(
-            "INSERT INTO deaths (username, died_at, cause) VALUES (?, ?, ?)",
-            (username, now, cause),
-        )
-        conn.execute(
-            "UPDATE players SET death_count = death_count + 1 WHERE username = ?",
-            (username,),
-        )
-        row = conn.execute(
-            "SELECT death_count FROM players WHERE username = ?", (username,)
-        ).fetchone()
-        return row[0] if row else 0
 
 
 def is_known_player(username: str) -> bool:
@@ -129,7 +104,7 @@ def is_known_player(username: str) -> bool:
 def get_all_players() -> list:
     with _db() as conn:
         return conn.execute(
-            "SELECT username, first_seen, last_seen, join_count, death_count "
+            "SELECT username, first_seen, last_seen, join_count "
             "FROM players ORDER BY join_count DESC"
         ).fetchall()
 
@@ -234,7 +209,9 @@ class PlayerTrackerCog(commands.Cog):
             print(f"[PlayerTracker] Skipping death for unknown entity {name!r} (vanilla-bug false positive)")
             return
         details = details or {}
-        death_count = record_death(name, details.get("cause"))
+        # Death count comes from Aegis Panel's ledger. Aegis flushes at most once
+        # a minute, so the just-detected death usually isn't on disk yet — add 1.
+        death_count = await aegis_stats.get_field(self.bot, name, "deaths", force=True) + 1
         if not self.bot.features.is_enabled("deaths"):
             print(f"[PlayerTracker] Death -> {name} (#{death_count}) (notifications disabled)")
             return
@@ -403,15 +380,19 @@ class PlayerTrackerCog(commands.Cog):
         return known
 
     async def _seed_known_players(self):
-        known = await self._read_server_known_players()
+        # Prefer Aegis Panel's ledger (authoritative); fall back to the server's
+        # players.db when Aegis isn't present yet.
+        known = await aegis_stats.known_players(self.bot, force=True)
+        if not known:
+            known = await self._read_server_known_players()
         if not known:
             print("[PlayerTracker] No known players found on the server; starting with an empty list")
             return
         now = datetime.datetime.utcnow().isoformat()
         with _db() as conn:
             conn.executemany(
-                "INSERT OR IGNORE INTO players (username, first_seen, last_seen, join_count, death_count) "
-                "VALUES (?, ?, ?, 1, 0)",
+                "INSERT OR IGNORE INTO players (username, first_seen, last_seen, join_count) "
+                "VALUES (?, ?, ?, 1)",
                 [(u, now, now) for u in known],
             )
         self._seeded = True
