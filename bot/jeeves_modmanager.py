@@ -12,6 +12,8 @@ Mod management on a managed host happens in the panel; this command is a
 read-only view of what is configured.
 """
 
+import io
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -36,24 +38,6 @@ class JeevesModManagerCog(commands.Cog):
                 p = part.strip().lstrip("\\")
                 if p:
                     out.append(p)
-        return out
-
-    @staticmethod
-    def _chunk_text(s: str, limit: int) -> list:
-        """Split `s` into pieces <= `limit` chars, preferring breaks on ', '."""
-        if len(s) <= limit:
-            return [s]
-        out = []
-        while len(s) > limit:
-            cut = s.rfind(", ", 0, limit)
-            if cut < 0:
-                cut = s.rfind(" ", 0, limit)
-            if cut < 0:
-                cut = limit
-            out.append(s[:cut].rstrip(", "))
-            s = s[cut:].lstrip(", ")
-        if s:
-            out.append(s)
         return out
 
     @app_commands.command(
@@ -85,30 +69,44 @@ class JeevesModManagerCog(commands.Cog):
         workshop = self._split_items(server_config.ini_value(text, "WorkshopItems"))
         maps = [m for m in server_config.ini_value(text, "Map") if m.strip()]
 
-        sections = []
-        if mods:
-            sections.append(f"**Mods ({len(mods)})**\n" + ", ".join(f"`{m}`" for m in mods))
-        if maps:
-            sections.append(f"**Maps ({len(maps)})**\n" + ", ".join(f"`{m}`" for m in maps))
-        if workshop:
-            sections.append(f"**Workshop items ({len(workshop)})**\n" + ", ".join(f"`{w}`" for w in workshop))
-
-        if not sections:
+        if not mods and not workshop and not maps:
             await interaction.followup.send(embed=discord.Embed(
                 title="📋 Server Mod List", description="No mods configured.",
                 colour=discord.Colour.purple()))
             return
 
-        # Chunk the full text into pieces small enough that a single embed never
-        # trips Discord's limits — description (4096) and total (6000) — then
-        # send one embed per piece (Discord allows up to 10 embeds per message).
-        full = "\n\n".join(sections)
-        parts = self._chunk_text(full, 2000)
-        embeds = []
-        for i, part in enumerate(parts):
-            title = "📋 Server Mod List" if i == 0 else "📋 Server Mod List (cont.)"
-            embeds.append(discord.Embed(title=title, description=part, colour=discord.Colour.purple()))
-        await interaction.followup.send(embeds=embeds)
+        # A short summary embed (never trips Discord's size limits) plus the
+        # full list as an attached text file (files have no size limits), so a
+        # long mod list can never overflow an embed.
+        summary = []
+        if mods:
+            preview = ", ".join(f"`{m}`" for m in mods[:12])
+            summary.append(f"**Mods ({len(mods)})**\n{preview}{' …' if len(mods) > 12 else ''}")
+        if maps:
+            summary.append(f"**Maps ({len(maps)})**\n" + ", ".join(f"`{m}`" for m in maps))
+        if workshop:
+            summary.append(f"**Workshop items ({len(workshop)})** — see file")
+
+        embed = discord.Embed(
+            title="📋 Server Mod List",
+            description="\n\n".join(summary),
+            colour=discord.Colour.purple(),
+        )
+
+        lines = []
+        if mods:
+            lines.append(f"MODS ({len(mods)})")
+            lines.extend(f"  {m}" for m in mods)
+        if maps:
+            lines.append(f"\nMAPS ({len(maps)})")
+            lines.extend(f"  {m}" for m in maps)
+        if workshop:
+            lines.append(f"\nWORKSHOP ITEMS ({len(workshop)})")
+            lines.extend(f"  {w}" for w in workshop)
+        content = "\n".join(lines)
+        file = discord.File(io.BytesIO(content.encode("utf-8")), filename="server-modlist.txt")
+
+        await interaction.followup.send(embed=embed, file=file)
 
 
 async def setup(bot: commands.Bot) -> None:
