@@ -46,9 +46,9 @@ class JeevesModManagerCog(commands.Cog):
         out = []
         while len(s) > limit:
             cut = s.rfind(", ", 0, limit)
-            if cut <= 0:
+            if cut < 0:
                 cut = s.rfind(" ", 0, limit)
-            if cut <= 0:
+            if cut < 0:
                 cut = limit
             out.append(s[:cut].rstrip(", "))
             s = s[cut:].lstrip(", ")
@@ -99,10 +99,11 @@ class JeevesModManagerCog(commands.Cog):
                 colour=discord.Colour.purple()))
             return
 
-        # Chunk the full text into pieces that fit Discord's embed description
-        # (4096 max) and total-size (6000) limits, then send one embed per piece.
+        # Chunk the full text into pieces small enough that a single embed never
+        # trips Discord's limits — description (4096) and total (6000) — then
+        # send one embed per piece (Discord allows up to 10 embeds per message).
         full = "\n\n".join(sections)
-        parts = self._chunk_text(full, 3900)
+        parts = self._chunk_text(full, 2000)
         embeds = []
         for i, part in enumerate(parts):
             title = "📋 Server Mod List" if i == 0 else "📋 Server Mod List (cont.)"
