@@ -290,7 +290,7 @@ class WhitelistCog(commands.Cog):
 
     # ---- approval message --------------------------------------------------
 
-    def _build_approval_embed(self, username: str, password: str, steam_id: str,
+    def _build_approval_embed(self, username: str, steam_id: str,
                               character_lore: str, user: discord.User,
                               timestamp: str) -> discord.Embed:
         embed = discord.Embed(
@@ -300,7 +300,6 @@ class WhitelistCog(commands.Cog):
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
         embed.add_field(name="Username", value=f"`{username}`", inline=False)
-        embed.add_field(name="Password", value=f"`{password}`", inline=False)
         embed.add_field(name="SteamID", value=f"`{steam_id}`", inline=False)
         embed.add_field(name="Character Lore", value=character_lore, inline=False)
         embed.add_field(name="Submitted at", value=timestamp, inline=False)
@@ -313,7 +312,7 @@ class WhitelistCog(commands.Cog):
         if message is None:
             return
         embed = self._build_approval_embed(
-            view.username, view.password, view.steam_id, view.character_lore,
+            view.username, view.steam_id, view.character_lore,
             view.submitter, view.timestamp)
         if status == "approved":
             embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
@@ -446,7 +445,7 @@ class WhitelistCog(commands.Cog):
                                          character_lore, user, timestamp)
             try:
                 await channel.send(
-                    embed=self._build_approval_embed(username, password, steam_id,
+                    embed=self._build_approval_embed(username, steam_id,
                                                      character_lore, user, timestamp),
                     view=view,
                 )
