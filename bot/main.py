@@ -242,18 +242,29 @@ class RCONHelper:
         self.host = config.RCON_HOST
         self.port = config.RCON_PORT
         self.password = config.RCON_PASSWORD
+        # Last failure detail, for surfacing exact RCON errors to callers.
+        self.last_error: Optional[str] = None
 
     async def send_command(self, command: str, timeout: int = 10) -> Optional[str]:
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 rcon.source.rcon(command, host=self.host, port=self.port, passwd=self.password),
                 timeout=timeout,
             )
+            self.last_error = None
+            return result
         except asyncio.TimeoutError:
+            self.last_error = f"RCON timed out after {timeout}s"
             print(f"RCON timeout ({timeout}s): {command}")
             return None
+        except EmptyResponse:
+            # Empty response = the command ran with no output (normal for
+            # adduser/save/quit); not a failure.
+            self.last_error = None
+            return None
         except (socket.timeout, ConnectionRefusedError, OSError,
-                EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword) as e:
+                SessionTimeout, UnexpectedTerminator, WrongPassword) as e:
+            self.last_error = f"{type(e).__name__}: {e}"
             print(f"RCON error: {e}")
             return None
 
@@ -271,9 +282,11 @@ class RCONHelper:
         try:
             with Client(self.host, self.port, passwd=self.password, timeout=timeout) as client:
                 client.run("players")
+                self.last_error = None
                 return True
         except (socket.timeout, ConnectionRefusedError, OSError,
-                EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword):
+                EmptyResponse, SessionTimeout, UnexpectedTerminator, WrongPassword) as e:
+            self.last_error = f"{type(e).__name__}: {e}"
             return False
 
     @staticmethod

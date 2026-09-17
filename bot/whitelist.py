@@ -523,7 +523,8 @@ class WhitelistCog(commands.Cog):
         s = steam_id.replace('"', "").strip()
 
         if not rcon.is_server_online():
-            return "server is offline (RCON unreachable)", ""
+            detail = getattr(rcon, "last_error", "") or "connection failed"
+            return f"server is offline / RCON unreachable — {detail}", ""
 
         cmds = []
         cmd1 = f'adduser "{u}" "{p}"'
@@ -537,20 +538,24 @@ class WhitelistCog(commands.Cog):
                 print(f"[Whitelist] adduser: account already exists ({resp.strip()!r}); "
                       f"continuing to addSteamID")
             else:
-                print(f"[Whitelist] adduser resp: {resp!r}")
-        elif not rcon.is_server_online():
-            # None usually means an empty success response, but if the server
-            # dropped mid-command, surface that as a real failure.
-            return "RCON `adduser` failed (connection lost)", "; ".join(cmds)
+                # PZ `adduser` has no output on success, so any other non-empty
+                # response is a failure — surface the exact message.
+                return f"`adduser` failed: {resp.strip()}", "; ".join(cmds)
+        elif rcon.last_error:
+            return f"`adduser` failed: {rcon.last_error}", "; ".join(cmds)
 
         if s:
             cmd2 = f'addSteamID "{s}"'
             cmds.append(cmd2)
             resp2 = await rcon.send_command(cmd2)
             if resp2 is not None:
-                print(f"[Whitelist] addSteamID resp: {resp2!r}")
-            elif not rcon.is_server_online():
-                return "account added, but `addSteamID` failed (connection lost)", "; ".join(cmds)
+                low2 = resp2.lower()
+                if "already" in low2 or "exist" in low2:
+                    print(f"[Whitelist] addSteamID: already whitelisted ({resp2.strip()!r})")
+                else:
+                    return f"account added, but `addSteamID` failed: {resp2.strip()}", "; ".join(cmds)
+            elif rcon.last_error:
+                return f"account added, but `addSteamID` failed: {rcon.last_error}", "; ".join(cmds)
 
         return "", "; ".join(cmds)
 
@@ -564,7 +569,8 @@ class WhitelistCog(commands.Cog):
         s = steam_id.replace('"', "").strip()
 
         if not rcon.is_server_online():
-            return "server is offline (RCON unreachable)", ""
+            detail = getattr(rcon, "last_error", "") or "connection failed"
+            return f"server is offline / RCON unreachable — {detail}", ""
 
         cmds = []
         cmd1 = f'removeuser "{u}"'
@@ -572,8 +578,8 @@ class WhitelistCog(commands.Cog):
         resp = await rcon.send_command(cmd1)
         if resp is not None:
             print(f"[Whitelist] removeuser resp: {resp!r}")
-        elif not rcon.is_server_online():
-            return "RCON `removeuser` failed (connection lost)", "; ".join(cmds)
+        elif rcon.last_error:
+            return f"`removeuser` failed: {rcon.last_error}", "; ".join(cmds)
 
         if s:
             cmd2 = f'removeSteamID "{s}"'
@@ -581,8 +587,8 @@ class WhitelistCog(commands.Cog):
             resp2 = await rcon.send_command(cmd2)
             if resp2 is not None:
                 print(f"[Whitelist] removeSteamID resp: {resp2!r}")
-            elif not rcon.is_server_online():
-                return "account removed, but `removeSteamID` failed (connection lost)", "; ".join(cmds)
+            elif rcon.last_error:
+                return f"account removed, but `removeSteamID` failed: {rcon.last_error}", "; ".join(cmds)
 
         return "", "; ".join(cmds)
 
@@ -651,7 +657,11 @@ class WhitelistCog(commands.Cog):
         err, code = await self._add_whitelist_user_rcon(
             username, request.get("Password", ""), request.get("SteamID", ""))
         if err:
-            await interaction.followup.send(f"\u274c Approval failed: {err}", ephemeral=True)
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Approval Failed",
+                description=f"Could not whitelist **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
             return
 
         self._update_csv_row(request_id, {
@@ -720,7 +730,11 @@ class WhitelistCog(commands.Cog):
         err, _code = await self._remove_whitelist_user_rcon(
             username, request.get("SteamID", ""))
         if err:
-            await interaction.followup.send(f"\u274c Deletion failed: {err}", ephemeral=True)
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Deletion Failed",
+                description=f"Could not delete **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
             return
         self._update_csv_row(request_id, {
             "isWhitelisted": "false",
