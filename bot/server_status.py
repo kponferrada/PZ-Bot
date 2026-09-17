@@ -526,6 +526,9 @@ class ServerStatusCog(commands.Cog):
             rcon_ok = self.bot.rcon.is_server_online()
             world, world_age = await lua_bridge.read_world_status_with_age()
             siege = await lua_bridge.read_siege_status()
+            # The bridge now writes a nested {schedule, siege} table. The dashboard
+            # only surfaces schedule/state fields, so read the schedule section.
+            siege = (siege or {}).get("schedule")
 
             if world_age is not None:
                 d = world or {}

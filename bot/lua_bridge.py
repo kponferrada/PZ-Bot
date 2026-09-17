@@ -257,6 +257,122 @@ def _parse_lua_table(text: str) -> dict | None:
     return result if result else None
 
 
+# ---- nested Lua table parser (for the siege status file's schedule/siege sections) ----
+
+def _parse_lua_nested(text: str) -> dict | None:
+    """Parse a Lua `return { … }` table, INCLUDING nested tables, into a dict.
+
+    Used for the siege status file, which now writes `schedule = { … }` and
+    `siege = { … }` sections. Values may be strings, numbers, booleans, or
+    nested tables.
+    """
+    s = text.strip()
+    if s.startswith("return"):
+        s = s[len("return"):].lstrip()
+    value, _ = _parse_nested_value(s, 0)
+    return value if isinstance(value, dict) else None
+
+
+def _skip_lua_ws(s: str, i: int) -> int:
+    while i < len(s) and s[i] in " \t\r\n":
+        i += 1
+    return i
+
+
+def _parse_nested_value(s: str, i: int):
+    i = _skip_lua_ws(s, i)
+    if i >= len(s):
+        return None, i
+    c = s[i]
+    if c == "{":
+        return _parse_nested_table(s, i)
+    if c == '"':
+        return _parse_lua_string(s, i)
+    j = i
+    while j < len(s) and s[j] not in " \t\r\n,}":
+        j += 1
+    token = s[i:j]
+    if token == "true":
+        return True, j
+    if token == "false":
+        return False, j
+    if token == "nil":
+        return None, j
+    try:
+        return int(token), j
+    except ValueError:
+        try:
+            return float(token), j
+        except ValueError:
+            return token, j
+
+
+def _parse_lua_string(s: str, i: int):
+    """Parse a Lua double-quoted string (with \\n \\r \\t \\\" \\\\ \\ddd escapes)."""
+    j = i + 1
+    out = []
+    while j < len(s):
+        c = s[j]
+        if c == "\\":
+            nxt = s[j + 1] if j + 1 < len(s) else ""
+            if nxt == "n":
+                out.append("\n"); j += 2; continue
+            if nxt == "r":
+                out.append("\r"); j += 2; continue
+            if nxt == "t":
+                out.append("\t"); j += 2; continue
+            if nxt == '"':
+                out.append('"'); j += 2; continue
+            if nxt == "\\":
+                out.append("\\"); j += 2; continue
+            if nxt.isdigit():
+                num = 0
+                k = j + 1
+                while k < len(s) and k < j + 4 and s[k].isdigit():
+                    num = num * 10 + int(s[k]); k += 1
+                out.append(chr(num & 0xFF)); j = k; continue
+            out.append(nxt); j += 2; continue
+        if c == '"':
+            return "".join(out), j + 1
+        out.append(c); j += 1
+    return "".join(out), j
+
+
+def _parse_nested_table(s: str, i: int):
+    """Parse a `{ key = value, ... }` body (s[i] == '{') into a dict."""
+    i += 1
+    result = {}
+    i = _skip_lua_ws(s, i)
+    if i < len(s) and s[i] == "}":
+        return result, i + 1
+    while i < len(s):
+        i = _skip_lua_ws(s, i)
+        if i >= len(s):
+            break
+        if s[i] == "}":
+            return result, i + 1
+        if s[i] == '"':
+            key, i = _parse_lua_string(s, i)
+        else:
+            j = i
+            while j < len(s) and s[j] not in " \t\r\n=":
+                j += 1
+            key = s[i:j]
+            i = j
+        i = _skip_lua_ws(s, i)
+        if i < len(s) and s[i] == "=":
+            i += 1
+            value, i = _parse_nested_value(s, i)
+            result[key] = value
+        i = _skip_lua_ws(s, i)
+        if i < len(s) and s[i] == ",":
+            i += 1
+            continue
+        if i < len(s) and s[i] == "}":
+            return result, i + 1
+    return result, i
+
+
 async def _read_status(filename: str) -> dict | None:
     if _lua_dir is None:
         return None
@@ -274,8 +390,25 @@ async def _read_status(filename: str) -> dict | None:
         return None
 
 
+async def _read_status_nested(filename: str) -> dict | None:
+    if _lua_dir is None:
+        return None
+    sftp = sftp_client.get()
+    path = _path(filename)
+    if not await sftp.exists(path):
+        return None
+    try:
+        text = (await sftp.read_text(path)).strip()
+        if not text:
+            return None
+        return _parse_lua_nested(text)
+    except Exception as exc:
+        print(f"[LuaBridge] Failed to read {filename}: {exc}")
+        return None
+
+
 async def read_siege_status() -> dict | None:
-    return await _read_status(SIEGE_STATUS_FILE)
+    return await _read_status_nested(SIEGE_STATUS_FILE)
 
 
 async def read_drops_status() -> dict | None:

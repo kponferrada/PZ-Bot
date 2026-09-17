@@ -54,6 +54,17 @@ class SiegeNightCog(commands.Cog):
         self._announced_ended_sieges: set[int] = set()   # totalSiegesCompleted
         self._last_poller_key = None
 
+    @staticmethod
+    def _split_status(status):
+        """Return (schedule, siege) sub-dicts from a nested siege status dict.
+
+        The bridge mod writes `schedule = { … }` (always-refreshed state) and
+        `siege = { … }` (last/on-going siege) sections.
+        """
+        if not status:
+            return {}, {}
+        return status.get("schedule") or {}, status.get("siege") or {}
+
     async def cog_load(self):
         self.siege_status_poller.start()
 
@@ -76,11 +87,12 @@ class SiegeNightCog(commands.Cog):
             status = await lua_bridge.read_siege_status()
             if not status:
                 return
+            sched, siege = self._split_status(status)
 
-            phase = status.get("phase") or "idle"
-            event_day = status.get("eventDay", 0)
-            siege_count = status.get("siegeCount", 0)
-            completed = status.get("totalSiegesCompleted", 0)
+            phase = sched.get("phase") or "idle"
+            event_day = sched.get("eventDay", 0)
+            siege_count = sched.get("siegeCount", 0)
+            completed = sched.get("totalSiegesCompleted", 0)
 
             poller_key = (phase, event_day, completed, siege_count)
             if poller_key != self._last_poller_key:
@@ -94,7 +106,7 @@ class SiegeNightCog(commands.Cog):
                 if event_day and event_day not in self._announced_warning_days:
                     self._announced_warning_days.add(event_day)
                     world = await lua_bridge.read_world_status()
-                    date_str = siege_date_string(world, status) or ""
+                    date_str = siege_date_string(world, sched) or ""
                     desc = f"A siege night is scheduled for **Day {event_day}**"
                     if date_str:
                         desc += f" ({date_str})"
@@ -112,12 +124,12 @@ class SiegeNightCog(commands.Cog):
             elif phase == "active":
                 if siege_count not in self._announced_active_sieges:
                     self._announced_active_sieges.add(siege_count)
-                    target = status.get("targetZombies", 0)
-                    players = status.get("playerCount", 0)
-                    direction = _direction_name(status.get("lastDirection"))
-                    wave = status.get("currentWaveIndex", 0)
-                    cur_phase = status.get("currentPhase", "")
-                    spawned = status.get("spawnedThisSiege", 0)
+                    target = siege.get("targetZombies", 0)
+                    players = sched.get("playerCount", 0)
+                    direction = _direction_name(siege.get("lastDirection"))
+                    wave = siege.get("currentWaveIndex", 0)
+                    cur_phase = siege.get("currentPhase", "")
+                    spawned = siege.get("spawnedThisSiege", 0)
                     # In-game red-alert (servermsg + alert sound) — fires once per siege.
                     await self.bot.rcon.broadcast(
                         "SIEGE NIGHT HAS BEGUN! Zombies are attacking. Hold the line!"
@@ -149,12 +161,12 @@ class SiegeNightCog(commands.Cog):
                 # what we've already announced.
                 if completed and completed not in self._announced_ended_sieges:
                     self._announced_ended_sieges.add(completed)
-                    next_day = status.get("nextSiegeDay")
-                    kills = status.get("killsThisSiege", 0)
-                    bonus = status.get("bonusKills", 0)
-                    specials = status.get("specialKillsThisSiege", 0)
-                    spawned = status.get("spawnedThisSiege", 0)
-                    total_kills = status.get("totalKillsAllTime", 0)
+                    next_day = sched.get("nextSiegeDay")
+                    kills = siege.get("killsThisSiege", 0)
+                    bonus = siege.get("bonusKills", 0)
+                    specials = siege.get("specialKillsThisSiege", 0)
+                    spawned = siege.get("spawnedThisSiege", 0)
+                    total_kills = siege.get("totalKillsAllTime", 0)
                     embed = discord.Embed(
                         title="\u2705 Siege Night Has Ended",
                         description="The siege has been repelled. The night is quiet once more.",
@@ -174,7 +186,7 @@ class SiegeNightCog(commands.Cog):
                     )
                     if next_day:
                         world = await lua_bridge.read_world_status()
-                        date_str = siege_date_string(world, status)
+                        date_str = siege_date_string(world, sched)
                         nd = f"Next siege night: **Day {next_day}**"
                         if date_str:
                             nd += f" ({date_str})"
@@ -194,10 +206,11 @@ class SiegeNightCog(commands.Cog):
         try:
             status = await lua_bridge.read_siege_status()
             if status:
-                phase = status.get("phase") or "idle"
-                event_day = status.get("eventDay", 0)
-                siege_count = status.get("siegeCount", 0)
-                completed = status.get("totalSiegesCompleted", 0)
+                sched, _ = self._split_status(status)
+                phase = sched.get("phase") or "idle"
+                event_day = sched.get("eventDay", 0)
+                siege_count = sched.get("siegeCount", 0)
+                completed = sched.get("totalSiegesCompleted", 0)
                 if phase == "warning" and event_day:
                     self._announced_warning_days.add(event_day)
                 if phase == "active":
@@ -232,20 +245,21 @@ class SiegeNightCog(commands.Cog):
             ))
             return
 
-        phase = status.get("phase") or "idle"
-        event_day = status.get("eventDay", "?")
-        next_day = status.get("nextSiegeDay", 0)
-        completed = status.get("totalSiegesCompleted", 0)
-        siege_count = status.get("siegeCount", 0)
+        sched, siege = self._split_status(status)
+        phase = sched.get("phase") or "idle"
+        event_day = sched.get("eventDay", "?")
+        next_day = sched.get("nextSiegeDay", 0)
+        completed = sched.get("totalSiegesCompleted", 0)
+        siege_count = sched.get("siegeCount", 0)
 
         world = await lua_bridge.read_world_status()
-        date_str = siege_date_string(world, status)
+        date_str = siege_date_string(world, sched)
 
         if phase == "active":
             state = "\U0001f534 **ACTIVE** — Siege in progress"
-            target = status.get("targetZombies", 0)
-            kills = status.get("killsThisSiege", 0)
-            spawned = status.get("spawnedThisSiege", 0)
+            target = siege.get("targetZombies", 0)
+            kills = siege.get("killsThisSiege", 0)
+            spawned = siege.get("spawnedThisSiege", 0)
             state += f"\n\U0001f9df Spawned: **{spawned}** | Kills: **{kills}** | Target: **{target}**"
         elif phase == "warning":
             state = "\U0001f7e1 **Warning Active** — Siege night approaching tonight"
