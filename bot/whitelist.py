@@ -13,6 +13,8 @@ Flow:
      in `Whitelisted By`, flags `isWhitelisted`, and DMs a welcome message.
      Deny → asks the admin for a reason, records it in `Notes`, and DMs the
      requester the denial reason.
+  5. Delete → (after approval) removes the account over RCON (`removeuser` +
+     `removeSteamID`), records the reason in `Notes`, and updates the form.
 
 The Approve/Deny buttons are *persistent* — their `custom_id` encodes the
 request id, so they keep working across bot restarts (views are re-registered
@@ -198,6 +200,49 @@ class WhitelistApprovalView(discord.ui.View):
         await self.cog.deny_request(interaction, self.request_id)
 
 
+class WhitelistDeleteView(discord.ui.View):
+    """Persistent "Delete Account" button shown after a request is approved."""
+
+    def __init__(self, cog: "WhitelistCog", request_id: str):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.request_id = request_id
+
+        delete = discord.ui.Button(
+            label="Delete Account",
+            style=discord.ButtonStyle.red,
+            emoji="\U0001f5d1\ufe0f",  # 🗑️
+            custom_id=f"whitelist:delete:{request_id}",
+        )
+        delete.callback = self.delete
+        self.add_item(delete)
+
+    async def delete(self, interaction: discord.Interaction) -> None:
+        await self.cog.delete_request(interaction, self.request_id)
+
+
+class DeleteReasonModal(discord.ui.Modal, title="Delete Whitelist Account"):
+    """Asks the admin why the approved account is being deleted."""
+
+    reason = discord.ui.TextInput(
+        label="Reason for deletion",
+        style=discord.TextStyle.paragraph,
+        placeholder="Why is this account being deleted?",
+        required=True,
+        max_length=1024,
+    )
+
+    def __init__(self, cog: "WhitelistCog", request_id: str, message: discord.Message):
+        super().__init__()
+        self.cog = cog
+        self.request_id = request_id
+        self.message = message
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.complete_deletion(
+            interaction, self.request_id, self.message, self.reason.value.strip())
+
+
 class WhitelistCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -216,9 +261,9 @@ class WhitelistCog(commands.Cog):
         self.view = WhitelistView(self)
         bot.add_view(self.view)
 
-        # Re-register Approve/Deny views for any still-pending requests so their
-        # buttons survive a restart too.
-        self._register_pending_views()
+        # Re-register persistent views (Approve/Deny + Delete) so their buttons
+        # survive a restart too.
+        self._register_views()
 
         print(f"[Whitelist] channel={self._channel_id or 'unset'} "
               f"approval={self._approval_channel_id or 'unset'} "
@@ -334,21 +379,24 @@ class WhitelistCog(commands.Cog):
                 return row
         return None
 
-    def _register_pending_views(self) -> None:
-        """Re-register Approve/Deny views for still-pending requests."""
-        count = 0
+    def _register_views(self) -> None:
+        """Re-register persistent views (Approve/Deny for pending, Delete for approved)."""
+        pending = 0
+        approved = 0
         for row in self._read_csv():
             rid = row.get("request_id", "")
             if not rid:
                 continue
-            if (row.get("isWhitelisted", "false") or "false").strip().lower() == "true":
-                continue
-            if (row.get("Notes", "") or "").strip():
-                continue  # already denied
-            self.bot.add_view(WhitelistApprovalView(self, rid))
-            count += 1
-        if count:
-            print(f"[Whitelist] Re-registered {count} pending approval view(s).")
+            whitelisted = (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
+            notes = (row.get("Notes", "") or "").strip()
+            if whitelisted:
+                self.bot.add_view(WhitelistDeleteView(self, rid))
+                approved += 1
+            elif not notes:
+                self.bot.add_view(WhitelistApprovalView(self, rid))
+                pending += 1
+        if pending or approved:
+            print(f"[Whitelist] Re-registered {pending} pending + {approved} approved view(s).")
 
     # ---- submitter fetch -----------------------------------------------------
 
@@ -391,22 +439,32 @@ class WhitelistCog(commands.Cog):
 
     async def _finalize_approval(self, message, request: dict, admin: discord.User,
                                  status: str, reason: str = "") -> None:
-        """Edit the approval message to show the decision and drop the buttons."""
+        """Edit the approval message to show the decision and update the buttons."""
         if message is None:
             return
         submitter = await self._fetch_submitter(request.get("discord_id", ""))
         embed = self._request_embed(request, submitter)
+        view = None
         if status == "approved":
             embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
             embed.colour = discord.Colour.green()
+            # Keep a persistent "Delete Account" button so the account can be
+            # removed later.
+            view = WhitelistDeleteView(self, request.get("request_id", ""))
         elif status == "denied":
             value = f"\u274c Denied by {admin.mention}"
             if reason:
                 value += f" — {reason}"
             embed.add_field(name="Status", value=value, inline=False)
             embed.colour = discord.Colour.red()
+        elif status == "deleted":
+            value = f"\U0001f5d1\ufe0f Deleted by {admin.mention}"
+            if reason:
+                value += f" — {reason}"
+            embed.add_field(name="Status", value=value, inline=False)
+            embed.colour = discord.Colour.dark_grey()
         try:
-            await message.edit(embed=embed, view=None)
+            await message.edit(embed=embed, view=view)
         except discord.HTTPException as e:
             print(f"[Whitelist] Failed to update approval message: {e}")
 
@@ -474,8 +532,12 @@ class WhitelistCog(commands.Cog):
         if resp is not None:
             low = resp.lower()
             if "already" in low or "exist" in low:
-                return f"'{u}' may already be whitelisted: {resp.strip()}", "; ".join(cmds)
-            print(f"[Whitelist] adduser resp: {resp!r}")
+                # Account already exists (e.g. re-application) — don't abort;
+                # still bind the SteamID below.
+                print(f"[Whitelist] adduser: account already exists ({resp.strip()!r}); "
+                      f"continuing to addSteamID")
+            else:
+                print(f"[Whitelist] adduser resp: {resp!r}")
         elif not rcon.is_server_online():
             # None usually means an empty success response, but if the server
             # dropped mid-command, surface that as a real failure.
@@ -489,6 +551,38 @@ class WhitelistCog(commands.Cog):
                 print(f"[Whitelist] addSteamID resp: {resp2!r}")
             elif not rcon.is_server_online():
                 return "account added, but `addSteamID` failed (connection lost)", "; ".join(cmds)
+
+        return "", "; ".join(cmds)
+
+    async def _remove_whitelist_user_rcon(self, username: str, steam_id: str) -> tuple[str, str]:
+        """Remove a whitelist account + its SteamID over RCON.
+
+        Returns `(error, rcon_command)` — `error` is "" on success.
+        """
+        rcon = self.bot.rcon
+        u = username.replace('"', "").strip()
+        s = steam_id.replace('"', "").strip()
+
+        if not rcon.is_server_online():
+            return "server is offline (RCON unreachable)", ""
+
+        cmds = []
+        cmd1 = f'removeuser "{u}"'
+        cmds.append(cmd1)
+        resp = await rcon.send_command(cmd1)
+        if resp is not None:
+            print(f"[Whitelist] removeuser resp: {resp!r}")
+        elif not rcon.is_server_online():
+            return "RCON `removeuser` failed (connection lost)", "; ".join(cmds)
+
+        if s:
+            cmd2 = f'removeSteamID "{s}"'
+            cmds.append(cmd2)
+            resp2 = await rcon.send_command(cmd2)
+            if resp2 is not None:
+                print(f"[Whitelist] removeSteamID resp: {resp2!r}")
+            elif not rcon.is_server_online():
+                return "account removed, but `removeSteamID` failed (connection lost)", "; ".join(cmds)
 
         return "", "; ".join(cmds)
 
@@ -605,6 +699,39 @@ class WhitelistCog(commands.Cog):
         await interaction.response.send_message(
             "\u274c Denied. Reason recorded in the CSV.", ephemeral=True)
         print(f"[Whitelist] Denied request {request_id}: {reason}")
+
+    async def delete_request(self, interaction: discord.Interaction, request_id: str) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to delete accounts.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            DeleteReasonModal(self, request_id, interaction.message))
+
+    async def complete_deletion(self, interaction: discord.Interaction,
+                                request_id: str, message, reason: str) -> None:
+        request = self._lookup_request(request_id)
+        if request is None:
+            await interaction.response.send_message(
+                "\u274c Request not found (it may have been removed).", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        username = request.get("Username", "")
+        err, _code = await self._remove_whitelist_user_rcon(
+            username, request.get("SteamID", ""))
+        if err:
+            await interaction.followup.send(f"\u274c Deletion failed: {err}", ephemeral=True)
+            return
+        self._update_csv_row(request_id, {
+            "isWhitelisted": "false",
+            "Notes": reason,
+        })
+        request = self._lookup_request(request_id)
+        await self._finalize_approval(message, request, interaction.user, "deleted", reason)
+        await interaction.followup.send(
+            f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV.",
+            ephemeral=True)
+        print(f"[Whitelist] Deleted account {username} (request {request_id}): {reason}")
 
     # ---- commands ------------------------------------------------------------
 
