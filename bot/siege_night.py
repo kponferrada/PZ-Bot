@@ -29,6 +29,21 @@ from discord.ext import commands, tasks
 import lua_bridge
 from game_calendar import siege_date_string
 
+# Siege Night's `lastDirection` index -> compass name (matches SN.DIR_NAMES).
+_DIR_NAMES = ("North", "Northeast", "East", "Southeast",
+              "South", "Southwest", "West", "Northwest")
+
+
+def _direction_name(direction):
+    """Map Siege Night's lastDirection (-1..7) to a compass name, or None."""
+    try:
+        d = int(direction)
+    except (TypeError, ValueError):
+        return None
+    if d < 0 or d >= len(_DIR_NAMES):
+        return None
+    return _DIR_NAMES[d]
+
 
 class SiegeNightCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -95,23 +110,36 @@ class SiegeNightCog(commands.Cog):
                     print(f"[SiegeNight] Siege tonight announced: day {event_day}")
 
             elif phase == "active":
-                if siege_count and siege_count not in self._announced_active_sieges:
+                if siege_count not in self._announced_active_sieges:
                     self._announced_active_sieges.add(siege_count)
-                    target = status.get("targetZombies", "?")
-                    players = status.get("playerCount", "?")
+                    target = status.get("targetZombies", 0)
+                    players = status.get("playerCount", 0)
+                    direction = _direction_name(status.get("lastDirection"))
+                    wave = status.get("currentWaveIndex", 0)
+                    cur_phase = status.get("currentPhase", "")
+                    spawned = status.get("spawnedThisSiege", 0)
                     # In-game red-alert (servermsg + alert sound) — fires once per siege.
                     await self.bot.rcon.broadcast(
                         "SIEGE NIGHT HAS BEGUN! Zombies are attacking. Hold the line!"
                     )
+                    desc = f"**{target}** zombies are descending on **{players}** survivor(s)."
+                    if direction:
+                        desc += f"\nHorde direction: **{direction}**."
+                    desc += "\n\nHold the line."
                     embed = discord.Embed(
                         title="\U0001f9df Siege Night Has Begun!",
-                        description=(
-                            f"**{target}** zombies are "
-                            f"descending on **{players}** survivor(s).\n\n"
-                            "Hold the line."
-                        ),
+                        description=desc,
                         colour=discord.Colour.red(),
                     )
+                    intel = [f"Siege **#{siege_count + 1}**"]
+                    if wave:
+                        intel.append(f"Wave **{wave}**")
+                    if cur_phase:
+                        intel.append(f"Phase **{cur_phase.title()}**")
+                    if spawned:
+                        intel.append(f"Spawned **{spawned}**")
+                    if len(intel) > 1:
+                        embed.add_field(name="\U0001f4a1 Intel", value=" · ".join(intel), inline=False)
                     if self.bot.features.is_enabled("siege"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Notification sent: active, siege={siege_count}")
@@ -122,18 +150,35 @@ class SiegeNightCog(commands.Cog):
                 if completed and completed not in self._announced_ended_sieges:
                     self._announced_ended_sieges.add(completed)
                     next_day = status.get("nextSiegeDay")
-                    desc = "The siege has been repelled. The night is quiet once more."
+                    kills = status.get("killsThisSiege", 0)
+                    bonus = status.get("bonusKills", 0)
+                    specials = status.get("specialKillsThisSiege", 0)
+                    spawned = status.get("spawnedThisSiege", 0)
+                    total_kills = status.get("totalKillsAllTime", 0)
+                    embed = discord.Embed(
+                        title="\u2705 Siege Night Has Ended",
+                        description="The siege has been repelled. The night is quiet once more.",
+                        colour=discord.Colour.green(),
+                    )
+                    results = [f"Kills **{kills}**", f"Specials **{specials}**"]
+                    if bonus:
+                        results.append(f"Bonus **{bonus}**")
+                    if spawned:
+                        results.append(f"Spawned **{spawned}**")
+                    if total_kills:
+                        results.append(f"All-time **{total_kills}**")
+                    embed.add_field(
+                        name="\U0001f4ca Siege Results",
+                        value=" · ".join(results),
+                        inline=False,
+                    )
                     if next_day:
                         world = await lua_bridge.read_world_status()
                         date_str = siege_date_string(world, status)
-                        desc += f"\n\nNext siege night: **Day {next_day}**"
+                        nd = f"Next siege night: **Day {next_day}**"
                         if date_str:
-                            desc += f" ({date_str})"
-                    embed = discord.Embed(
-                        title="\u2705 Siege Night Has Ended",
-                        description=desc,
-                        colour=discord.Colour.green(),
-                    )
+                            nd += f" ({date_str})"
+                        embed.add_field(name="\U0001f319 Next", value=nd, inline=False)
                     if self.bot.features.is_enabled("siege"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Notification sent: ended, completed={completed}")
@@ -155,7 +200,7 @@ class SiegeNightCog(commands.Cog):
                 completed = status.get("totalSiegesCompleted", 0)
                 if phase == "warning" and event_day:
                     self._announced_warning_days.add(event_day)
-                if phase == "active" and siege_count:
+                if phase == "active":
                     self._announced_active_sieges.add(siege_count)
                 if completed:
                     self._announced_ended_sieges.add(completed)
