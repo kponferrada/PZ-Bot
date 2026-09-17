@@ -26,62 +26,61 @@ _COUNT_TEXT = (250, 250, 250)
 
 # Value slots: field -> (x_left, y_top, max_width_px, font_size_px)
 _SLOTS = {
-    "survivor":       (369, 286, 250, 18),
-    "character_name": (369, 335, 250, 18),
-    "infected":       (369, 385, 120, 18),
-    "survival_time":  (370, 438, 250, 18),
-    "zombie_kills":   (370, 491, 180, 18),
-    "cause":          (368, 642, 280, 17),
-    "injuries":       (370, 702, 300, 15),
-    "location":       (370, 868, 300, 15),
-    "game_date_time": (370, 925, 240, 15),
+    "survivor":       (398, 298, 250, 18),
+    "character_name": (398, 355, 250, 18),
+    "infected":       (398, 414, 120, 18),
+    "survival_time":  (399, 475, 250, 18),
+    "zombie_kills":   (398, 535, 180, 18),
+    "cause":          (400, 709, 280, 17),
+    "injuries":       (400, 776, 300, 15),
+    "location":       (401, 959, 300, 15),
+    "game_date_time": (401, 1030, 240, 15),
 }
 
 # Death count: the big total number sits centred on the blood splatter; the
 # white circle placeholder is inpainted away first.
-_COUNT_CENTER = (949, 368)
-_COUNT_MAX_W = 190          # horizontal room for the big number
+_COUNT_CENTER = (1072, 393)
+_COUNT_MAX_W = 220          # horizontal room for the big number
 _COUNT_MAX_SIZE = 76        # largest font for the big number
 
-# Three stat boxes: box -> (centre_x, count_y). The count replaces the dot.
+# Two smaller death-count cards: box -> (centre_x, count_y). The count replaces
+# the placeholder dot. No background is drawn — just the number (low-key).
 _STAT_BOXES = {
-    "today":    (820, 511),
-    "week":     (957, 511),
-    "all_time": (1098, 511),
+    "today": (965, 535),
+    "week":  (1229, 535),
 }
-_STAT_SIZE = 18             # font size for the box counts
+_STAT_SIZE = 16             # font size for the box counts
 
 # Paper-doll body-part marker positions (image pixel coordinates).
 # The doll faces the reader, so the character's LEFT side is on the viewer's
 # RIGHT (higher x) and the character's RIGHT side on the viewer's LEFT.
 _BODY_PARTS: Dict[str, Tuple[int, int]] = {
-    "head":        (842, 667),
-    "neck":        (842, 699),
-    "torso_upper": (840, 760),
-    "torso_lower": (840, 820),
-    "groin":       (840, 860),
-    "upperarm_l":  (880, 745),   # character's left arm → viewer's right
-    "forearm_l":   (896, 790),
-    "hand_l":      (905, 818),
-    "upperarm_r":  (801, 745),   # character's right arm → viewer's left
-    "forearm_r":   (783, 790),
-    "hand_r":      (770, 818),
-    "leg_l":       (868, 915),
-    "foot_l":      (872, 965),
-    "leg_r":       (809, 915),
-    "foot_r":      (803, 965),
+    "head":        (932, 730),
+    "neck":        (932, 765),
+    "torso_upper": (930, 800),
+    "torso_lower": (930, 860),
+    "groin":       (930, 900),
+    "upperarm_l":  (983, 810),   # character's left arm → viewer's right
+    "forearm_l":   (1003, 860),
+    "hand_l":      (1007, 880),
+    "upperarm_r":  (875, 810),   # character's right arm → viewer's left
+    "forearm_r":   (855, 860),
+    "hand_r":      (848, 880),
+    "leg_l":       (956, 940),
+    "foot_l":      (965, 1000),
+    "leg_r":       (901, 940),
+    "foot_r":      (890, 1000),
 }
 
 # Injury icons live in the template's legend (right of the paper doll). Each
 # condition maps to one legend icon, which we crop out of the template and paste
 # onto the paper doll at the matching body part.
 _ICON_SOURCES = {
-    "bleeding":  (970, 647, 1003, 692),   # red droplet
-    "cut":       (965, 691, 1010, 738),   # 3 deep-red slanted lines
-    "scratched": (967, 741, 1004, 781),   # 3 light-red lines
-    "bitten":    (967, 786, 1007, 827),   # bite mark
-    "bruised":   (970, 830, 1000, 861),   # red circle
-    "fractured": (965, 869, 1003, 905),   # bone
+    "bleeding":  (1120, 708, 1147, 757),   # red droplet
+    "cut":       (1120, 768, 1158, 820),   # 3 deep-red slanted lines
+    "scratched": (1120, 834, 1150, 881),   # 3 light-red lines
+    "bitten":    (1120, 900, 1152, 948),   # bite mark
+    "fractured": (1120, 971, 1148, 1007),  # bone
 }
 
 # Injury condition -> legend icon key.
@@ -93,8 +92,6 @@ _CONDITION_ICONS = {
     "scratched":  "scratched",
     "cut":        "cut",
     "laceration": "cut",
-    "bruised":    "bruised",
-    "bruise":     "bruised",
     "fractured":  "fractured",
     "fracture":   "fractured",
     "broken bone": "fractured",
@@ -309,12 +306,12 @@ def _draw_centered(draw: ImageDraw.ImageDraw, center: Tuple[int, int],
 
 def _draw_stat_boxes(draw: ImageDraw.ImageDraw, img: Image.Image,
                      counts: Dict[str, int]) -> None:
-    """Replace each stat-box dot with its count number."""
+    """Replace each stat-box dot with its count number (no background)."""
     font = _font(_STAT_SIZE)
     for box, (cx, cy) in _STAT_BOXES.items():
         value = str(counts.get(box, 0) or 0)
-        # Cover the placeholder dot (and room for the number) with the panel bg.
-        draw.rectangle([cx - 45, cy - 13, cx + 45, cy + 13], fill=_BG)
+        # Inpaint the placeholder dot, then draw just the number (low-key).
+        _clear_white_text(img, (cx - 12, cy - 12, cx + 12, cy + 12))
         _draw_centered(draw, (cx, cy), value, font, _COUNT_TEXT)
 
 
@@ -350,11 +347,10 @@ def render_death_card(data: Dict) -> Image.Image:
         cfont = _fit_number(draw, count, _COUNT_MAX_W, _COUNT_MAX_SIZE)
         _draw_centered(draw, (cx, cy), count, cfont, _COUNT_TEXT)
 
-    # 3. Three stat boxes: TODAY / THIS WEEK / ALL TIME.
+    # 3. Two smaller cards: TODAY / THIS WEEK.
     _draw_stat_boxes(draw, img, {
         "today": data.get("deaths_today", 0),
         "week": data.get("deaths_week", 0),
-        "all_time": data.get("death_count", 0),
     })
 
     # 4. Injury markers on the paper doll (legend icons).
