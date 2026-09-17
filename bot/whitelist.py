@@ -60,6 +60,24 @@ def _normalize_yesno(value: str) -> str:
     return value.strip()
 
 
+def _validate_steam_id(value: str) -> str | None:
+    """Return an error message if `value` isn't a valid SteamID64, else None.
+
+    A SteamID64 is a 17-digit decimal number beginning with 7656119 (the public
+    individual-account prefix). We require exactly 17 numeric digits.
+    """
+    sid = (value or "").strip()
+    if not sid:
+        return "SteamID is required."
+    if not sid.isdigit():
+        return f"SteamID must contain only numbers — `{sid}` has other characters."
+    if len(sid) != 17:
+        return f"SteamID must be exactly 17 digits — `{sid}` has {len(sid)}."
+    if not sid.startswith("7656119"):
+        return "SteamID must start with `7656119` — that doesn't look like a SteamID64."
+    return None
+
+
 class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
     """The form a user fills in to request whitelist access."""
 
@@ -77,7 +95,7 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
     )
     steam_id = discord.ui.TextInput(
         label="SteamID",
-        placeholder="Your SteamID (e.g. 7656119…)",
+        placeholder="17-digit SteamID64 (starts with 7656119…)",
         required=True,
         max_length=32,
     )
@@ -93,6 +111,10 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        error = _validate_steam_id(self.steam_id.value)
+        if error:
+            await interaction.response.send_message(f"\u274c {error}", ephemeral=True)
+            return
         await self.cog.handle_request(
             interaction,
             username=self.username.value.strip(),
