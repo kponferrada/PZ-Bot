@@ -431,6 +431,7 @@ class WhitelistCog(commands.Cog):
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
         embed.add_field(name="Username", value=f"`{request.get('Username', '')}`", inline=False)
+        embed.add_field(name="Password", value=f"`{request.get('Password', '')}`", inline=False)
         embed.add_field(name="SteamID", value=f"`{request.get('SteamID', '')}`", inline=False)
         embed.add_field(name="Character Lore", value=request.get("withCharacterLore", ""), inline=False)
         embed.add_field(name="Submitted at", value=request.get("Timestamp", ""), inline=False)
