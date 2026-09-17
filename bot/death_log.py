@@ -113,10 +113,11 @@ class DeathLogCog(commands.Cog):
         # isn't on disk yet — add 1.
         death_count = await aegis_stats.get_field(self.bot, survivor, "deaths", force=True) + 1
 
-        # Record this death for the day/week counts (all-time total stays Aegis's).
+        # Record this death, then read this survivor's own day/week counts
+        # (all-time total stays Aegis's authoritative ledger).
         death_store.record_death(survivor, game_date_time)
-        deaths_today = death_store.count_today()
-        deaths_week = death_store.count_week()
+        deaths_today = death_store.count_today(survivor)
+        deaths_week = death_store.count_week(survivor)
 
         if not self.bot.features.is_enabled("deaths"):
             print(f"[DeathLog] Death -> {survivor} (#{death_count}) (notifications disabled)")

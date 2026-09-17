@@ -1,9 +1,10 @@
 """death_store.py — record death events with timestamps for day/week/all-time counts.
 
-The death card's "DEATH COUNT" panel has three stat boxes — TODAY, THIS WEEK,
-ALL TIME — plus a big total number. The all-time total is authoritative from
-Aegis Panel's ledger (see aegis_stats); this module keeps a local timestamped
-log of deaths so the bot can also answer "how many died today / this week".
+The death card's "DEATH COUNT" panel shows TODAY / THIS WEEK counts plus a big
+total number. The all-time total is authoritative from Aegis Panel's ledger
+(see aegis_stats); this module keeps a local timestamped log of deaths so the
+bot can answer "how many times did THIS survivor die today / this week" — the
+day/week counts are per-character, keyed on the Steam username.
 
 The log is a small JSON file (deaths.json) with one event per death:
     {"survivor": "foo", "ts": 1726600000.0, "game_dt": "1993-7-22 14:32"}
@@ -68,17 +69,27 @@ def _week_start(ts: float) -> float:
     return monday.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
-def count_since(ts: float) -> int:
-    """Deaths with a timestamp >= `ts`."""
-    return sum(1 for e in _load() if e.get("ts", 0) >= ts)
+def count_since(ts: float, survivor: str = "") -> int:
+    """Deaths with a timestamp >= `ts`.
+
+    When `survivor` is given, only that survivor's deaths are counted — the
+    death card shows per-character day/week counts, not the whole server's.
+    """
+    events = _load()
+    if survivor:
+        return sum(
+            1 for e in events
+            if e.get("survivor") == survivor and e.get("ts", 0) >= ts
+        )
+    return sum(1 for e in events if e.get("ts", 0) >= ts)
 
 
-def count_today() -> int:
-    return count_since(_day_start(time.time()))
+def count_today(survivor: str = "") -> int:
+    return count_since(_day_start(time.time()), survivor)
 
 
-def count_week() -> int:
-    return count_since(_week_start(time.time()))
+def count_week(survivor: str = "") -> int:
+    return count_since(_week_start(time.time()), survivor)
 
 
 def count_all() -> int:
