@@ -19,7 +19,6 @@ _FONT_PATH = _ASSETS / "fonts" / "LiberationSans-Bold.ttf"
 # Card colours (sampled from the template).
 _BG = (1, 12, 17)            # dark card background behind the value slots
 _TEXT = (230, 230, 231)      # bright value text (matches the title)
-_COUNT_BG = (6, 6, 6)        # death-count box background
 _COUNT_TEXT = (250, 250, 250)
 
 # Value slots: field -> (x_left, y_top, max_width_px, font_size_px)
@@ -39,22 +38,24 @@ _SLOTS = {
 _COUNT_BOX = (850, 290, 1080, 468)
 
 # Paper-doll body-part marker positions (image pixel coordinates).
+# The doll faces the reader, so the character's LEFT side is on the viewer's
+# RIGHT (higher x) and the character's RIGHT side on the viewer's LEFT.
 _BODY_PARTS: Dict[str, Tuple[int, int]] = {
-    "head":        (880, 660),
-    "neck":        (880, 680),
-    "torso_upper": (888, 718),
-    "torso_lower": (888, 752),
-    "groin":       (888, 778),
-    "upperarm_l":  (846, 712),
-    "forearm_l":   (845, 745),
-    "hand_l":      (844, 782),
-    "upperarm_r":  (934, 712),
-    "forearm_r":   (935, 745),
-    "hand_r":      (936, 782),
-    "leg_l":       (862, 812),
-    "foot_l":      (862, 948),
-    "leg_r":       (910, 812),
-    "foot_r":      (910, 948),
+    "head":        (876, 658),
+    "neck":        (876, 688),
+    "torso_upper": (876, 725),
+    "torso_lower": (876, 800),
+    "groin":       (876, 852),
+    "upperarm_l":  (917, 725),   # character's left arm → viewer's right
+    "forearm_l":   (930, 775),
+    "hand_l":      (946, 815),
+    "upperarm_r":  (830, 725),   # character's right arm → viewer's left
+    "forearm_r":   (818, 775),
+    "hand_r":      (807, 815),
+    "leg_l":       (905, 915),
+    "foot_l":      (906, 958),
+    "leg_r":       (843, 915),
+    "foot_r":      (838, 958),
 }
 
 # Injury icons live in the template's legend (bottom-right "Injury Overview").
@@ -109,6 +110,68 @@ def _load_icons() -> Dict[str, Image.Image]:
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(_FONT_PATH), size)
+
+
+def _clear_white_text(img: Image.Image, box: tuple) -> None:
+    """Inpaint white placeholder text in `box` with the local card background.
+
+    The `{death count}` placeholder is thick distressed-white text over the red
+    splatter. A median filter is too weak for it, so we do a horizontal scanline
+    fill: each run of white pixels is replaced with an interpolation of the
+    nearest non-white pixel to its left and right, which reconstructs the
+    splatter reasonably.
+    """
+    l, t, r, b = box
+    region = img.crop(box).convert("RGB")
+    px = region.load()
+    w, h = region.size
+
+    def _is_white(c) -> bool:
+        return c[0] > 150 and c[1] > 150 and c[2] > 150
+
+    for y in range(h):
+        x = 0
+        while x < w:
+            if _is_white(px[x, y]):
+                run_end = x
+                while run_end < w and _is_white(px[run_end, y]):
+                    run_end += 1
+                left = None
+                for xx in range(x - 1, -1, -1):
+                    if not _is_white(px[xx, y]):
+                        left = px[xx, y]
+                        break
+                right = None
+                for xx in range(run_end, w):
+                    if not _is_white(px[xx, y]):
+                        right = px[xx, y]
+                        break
+                for xx in range(x, run_end):
+                    if left is not None and right is not None:
+                        frac = (xx - x + 1) / (run_end - x + 1)
+                        px[xx, y] = tuple(
+                            round(left[i] * (1 - frac) + right[i] * frac) for i in range(3))
+                    elif left is not None:
+                        px[xx, y] = left
+                    elif right is not None:
+                        px[xx, y] = right
+                x = run_end
+            else:
+                x += 1
+
+    img.paste(region, (l, t))
+
+
+def _fit_number(draw: ImageDraw.ImageDraw, text: str, max_width: int,
+                start_size: int) -> ImageFont.FreeTypeFont:
+    """Pick the largest font (down to 24) that keeps `text` within `max_width`."""
+    size = start_size
+    while size > 24:
+        font = _font(size)
+        if draw.textlength(text, font=font) <= max_width:
+            return font
+        size -= 4
+    return _font(24)
 
 
 def _truncate(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
@@ -171,10 +234,7 @@ def _parse_injuries(injuries: str) -> List[Tuple[str, List[str]]]:
 
 def _draw_centered(draw: ImageDraw.ImageDraw, center: Tuple[int, int],
                    text: str, font, fill) -> None:
-    box = draw.textbbox((0, 0), text, font=font)
-    w = box[2] - box[0]
-    h = box[3] - box[1]
-    draw.text((center[0] - w // 2, center[1] - h // 2), text, font=font, fill=fill)
+    draw.text(center, text, font=font, fill=fill, anchor="mm")
 
 
 def render_death_card(data: Dict) -> Image.Image:
@@ -199,13 +259,12 @@ def render_death_card(data: Dict) -> Image.Image:
         value = _truncate(draw, value, font, max_w)
         draw.text((x, y - 3), value, font=font, fill=_TEXT)
 
-    # 2. Death count (big number).
+    # 2. Death count (big number, transparent background — no box).
     count = str(data.get("death_count", "") or "0").strip()
     l, t, r, b = _COUNT_BOX
-    draw.rectangle([l, t, r, b], fill=_COUNT_BG)
+    _clear_white_text(img, (l, t, r, b))
     if count:
-        cfont = _font(52)
-        count = _truncate(draw, count, cfont, r - l - 16)
+        cfont = _fit_number(draw, count, r - l - 24, 88)
         _draw_centered(draw, ((l + r) // 2, (t + b) // 2), count, cfont, _COUNT_TEXT)
 
     # 3. Injury markers on the paper doll (legend icons).
