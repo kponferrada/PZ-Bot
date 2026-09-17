@@ -145,6 +145,10 @@ class Config:
         self.STEAM_API_KEY = _env("STEAM_API_KEY", "")
         self.MOD_UPDATE_STATE_PATH = _env("MOD_UPDATE_STATE_PATH", "mod_update_state.json")
 
+        # Automatic cleanup of bot-generated files (see cleanup.py).
+        self.CLEANUP_INTERVAL_HOURS = _env_int("CLEANUP_INTERVAL_HOURS", 24)
+        self.CLEANUP_STALE_HOURS = _env_int("CLEANUP_STALE_HOURS", 24)
+
         print(f"Config loaded: RCON={self.RCON_HOST}:{self.RCON_PORT} "
               f"Guild={self.GUILD_ID} Channel={self.CHANNEL_ID} "
               f"SFTP={self.SFTP_HOST}:{self.SFTP_PORT}")
@@ -330,7 +334,7 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jeeves_modmanager", "server_status",
-                    "restart_watch", "feature_controls", "whitelist", "stats", "help"):
+                    "restart_watch", "feature_controls", "whitelist", "stats", "cleanup", "help"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
