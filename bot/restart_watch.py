@@ -10,7 +10,7 @@ over RCON (no event deferral):
 `/forcemodupdate` forces the same sequence immediately.
 
 Scheduled restarts (RESTART_SCHEDULE_UTC) run the exact same countdown + kick +
-quit flow, timed so the quit lands on the scheduled hour.
+quit flow as a workshop update (notify T-2min, save T-1:30, kick T-1min).
 """
 
 import os
@@ -166,8 +166,8 @@ class RestartWatch(commands.Cog):
     async def _run_countdown(self, duration=None) -> None:
         """Countdown: kick-notification T-2min, save T-1:30, kick T-1min, save+quit T-0.
 
-        `duration` (seconds) overrides the default restart delay; scheduled
-        restarts pass the exact time remaining so the quit lands on schedule."""
+        `duration` (seconds) overrides the default restart delay (unused by the
+        normal flows, which rely on the default countdown)."""
         remaining = self._restart_delay if duration is None else duration
         notified = False
         saved = False
@@ -195,8 +195,7 @@ class RestartWatch(commands.Cog):
 
         `image` overrides the announcement banner (defaults to the mod-update
         banner; scheduled restarts pass the generic restart banner).
-        `duration` (seconds) overrides the countdown length so scheduled
-        restarts finish (quit) exactly at the scheduled time."""
+        `duration` (seconds) overrides the countdown length."""
         self.bot.state.expect_restart()
         # The pending update is only "applied" once the server actually restarts.
         # Mark the baseline stale so the next poll re-seeds against the applied
@@ -281,8 +280,8 @@ class RestartWatch(commands.Cog):
 
     async def _run_scheduled_check(self) -> None:
         """At the scheduled time, run the full restart sequence (countdown + kick +
-        quit) — the same flow a workshop update uses. An advance warning is posted
-        first if the warning window is longer than the restart countdown."""
+        quit) — the exact same flow a workshop update uses. An advance warning is
+        posted first if the warning window is longer than the restart countdown."""
         if not self.bot.features.is_enabled("restart"):
             return
         # Don't stack a scheduled restart on top of one already in progress.
@@ -297,10 +296,12 @@ class RestartWatch(commands.Cog):
         if delta <= self._restart_delay:
             if self._scheduled_trigger_key != key:
                 self._scheduled_trigger_key = key
+                # Same path as a mod-update restart: full countdown (notify
+                # T-2min, save T-1:30, kick T-1min, quit T-0), no duration
+                # override — so the kick runs exactly like a mod update.
                 await self._start_restart(
                     "Scheduled restart",
                     image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
-                    duration=max(1, int(delta)),
                 )
             return
 
