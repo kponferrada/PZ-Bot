@@ -538,9 +538,10 @@ class WhitelistCog(commands.Cog):
                 # still bind the SteamID below.
                 print(f"[Whitelist] adduser: account already exists ({resp.strip()!r}); "
                       f"continuing to addSteamID")
+            elif "created" in low or "added" in low:
+                print(f"[Whitelist] adduser: {resp.strip()!r}")
             else:
-                # PZ `adduser` has no output on success, so any other non-empty
-                # response is a failure — surface the exact message.
+                # Anything else is a genuine failure — surface the exact message.
                 return f"`adduser` failed: {resp.strip()}", "; ".join(cmds)
         elif rcon.last_error:
             return f"`adduser` failed: {rcon.last_error}", "; ".join(cmds)
@@ -553,6 +554,8 @@ class WhitelistCog(commands.Cog):
                 low2 = resp2.lower()
                 if "already" in low2 or "exist" in low2:
                     print(f"[Whitelist] addSteamID: already whitelisted ({resp2.strip()!r})")
+                elif "added" in low2 or "created" in low2:
+                    print(f"[Whitelist] addSteamID: {resp2.strip()!r}")
                 else:
                     return f"account added, but `addSteamID` failed: {resp2.strip()}", "; ".join(cmds)
             elif rcon.last_error:
