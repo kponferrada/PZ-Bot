@@ -63,8 +63,8 @@ def _normalize_yesno(value: str) -> str:
 def _validate_steam_id(value: str) -> str | None:
     """Return an error message if `value` isn't a valid SteamID64, else None.
 
-    A SteamID64 is a 17-digit decimal number beginning with 7656119 (the public
-    individual-account prefix). We require exactly 17 numeric digits.
+    A SteamID64 is a 17-digit decimal number. (The leading digits vary — not all
+    accounts share the same prefix — so we only enforce length + digits.)
     """
     sid = (value or "").strip()
     if not sid:
@@ -73,8 +73,6 @@ def _validate_steam_id(value: str) -> str | None:
         return f"SteamID must contain only numbers — `{sid}` has other characters."
     if len(sid) != 17:
         return f"SteamID must be exactly 17 digits — `{sid}` has {len(sid)}."
-    if not sid.startswith("7656119"):
-        return "SteamID must start with `7656119` — that doesn't look like a SteamID64."
     return None
 
 
@@ -95,7 +93,7 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
     )
     steam_id = discord.ui.TextInput(
         label="SteamID",
-        placeholder="17-digit SteamID64 (starts with 7656119…)",
+        placeholder="Your 17-digit SteamID64",
         required=True,
         max_length=32,
     )
