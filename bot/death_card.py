@@ -1,10 +1,13 @@
 """death_card.py — render a death notification onto assets/cause-of-death.png.
 
 The card is a dark "DEATH NOTIFICATION" template with ghost `{placeholder}` text
-slots. This module covers each slot and draws the real value, truncating anything
-that would overflow its slot, then pastes the matching injury icon (droplet /
-slash / scratch / bite) onto the paper-doll silhouette from the parsed
-`Injuries:` list.
+slots. This module covers each slot and draws the real value (in Exo 2), then
+pastes the matching injury icon (bleeding / cut / scratched / bitten / bruised /
+fractured) onto the paper-doll silhouette from the parsed `Injuries:` list.
+
+The "DEATH COUNT" panel holds a big total number (drawn over the blood splatter)
+and three stat boxes — TODAY / THIS WEEK / ALL TIME — whose placeholder dots are
+replaced with the real counts.
 """
 
 from pathlib import Path
@@ -14,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 _ASSETS = Path(__file__).parent / "assets"
 _CARD_PATH = _ASSETS / "cause-of-death.png"
-_FONT_PATH = _ASSETS / "fonts" / "LiberationSans-Bold.ttf"
+_FONT_PATH = _ASSETS / "fonts" / "Exo2.ttf"
 
 # Card colours (sampled from the template).
 _BG = (1, 12, 17)            # dark card background behind the value slots
@@ -23,49 +26,62 @@ _COUNT_TEXT = (250, 250, 250)
 
 # Value slots: field -> (x_left, y_top, max_width_px, font_size_px)
 _SLOTS = {
-    "survivor":       (371, 284, 250, 18),
-    "character_name": (371, 331, 250, 18),
-    "infected":       (371, 383, 120, 18),
-    "survival_time":  (372, 436, 250, 18),
-    "zombie_kills":   (371, 490, 180, 18),
-    "cause":          (371, 643, 280, 17),
-    "injuries":       (372, 708, 300, 15),
-    "location":       (372, 869, 300, 15),
-    "game_date_time": (373, 929, 240, 15),
+    "survivor":       (369, 286, 250, 18),
+    "character_name": (369, 335, 250, 18),
+    "infected":       (369, 385, 120, 18),
+    "survival_time":  (370, 438, 250, 18),
+    "zombie_kills":   (370, 491, 180, 18),
+    "cause":          (368, 642, 280, 17),
+    "injuries":       (370, 702, 300, 15),
+    "location":       (370, 868, 300, 15),
+    "game_date_time": (370, 925, 240, 15),
 }
 
-# Death-count box (the big number area) — left/top/right/bottom.
-_COUNT_BOX = (850, 290, 1080, 468)
+# Death count: the big total number sits centred on the blood splatter; the
+# white circle placeholder is inpainted away first.
+_COUNT_CENTER = (949, 368)
+_COUNT_MAX_W = 190          # horizontal room for the big number
+_COUNT_MAX_SIZE = 76        # largest font for the big number
+
+# Three stat boxes: box -> (centre_x, count_y). The count replaces the dot.
+_STAT_BOXES = {
+    "today":    (820, 511),
+    "week":     (957, 511),
+    "all_time": (1098, 511),
+}
+_STAT_SIZE = 18             # font size for the box counts
 
 # Paper-doll body-part marker positions (image pixel coordinates).
 # The doll faces the reader, so the character's LEFT side is on the viewer's
 # RIGHT (higher x) and the character's RIGHT side on the viewer's LEFT.
 _BODY_PARTS: Dict[str, Tuple[int, int]] = {
-    "head":        (876, 658),
-    "neck":        (876, 688),
-    "torso_upper": (876, 725),
-    "torso_lower": (876, 800),
-    "groin":       (876, 852),
-    "upperarm_l":  (917, 725),   # character's left arm → viewer's right
-    "forearm_l":   (930, 775),
-    "hand_l":      (946, 815),
-    "upperarm_r":  (830, 725),   # character's right arm → viewer's left
-    "forearm_r":   (818, 775),
-    "hand_r":      (807, 815),
-    "leg_l":       (905, 915),
-    "foot_l":      (906, 958),
-    "leg_r":       (843, 915),
-    "foot_r":      (838, 958),
+    "head":        (842, 667),
+    "neck":        (842, 699),
+    "torso_upper": (840, 760),
+    "torso_lower": (840, 820),
+    "groin":       (840, 860),
+    "upperarm_l":  (880, 745),   # character's left arm → viewer's right
+    "forearm_l":   (896, 790),
+    "hand_l":      (905, 818),
+    "upperarm_r":  (801, 745),   # character's right arm → viewer's left
+    "forearm_r":   (783, 790),
+    "hand_r":      (770, 818),
+    "leg_l":       (868, 915),
+    "foot_l":      (872, 965),
+    "leg_r":       (809, 915),
+    "foot_r":      (803, 965),
 }
 
-# Injury icons live in the template's legend (bottom-right "Injury Overview").
-# Each condition maps to one of the four legend icons, which we crop out of the
-# template and paste onto the paper doll at the matching body part.
+# Injury icons live in the template's legend (right of the paper doll). Each
+# condition maps to one legend icon, which we crop out of the template and paste
+# onto the paper doll at the matching body part.
 _ICON_SOURCES = {
-    "bleeding":  (988, 632, 1024, 682),   # red droplet
-    "cut":       (985, 690, 1033, 743),   # 3 deep-red slanted lines
-    "scratched": (987, 754, 1028, 801),   # 3 light-red lines
-    "bitten":    (987, 811, 1032, 859),   # bite mark
+    "bleeding":  (970, 647, 1003, 692),   # red droplet
+    "cut":       (965, 691, 1010, 738),   # 3 deep-red slanted lines
+    "scratched": (967, 741, 1004, 781),   # 3 light-red lines
+    "bitten":    (967, 786, 1007, 827),   # bite mark
+    "bruised":   (970, 830, 1000, 861),   # red circle
+    "fractured": (965, 869, 1003, 905),   # bone
 }
 
 # Injury condition -> legend icon key.
@@ -73,8 +89,34 @@ _CONDITION_ICONS = {
     "bitten":     "bitten",
     "bleeding":   "bleeding",
     "deep wound": "cut",
+    "deepwound":  "cut",
     "scratched":  "scratched",
     "cut":        "cut",
+    "laceration": "cut",
+    "bruised":    "bruised",
+    "bruise":     "bruised",
+    "fractured":  "fractured",
+    "fracture":   "fractured",
+    "broken bone": "fractured",
+}
+
+# Human-readable labels for the parsed body-part keys (for the injuries text).
+_PART_LABELS = {
+    "head":        "Head",
+    "neck":        "Neck",
+    "torso_upper": "Upper torso",
+    "torso_lower": "Lower torso",
+    "groin":       "Groin",
+    "upperarm_l":  "Left upper arm",
+    "forearm_l":   "Left forearm",
+    "hand_l":      "Left hand",
+    "upperarm_r":  "Right upper arm",
+    "forearm_r":   "Right forearm",
+    "hand_r":      "Right hand",
+    "leg_l":       "Left leg",
+    "foot_l":      "Left foot",
+    "leg_r":       "Right leg",
+    "foot_r":      "Right foot",
 }
 
 _ICON_SIZE = 14  # marker height on the paper doll (px)
@@ -83,7 +125,7 @@ _icons_cache: Optional[Dict[str, Image.Image]] = None
 
 
 def _load_icons() -> Dict[str, Image.Image]:
-    """Crop the four injury icons out of the template legend (transparent bg)."""
+    """Crop the six injury icons out of the template legend (transparent bg)."""
     global _icons_cache
     if _icons_cache is not None:
         return _icons_cache
@@ -96,7 +138,8 @@ def _load_icons() -> Dict[str, Image.Image]:
             for x in range(icon.width):
                 r, g, b, _a = ip[x, y]
                 # Keep red-dominant icon pixels and bright white (bite-mark
-                # teeth); make the dark card background transparent.
+                # teeth / bone highlights); make the dark card background
+                # transparent.
                 if (r > 40 and r > g * 1.2 and r > b * 1.2) or (r > 150 and g > 150 and b > 150):
                     ip[x, y] = (r, g, b, 255)
                 else:
@@ -109,17 +152,20 @@ def _load_icons() -> Dict[str, Image.Image]:
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(_FONT_PATH), size)
+    font = ImageFont.truetype(str(_FONT_PATH), size)
+    try:
+        font.set_variation_by_axes([700])  # Bold
+    except Exception:
+        pass
+    return font
 
 
 def _clear_white_text(img: Image.Image, box: tuple) -> None:
-    """Inpaint white placeholder text in `box` with the local card background.
+    """Inpaint white pixels in `box` with the local background.
 
-    The `{death count}` placeholder is thick distressed-white text over the red
-    splatter. A median filter is too weak for it, so we do a horizontal scanline
-    fill: each run of white pixels is replaced with an interpolation of the
-    nearest non-white pixel to its left and right, which reconstructs the
-    splatter reasonably.
+    Each run of white pixels on a row is replaced with an interpolation of the
+    nearest non-white pixel to its left and right, reconstructing the splatter /
+    background underneath a ghost placeholder.
     """
     l, t, r, b = box
     region = img.crop(box).convert("RGB")
@@ -164,14 +210,14 @@ def _clear_white_text(img: Image.Image, box: tuple) -> None:
 
 def _fit_number(draw: ImageDraw.ImageDraw, text: str, max_width: int,
                 start_size: int) -> ImageFont.FreeTypeFont:
-    """Pick the largest font (down to 24) that keeps `text` within `max_width`."""
+    """Pick the largest font (down to 20) that keeps `text` within `max_width`."""
     size = start_size
-    while size > 24:
+    while size > 20:
         font = _font(size)
         if draw.textlength(text, font=font) <= max_width:
             return font
         size -= 4
-    return _font(24)
+    return _font(20)
 
 
 def _truncate(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
@@ -185,12 +231,18 @@ def _truncate(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str
 
 
 def _normalize_part(name: str) -> Optional[str]:
-    """Map a Project Zomboid BodyPartType name to a `_BODY_PARTS` key."""
-    n = name.strip().lower().replace(" ", "")
+    """Map a Project Zomboid BodyPartType name to a `_BODY_PARTS` key.
+
+    Accepts the enum-style names the Death Log mod emits (``Hand_L``,
+    ``ForeArm_R``, ``UpperLeg_L`` …) as well as human phrases (``Left hand``,
+    ``right forearm``). ``Hand_L`` == left hand, and on the doll the character's
+    left is the viewer's right (handled by `_BODY_PARTS` coordinates).
+    """
+    n = (name or "").strip().lower().replace(" ", "").replace("-", "").replace(".", "")
     if not n:
         return None
-    left = ("left" in n) or n.endswith("_l")
-    right = ("right" in n) or n.endswith("_r")
+    left = n.endswith("_l") or n.startswith("left") or "left" in n
+    right = n.endswith("_r") or n.startswith("right") or "right" in n
 
     if "head" in n:
         return "head"
@@ -198,17 +250,17 @@ def _normalize_part(name: str) -> Optional[str]:
         return "neck"
     if "groin" in n:
         return "groin"
-    if "torso" in n or "back" in n:
-        return "torso_lower" if "lower" in n else "torso_upper"
+    if "torso" in n or "back" in n or "chest" in n or "stomach" in n:
+        return "torso_lower" if ("lower" in n or "stomach" in n) else "torso_upper"
     if "hand" in n:
         return "hand_l" if left else ("hand_r" if right else None)
     if "forearm" in n or "fore" in n:
         return "forearm_l" if left else ("forearm_r" if right else None)
-    if "arm" in n:
+    if "arm" in n or "shoulder" in n:
         return "upperarm_l" if left else ("upperarm_r" if right else None)
     if "foot" in n:
         return "foot_l" if left else ("foot_r" if right else None)
-    if any(k in n for k in ("shin", "thigh", "lowerleg", "upperleg", "leg")):
+    if any(k in n for k in ("shin", "thigh", "lowerleg", "upperleg", "leg", "knee")):
         return "leg_l" if left else ("leg_r" if right else None)
     return None
 
@@ -232,16 +284,46 @@ def _parse_injuries(injuries: str) -> List[Tuple[str, List[str]]]:
     return result
 
 
+def _humanize_injuries(injuries: str) -> str:
+    """Rewrite `Hand_L: Fractured` -> `Left hand: Fractured` for the text slot."""
+    raw = (injuries or "").strip()
+    if not raw or raw.lower() in ("none", "n/a", "-"):
+        return raw or ""
+    parts: List[str] = []
+    for seg in raw.split(";"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        part, _, conds = seg.partition(":")
+        key = _normalize_part(part)
+        label = _PART_LABELS.get(key, part.strip()) if key else part.strip()
+        conds = conds.strip()
+        parts.append(f"{label}: {conds}" if conds else label)
+    return "; ".join(parts)
+
+
 def _draw_centered(draw: ImageDraw.ImageDraw, center: Tuple[int, int],
                    text: str, font, fill) -> None:
     draw.text(center, text, font=font, fill=fill, anchor="mm")
+
+
+def _draw_stat_boxes(draw: ImageDraw.ImageDraw, img: Image.Image,
+                     counts: Dict[str, int]) -> None:
+    """Replace each stat-box dot with its count number."""
+    font = _font(_STAT_SIZE)
+    for box, (cx, cy) in _STAT_BOXES.items():
+        value = str(counts.get(box, 0) or 0)
+        # Cover the placeholder dot (and room for the number) with the panel bg.
+        draw.rectangle([cx - 45, cy - 13, cx + 45, cy + 13], fill=_BG)
+        _draw_centered(draw, (cx, cy), value, font, _COUNT_TEXT)
 
 
 def render_death_card(data: Dict) -> Image.Image:
     """Render the death card from a dict of field values.
 
     Expected keys: survivor, character_name, infected, survival_time,
-    zombie_kills, cause, injuries, location, game_date_time, death_count.
+    zombie_kills, cause, injuries, location, game_date_time, death_count,
+    deaths_today, deaths_week.
     Returns a new PIL Image (the original template is never mutated).
     """
     img = Image.open(_CARD_PATH).convert("RGBA")
@@ -250,7 +332,8 @@ def render_death_card(data: Dict) -> Image.Image:
     # 1. Fill each value slot: cover the ghost placeholder, draw the value.
     for field, (x, y, max_w, size) in _SLOTS.items():
         value = str(data.get(field, "") or "").strip()
-        # Cover a generous box: the placeholder spans ~x..x+max_w and ~30px tall.
+        if field == "injuries":
+            value = _humanize_injuries(value)
         cover_h = 34 if size >= 17 else 28
         draw.rectangle([x - 4, y - 6, x + max_w + 8, y + cover_h], fill=_BG)
         if not value:
@@ -259,15 +342,22 @@ def render_death_card(data: Dict) -> Image.Image:
         value = _truncate(draw, value, font, max_w)
         draw.text((x, y - 3), value, font=font, fill=_TEXT)
 
-    # 2. Death count (big number, transparent background — no box).
+    # 2. Big total death count on the splatter (transparent — no box).
     count = str(data.get("death_count", "") or "0").strip()
-    l, t, r, b = _COUNT_BOX
-    _clear_white_text(img, (l, t, r, b))
+    cx, cy = _COUNT_CENTER
+    _clear_white_text(img, (cx - 14, cy - 14, cx + 14, cy + 14))
     if count:
-        cfont = _fit_number(draw, count, r - l - 24, 88)
-        _draw_centered(draw, ((l + r) // 2, (t + b) // 2), count, cfont, _COUNT_TEXT)
+        cfont = _fit_number(draw, count, _COUNT_MAX_W, _COUNT_MAX_SIZE)
+        _draw_centered(draw, (cx, cy), count, cfont, _COUNT_TEXT)
 
-    # 3. Injury markers on the paper doll (legend icons).
+    # 3. Three stat boxes: TODAY / THIS WEEK / ALL TIME.
+    _draw_stat_boxes(draw, img, {
+        "today": data.get("deaths_today", 0),
+        "week": data.get("deaths_week", 0),
+        "all_time": data.get("death_count", 0),
+    })
+
+    # 4. Injury markers on the paper doll (legend icons).
     icons = _load_icons()
     spacing = _ICON_SIZE + 3
     for key, conds in _parse_injuries(str(data.get("injuries", "") or "")):
@@ -279,7 +369,6 @@ def render_death_card(data: Dict) -> Image.Image:
             icon = icons.get(_CONDITION_ICONS.get(cond, ""))
             if icon is None:
                 continue  # unknown condition — no icon to draw
-            # Stack multiple conditions on the same part vertically, centred.
             cy = pos[1] + (i - (n - 1) / 2) * spacing
             px = pos[0] - icon.width // 2
             py = int(cy) - icon.height // 2

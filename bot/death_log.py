@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands, tasks
 
 import aegis_stats
+import death_store
 import sftp_client
 from death_card import render_death_card
 
@@ -111,6 +112,12 @@ class DeathLogCog(commands.Cog):
         # flushes at most once a minute, so the just-detected death usually
         # isn't on disk yet — add 1.
         death_count = await aegis_stats.get_field(self.bot, survivor, "deaths", force=True) + 1
+
+        # Record this death for the day/week counts (all-time total stays Aegis's).
+        death_store.record_death(survivor, game_date_time)
+        deaths_today = death_store.count_today()
+        deaths_week = death_store.count_week()
+
         if not self.bot.features.is_enabled("deaths"):
             print(f"[DeathLog] Death -> {survivor} (#{death_count}) (notifications disabled)")
             return
@@ -145,6 +152,8 @@ class DeathLogCog(commands.Cog):
             "location": position,
             "game_date_time": game_date_time,
             "death_count": death_count,
+            "deaths_today": deaths_today,
+            "deaths_week": deaths_week,
         }
 
         try:
