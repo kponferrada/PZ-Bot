@@ -37,6 +37,12 @@ _SLOTS = {
     "game_date_time": (401, 1030, 240, 15),
 }
 
+# Injuries wrap onto multiple lines so long lists fit instead of truncating.
+# The block shrinks its font until everything fits the "CAUSE OF DEATH &
+# INJURIES" panel (which ends just above the "LOCATION & DATE" header ~y 874).
+_INJURIES_MAX_H = 90         # vertical px available for the injuries block
+_INJURIES_MIN_SIZE = 11      # smallest font before we give up and truncate
+
 # Death count: the big total number sits centred on the blood splatter; the
 # white circle placeholder is inpainted away first.
 _COUNT_CENTER = (1072, 393)
@@ -322,6 +328,50 @@ def _humanize_injuries(injuries: str) -> str:
     return "; ".join(parts)
 
 
+def _wrap_injuries(draw: ImageDraw.ImageDraw, text: str, max_w: int):
+    """Wrap injuries into (lines, font, line_height) that fit the injuries block.
+
+    Starts at the slot's base font size and shrinks it until the wrapped lines
+    fit within `_INJURIES_MAX_H`, down to `_INJURIES_MIN_SIZE`. Lines break at
+    '; ' boundaries so each injury stays intact; if even the smallest font is
+    still too long, the last line is truncated with an ellipsis.
+    """
+    segments = [s.strip() for s in (text or "").split(";") if s.strip()]
+
+    def _lines_for(size: int):
+        font = _font(size)
+        lh = size + 3
+        lines: List[str] = []
+        cur = ""
+        for seg in segments:
+            cand = f"{cur}; {seg}" if cur else seg
+            if draw.textlength(cand, font=font) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = seg
+        if cur:
+            lines.append(cur)
+        return lines, font, lh
+
+    base = _SLOTS["injuries"][3]
+    for size in range(base, _INJURIES_MIN_SIZE - 1, -1):
+        lines, font, lh = _lines_for(size)
+        if len(lines) * lh <= _INJURIES_MAX_H:
+            return lines, font, lh
+
+    # Smallest font still overflows — truncate the last line to fit.
+    lines, font, lh = _lines_for(_INJURIES_MIN_SIZE)
+    max_lines = max(1, _INJURIES_MAX_H // lh)
+    lines = lines[:max_lines]
+    last = lines[-1]
+    while last and draw.textlength(last + "…", font=font) > max_w:
+        last = last[:-1]
+    lines[-1] = last + "…"
+    return lines, font, lh
+
+
 def _draw_centered(draw: ImageDraw.ImageDraw, center: Tuple[int, int],
                    text: str, font, fill) -> None:
     draw.text(center, text, font=font, fill=fill, anchor="mm")
@@ -358,9 +408,15 @@ def render_death_card(data: Dict) -> Image.Image:
         draw.rectangle([x - 4, y - 6, x + max_w + 8, y + cover_h], fill=_BG)
         if not value:
             continue
-        font = _font(size)
-        value = _truncate(draw, value, font, max_w)
-        draw.text((x, y - 3), value, font=font, fill=_TEXT)
+        if field == "injuries":
+            # Wrap long injury lists onto multiple lines instead of truncating.
+            lines, ifont, lh = _wrap_injuries(draw, value, max_w)
+            for i, line in enumerate(lines):
+                draw.text((x, y - 3 + i * lh), line, font=ifont, fill=_TEXT)
+        else:
+            font = _font(size)
+            value = _truncate(draw, value, font, max_w)
+            draw.text((x, y - 3), value, font=font, fill=_TEXT)
 
     # 2. Big total death count on the splatter (transparent — no box).
     count = str(data.get("death_count", "") or "0").strip()
