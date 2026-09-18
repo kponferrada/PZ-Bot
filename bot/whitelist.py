@@ -36,12 +36,15 @@ from __future__ import annotations
 
 import csv
 import datetime
+import sqlite3
 import uuid
 from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+import sftp_client
 
 _DEFAULT_CSV = "whitelist_requests.csv"
 
@@ -596,6 +599,98 @@ class WhitelistCog(commands.Cog):
 
         return "", "; ".join(cmds)
 
+    async def _read_server_whitelist(self) -> list:
+        """Read the server's `whitelist` table (username/steamid/role) over SFTP.
+
+        Returns a list of dicts `{username, steamid, role}`. `role` is the PZ
+        access level (7 = admin, 2 = player).
+        """
+        sftp = sftp_client.get()
+        db = getattr(self.bot.config, "SFTP_SERVER_DB", "") or "/server-data/db/pzserver.db"
+        try:
+            data = await sftp.read_bytes(db)
+        except sftp_client.SftpError as e:
+            print(f"[Whitelist] Cannot read whitelist DB {db}: {e}")
+            return []
+        rows: list = []
+        try:
+            conn = sqlite3.connect(":memory:")
+            conn.deserialize(data)
+            conn.row_factory = sqlite3.Row
+            for r in conn.execute("SELECT username, steamid, role FROM whitelist"):
+                rows.append({
+                    "username": (r["username"] or "").strip(),
+                    "steamid": (r["steamid"] or "").strip() if r["steamid"] is not None else "",
+                    "role": r["role"] if r["role"] is not None else 2,
+                })
+            conn.close()
+        except Exception as e:
+            print(f"[Whitelist] Failed to parse whitelist table: {e}")
+        return rows
+
+    async def _lookup_user(self, username: str) -> dict | None:
+        for row in await self._read_server_whitelist():
+            if row["username"].lower() == (username or "").strip().lower():
+                return row
+        return None
+
+    async def _modify_whitelist_user_rcon(self, username: str, steam_id: str,
+                                          new_username: str = "", new_password: str = "",
+                                          new_steam_id: str = "") -> tuple[str, str]:
+        """Modify a whitelist account over RCON.
+
+        `username` + `steam_id` identify the account; pass the field(s) to change
+        as `new_username` / `new_password` / `new_steam_id` (empty = unchanged).
+        A rename or password change is a remove-then-re-add (``adduser`` won't
+        overwrite, and the stored password is a one-way hash). Returns
+        `(error, rcon_commands)`.
+        """
+        rcon = self.bot.rcon
+        if not rcon.is_server_online():
+            detail = getattr(rcon, "last_error", "") or "connection failed"
+            return f"server is offline / RCON unreachable — {detail}", ""
+
+        old_u = username.replace('"', "").strip()
+        old_s = (steam_id or "").replace('"', "").strip()
+        new_u = (new_username or username).replace('"', "").strip()
+        new_s = (new_steam_id or steam_id or "").replace('"', "").strip()
+        new_p = (new_password or "").replace('"', "").strip()
+
+        rename = bool(new_username) and new_u != old_u
+        repass = bool(new_password)
+
+        cmds: list = []
+        if rename or repass:
+            if rename and not new_p:
+                return ("changing the username requires a new password — the stored "
+                        "password is hashed and can't be reused", "")
+            if old_u:
+                cmds.append(f'removeuser "{old_u}"')
+                await rcon.send_command(cmds[-1])
+            cmds.append(f'adduser "{new_u}" "{new_p}"')
+            resp = await rcon.send_command(cmds[-1])
+            if resp is not None:
+                low = resp.lower()
+                if not ("created" in low or "added" in low):
+                    return f"`adduser` failed: {resp.strip()}", "; ".join(cmds)
+            elif rcon.last_error:
+                return f"`adduser` failed: {rcon.last_error}", "; ".join(cmds)
+
+        # SteamID: after a rename/repass the re-created account is unbound, so
+        # (re)bind it; for a pure SteamID change swap old -> new.
+        if rename or repass:
+            if new_s:
+                cmds.append(f'addSteamID "{new_s}"')
+                await rcon.send_command(cmds[-1])
+        elif new_s and new_s != old_s:
+            if old_s:
+                cmds.append(f'removeSteamID "{old_s}"')
+                await rcon.send_command(cmds[-1])
+            cmds.append(f'addSteamID "{new_s}"')
+            await rcon.send_command(cmds[-1])
+
+        return "", "; ".join(cmds)
+
     # ---- request handling ----------------------------------------------------
 
     async def handle_request(self, interaction: discord.Interaction,
@@ -793,6 +888,156 @@ class WhitelistCog(commands.Cog):
     )
     async def cmd_whitelist(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(WhitelistModal(self))
+
+    # ---- manual whitelist management ----------------------------------------
+
+    @app_commands.command(
+        name="whitelistadd",
+        description="Manually add a user to the whitelist (username + password + SteamID).",
+    )
+    @app_commands.describe(
+        username="In-game username",
+        password="Account password",
+        steamid="17-digit SteamID64",
+    )
+    async def cmd_whitelist_add(self, interaction: discord.Interaction,
+                                username: str, password: str, steamid: str) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        error = _validate_steam_id(steamid)
+        if error:
+            await interaction.response.send_message(f"\u274c {error}", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        err, _code = await self._add_whitelist_user_rcon(username, password, steamid)
+        if err:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Add Failed",
+                description=f"Could not whitelist **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"\u2705 Added **{username}** (SteamID `{steamid}`) to the whitelist.", ephemeral=True)
+        print(f"[Whitelist] Manually added {username} (SteamID {steamid}) by {interaction.user}")
+
+    @app_commands.command(
+        name="whitelistmodify",
+        description="Modify a whitelisted user (password / username / SteamID).",
+    )
+    @app_commands.describe(
+        username="Current username",
+        steamid="Current SteamID",
+        new_username="New username (leave empty to keep)",
+        new_password="New password (leave empty to keep)",
+        new_steamid="New SteamID (leave empty to keep)",
+    )
+    async def cmd_whitelist_modify(self, interaction: discord.Interaction,
+                                   username: str, steamid: str,
+                                   new_username: str = None,
+                                   new_password: str = None,
+                                   new_steamid: str = None) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        if not (new_username or new_password or new_steamid):
+            await interaction.response.send_message(
+                "\u274c Provide at least one field to modify "
+                "(`new_username`, `new_password`, or `new_steamid`).", ephemeral=True)
+            return
+        if new_steamid:
+            error = _validate_steam_id(new_steamid)
+            if error:
+                await interaction.response.send_message(f"\u274c {error}", ephemeral=True)
+                return
+        await interaction.response.defer(ephemeral=True)
+        err, _code = await self._modify_whitelist_user_rcon(
+            username, steamid, new_username or "", new_password or "", new_steamid or "")
+        if err:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Modify Failed",
+                description=f"Could not modify **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        changed = []
+        if new_username:
+            changed.append(f"username \u2192 `{new_username}`")
+        if new_password:
+            changed.append("password")
+        if new_steamid:
+            changed.append(f"SteamID \u2192 `{new_steamid}`")
+        await interaction.followup.send(
+            f"\u2705 Modified **{username}** ({', '.join(changed)}).", ephemeral=True)
+        print(f"[Whitelist] Modified {username} by {interaction.user}: {', '.join(changed)}")
+
+    @app_commands.command(
+        name="whitelistlist",
+        description="List all whitelisted users.",
+    )
+    async def cmd_whitelist_list(self, interaction: discord.Interaction) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to view the whitelist.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        users = await self._read_server_whitelist()
+        if not users:
+            await interaction.followup.send("No whitelisted users found.", ephemeral=True)
+            return
+        users = sorted(users, key=lambda u: u["username"].lower())
+        lines = []
+        for u in users:
+            role = "Admin" if u.get("role", 2) >= 7 else "Player"
+            sid = u.get("steamid", "") or "\u2014"
+            lines.append(f"**{u['username']}** \u00b7 SteamID `{sid}` \u00b7 {role}")
+        embeds = []
+        for i in range(0, len(lines), 20):
+            embeds.append(discord.Embed(
+                title=f"\U0001f4dd Whitelisted Users ({len(users)})",
+                description="\n".join(lines[i:i + 20]),
+                colour=discord.Colour.blue(),
+            ))
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
+
+    @app_commands.command(
+        name="whitelistremove",
+        description="Remove a user from the whitelist by username.",
+    )
+    @app_commands.describe(
+        username="Username to remove",
+        reason="Reason for removal (optional)",
+    )
+    async def cmd_whitelist_remove(self, interaction: discord.Interaction,
+                                   username: str, reason: str = None) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        user = await self._lookup_user(username)
+        if user is None:
+            await interaction.followup.send(
+                f"\u274c User **{username}** was not found in the whitelist.", ephemeral=True)
+            return
+        steamid = user.get("steamid", "")
+        err, _code = await self._remove_whitelist_user_rcon(username, steamid)
+        if err:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Remove Failed",
+                description=f"Could not remove **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        msg = f"\U0001f5d1\ufe0f Removed **{username}** from the whitelist."
+        if reason:
+            msg += f"\nReason: {reason}"
+        await interaction.followup.send(msg, ephemeral=True)
+        print(f"[Whitelist] Removed {username} (SteamID {steamid or '-'}) "
+              f"by {interaction.user}; reason: {reason or '-'}")
 
 
 async def setup(bot: commands.Bot):
