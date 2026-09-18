@@ -49,7 +49,7 @@ _STAT_BOXES = {
     "today": (965, 535),
     "week":  (1229, 535),
 }
-_STAT_SIZE = 16             # font size for the box counts
+_STAT_SIZE = 24             # font size for the box counts (matches the card height)
 
 # Paper-doll body-part marker positions (image pixel coordinates).
 # The doll faces the reader, so the character's LEFT side is on the viewer's
@@ -75,12 +75,14 @@ _BODY_PARTS: Dict[str, Tuple[int, int]] = {
 # Injury icons live in the template's legend (right of the paper doll). Each
 # condition maps to one legend icon, which we crop out of the template and paste
 # onto the paper doll at the matching body part.
+# NOTE: x_start was 1120, which clipped the left edge of every icon (the
+# fractured bone lost half its width). The icons actually start at x≈1098.
 _ICON_SOURCES = {
-    "bleeding":  (1120, 708, 1147, 757),   # red droplet
-    "cut":       (1120, 768, 1158, 820),   # 3 deep-red slanted lines
-    "scratched": (1120, 834, 1150, 881),   # 3 light-red lines
-    "bitten":    (1120, 900, 1152, 948),   # bite mark
-    "fractured": (1120, 971, 1148, 1007),  # bone
+    "bleeding":  (1095, 708, 1152, 757),   # red droplet
+    "cut":       (1095, 768, 1160, 820),   # 3 deep-red slanted lines
+    "scratched": (1095, 834, 1154, 881),   # 3 light-red lines
+    "bitten":    (1095, 900, 1156, 948),   # bite mark
+    "fractured": (1095, 971, 1152, 1007),  # bone
 }
 
 # Injury condition -> legend icon key.
@@ -92,6 +94,8 @@ _CONDITION_ICONS = {
     "scratched":  "scratched",
     "cut":        "cut",
     "laceration": "cut",
+    "burn":       "cut",
+    "burned":     "cut",
     "fractured":  "fractured",
     "fracture":   "fractured",
     "broken bone": "fractured",
@@ -116,7 +120,7 @@ _PART_LABELS = {
     "foot_r":      "Right foot",
 }
 
-_ICON_SIZE = 14  # marker height on the paper doll (px)
+_ICON_SIZE = 16  # marker height on the paper doll (px)
 
 _icons_cache: Optional[Dict[str, Image.Image]] = None
 
