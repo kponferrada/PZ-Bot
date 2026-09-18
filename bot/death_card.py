@@ -88,10 +88,12 @@ _ICON_SOURCES = {
 # Injury condition -> legend icon key.
 _CONDITION_ICONS = {
     "bitten":     "bitten",
+    "bite":       "bitten",
     "bleeding":   "bleeding",
     "deep wound": "cut",
     "deepwound":  "cut",
     "scratched":  "scratched",
+    "scratch":    "scratched",
     "cut":        "cut",
     "laceration": "cut",
     "burn":       "cut",
@@ -266,6 +268,24 @@ def _normalize_part(name: str) -> Optional[str]:
     return None
 
 
+def _split_injury_segment(seg: str) -> Tuple[str, str]:
+    """Split one `Injuries:` segment into (body_part, conditions_string).
+
+    The Death Log mod has emitted two formats over time:
+      old (raw name + colon):   "Hand_R: Bleeding, Deep Wound"
+      new (friendly + parens):  "Left Hand (Bleeding, Deep Wound)"
+    Both are handled here.
+    """
+    seg = (seg or "").strip()
+    if "(" in seg:
+        part, _, rest = seg.partition("(")
+        return part.strip(), rest.rstrip(")").strip()
+    if ":" in seg:
+        part, _, conds = seg.partition(":")
+        return part.strip(), conds.strip()
+    return seg, ""
+
+
 def _parse_injuries(injuries: str) -> List[Tuple[str, List[str]]]:
     """Parse `Injuries:` text into [(body_part_key, [condition, ...]), ...]."""
     raw = (injuries or "").strip()
@@ -276,7 +296,7 @@ def _parse_injuries(injuries: str) -> List[Tuple[str, List[str]]]:
         seg = seg.strip()
         if not seg:
             continue
-        part, _, conds = seg.partition(":")
+        part, conds = _split_injury_segment(seg)
         key = _normalize_part(part)
         if not key:
             continue
@@ -286,7 +306,7 @@ def _parse_injuries(injuries: str) -> List[Tuple[str, List[str]]]:
 
 
 def _humanize_injuries(injuries: str) -> str:
-    """Rewrite `Hand_L: Fractured` -> `Left hand: Fractured` for the text slot."""
+    """Rewrite `Hand_L: Fractured` / `Left Hand (Fracture)` -> `Left hand: Fracture`."""
     raw = (injuries or "").strip()
     if not raw or raw.lower() in ("none", "n/a", "-"):
         return raw or ""
@@ -295,10 +315,9 @@ def _humanize_injuries(injuries: str) -> str:
         seg = seg.strip()
         if not seg:
             continue
-        part, _, conds = seg.partition(":")
+        part, conds = _split_injury_segment(seg)
         key = _normalize_part(part)
         label = _PART_LABELS.get(key, part.strip()) if key else part.strip()
-        conds = conds.strip()
         parts.append(f"{label}: {conds}" if conds else label)
     return "; ".join(parts)
 
