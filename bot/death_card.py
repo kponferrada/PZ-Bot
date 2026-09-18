@@ -38,10 +38,10 @@ _SLOTS = {
 }
 
 # Injuries wrap onto multiple lines so long lists fit instead of truncating.
-# The block shrinks its font until everything fits the "CAUSE OF DEATH &
-# INJURIES" panel (which ends just above the "LOCATION & DATE" header ~y 874).
-_INJURIES_MAX_H = 90         # vertical px available for the injuries block
-_INJURIES_MIN_SIZE = 11      # smallest font before we give up and truncate
+# The block is limited to the "Injuries" field box height so it never spills
+# past the box bottom into the "LOCATION & DATE" section (~y 814).
+_INJURIES_MAX_H = 38         # vertical px for the injuries block (2 rows @15px)
+_INJURIES_MIN_SIZE = 12      # smallest font before we give up and truncate
 
 # Death count: the big total number sits centred on the blood splatter; the
 # white circle placeholder is inpainted away first.
