@@ -380,13 +380,45 @@ class RankSync(commands.Cog):
                                   colour=discord.Colour.greyple())
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="listlinks", description="List all Discord-to-PZ username links.")
+    async def cmd_listlinks(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not self._links:
+            await interaction.followup.send(embed=discord.Embed(
+                title="No Links",
+                description="No Discord-to-PZ username links exist yet.",
+                colour=discord.Colour.greyple(),
+            ), ephemeral=True)
+            return
+
+        guild = self.bot.get_guild(self.bot.config.GUILD_ID)
+        rows = []
+        for discord_id, pz_username in self._links.items():
+            member = guild.get_member(int(discord_id)) if guild else None
+            rank = get_rank_from_roles(member) if member else 0
+            rows.append((pz_username.lower(), discord_id, pz_username, member, rank))
+        rows.sort(key=lambda r: r[0])
+
+        lines = []
+        for _, discord_id, pz_username, member, rank in rows:
+            discord_name = member.mention if member else f"`{discord_id}` (left server)"
+            display = RANK_DISPLAY.get(rank, str(rank))
+            lines.append(f"{discord_name} \u2192 **{pz_username}** \u2014 {display}")
+
+        embed = discord.Embed(
+            title=f"\U0001f517 Discord \u2194 PZ Links ({len(rows)})",
+            description="\n".join(lines),
+            colour=discord.Colour.blue(),
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     from main import require_role, config
 
     cog = RankSync(bot)
 
-    for cmd_name in ("cmd_setrank", "cmd_syncranks", "cmd_linkname", "cmd_unlinkname"):
+    for cmd_name in ("cmd_setrank", "cmd_syncranks", "cmd_linkname", "cmd_unlinkname", "cmd_listlinks"):
         cmd = getattr(cog, cmd_name)
         setattr(cog, cmd_name, require_role(config.DEFAULT_ROLE)(cmd))
 
