@@ -63,6 +63,58 @@ def get_rank_from_roles(member: discord.Member) -> int:
     return highest
 
 
+_LINKS_PAGE_SIZE = 20  # links per page in /listlinks
+
+
+class LinksPaginator(discord.ui.View):
+    """Previous/Next pagination for the /listlinks embed (author-only)."""
+
+    def __init__(self, pages: list, author_id: int):
+        super().__init__(timeout=180)
+        self.pages = pages
+        self.author_id = author_id
+        self.current = 0
+
+        self.prev_button = discord.ui.Button(label="\u25c0", style=discord.ButtonStyle.secondary)
+        self.prev_button.callback = self._on_prev
+        self.add_item(self.prev_button)
+
+        self.counter_button = discord.ui.Button(label="1 / 1", style=discord.ButtonStyle.secondary, disabled=True)
+        self.add_item(self.counter_button)
+
+        self.next_button = discord.ui.Button(label="\u25b6", style=discord.ButtonStyle.secondary)
+        self.next_button.callback = self._on_next
+        self.add_item(self.next_button)
+
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self.prev_button.disabled = self.current == 0
+        self.next_button.disabled = self.current >= len(self.pages) - 1
+        self.counter_button.label = f"{self.current + 1} / {len(self.pages)}"
+
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "\u274c This isn't your menu.", ephemeral=True)
+            return False
+        return True
+
+    async def _on_prev(self, interaction: discord.Interaction) -> None:
+        if not await self._guard(interaction):
+            return
+        self.current = max(0, self.current - 1)
+        self._refresh()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    async def _on_next(self, interaction: discord.Interaction) -> None:
+        if not await self._guard(interaction):
+            return
+        self.current = min(len(self.pages) - 1, self.current + 1)
+        self._refresh()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+
 class RankSync(commands.Cog):
     """Syncs Discord roles to in-game PZ ranks via a Lua data file over SFTP."""
 
@@ -405,12 +457,21 @@ class RankSync(commands.Cog):
             display = RANK_DISPLAY.get(rank, str(rank))
             lines.append(f"{discord_name} \u2192 **{pz_username}** \u2014 {display}")
 
-        embed = discord.Embed(
-            title=f"\U0001f517 Discord \u2194 PZ Links ({len(rows)})",
-            description="\n".join(lines),
-            colour=discord.Colour.blue(),
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # Paginate (in case the link list grows beyond a single embed).
+        pages = []
+        for i in range(0, len(lines), _LINKS_PAGE_SIZE):
+            chunk = lines[i:i + _LINKS_PAGE_SIZE]
+            pages.append(discord.Embed(
+                title=f"\U0001f517 Discord \u2194 PZ Links ({len(rows)})",
+                description="\n".join(chunk),
+                colour=discord.Colour.blue(),
+            ))
+
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            view = LinksPaginator(pages, interaction.user.id)
+            await interaction.followup.send(embed=pages[0], view=view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
