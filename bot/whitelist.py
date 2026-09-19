@@ -491,6 +491,13 @@ class WhitelistCog(commands.Cog):
                 f"Welcome to the barangay! Your account is now on the server whitelist.\n\n"
                 f"- **Username:** `{username}`\n"
                 f"- **SteamID:** `{steam_id}`\n\n"
+                f"Before you proceed further, we would like to remind you to check below channels and read through them to familiarize yourself with the server rules and guidelines:\n"
+                f"Rules: https://discord.com/channels/1541725057938882600/1541725891053363220 \n"
+                f"In-Game Rules: https://discord.com/channels/1541725057938882600/1547307029297635328 \n"
+                f"Modlist (Preferrably download from outside game before connecting): https://discord.com/channels/1541725057938882600/1541726944368926720 \n"
+                f"Performance guide: https://discord.com/channels/1541725057938882600/1550188547787595837 \n"
+                f"Server guides: https://discord.com/channels/1541725057938882600/1550134978216722494 \n"
+                f"Please note that some mods may require you to load it locally first then restarting Project Zomboid before joining. One sample is Desire body mod: https://steamcommunity.com/sharedfiles/filedetails/?id=3766704869 \n\n"
                 f"You can now join the server. See you in the apocalypse! \U0001f9df"
             ),
             colour=discord.Colour.green(),
