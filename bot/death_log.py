@@ -101,6 +101,17 @@ class DeathLogCog(commands.Cog):
         # Read both the current field names (post-rename) and the pre-rename
         # names, so deaths logged by an old mod build don't render as "Unknown".
         cause = d.get("cause of death") or d.get("death cause") or "Unknown"
+        # The Death Log mod now writes the PvP killer separately under
+        # "Last attacker" ("username / character name / steamid") instead of in
+        # "Cause of Death". Fold it back in so the notification names the killer.
+        attacker_raw = d.get("last attacker") or ""
+        if attacker_raw:
+            parts = [p.strip() for p in attacker_raw.split("/")]
+            username = parts[0] if len(parts) > 0 else ""
+            char_name = parts[1] if len(parts) > 1 else ""
+            if username:
+                killer = f"{username} ({char_name})" if char_name and char_name != username else username
+                cause = f"{cause} — by {killer}"
         injuries = d.get("injuries") or d.get("last injuries") or "None"
         survived = d.get("survival time") or d.get("survived time") or ""
         kills = d.get("zombie kills") or "0"
