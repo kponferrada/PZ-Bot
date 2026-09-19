@@ -48,10 +48,11 @@ def _direction_name(direction):
 class SiegeNightCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # Dedup sets (survive across bot restarts via seeding in before_loop).
+        # Dedup state (survive across bot restarts via seeding in before_loop).
         self._announced_warning_days: set[int] = set()   # eventDay
-        self._announced_active_sieges: set[int] = set()  # siegeCount
+        self._active_announced: bool = False             # current siege's start announced?
         self._announced_ended_sieges: set[int] = set()   # totalSiegesCompleted
+        self._last_wave_index: int = 0                   # last surge wave we announced (1-based)
         self._last_poller_key = None
 
     @staticmethod
@@ -122,21 +123,23 @@ class SiegeNightCog(commands.Cog):
                     print(f"[SiegeNight] Siege tonight announced: day {event_day}")
 
             elif phase == "active":
-                if siege_count not in self._announced_active_sieges:
-                    self._announced_active_sieges.add(siege_count)
-                    target = siege.get("targetZombies", 0)
-                    players = sched.get("playerCount", 0)
-                    direction = _direction_name(siege.get("lastDirection"))
-                    wave = siege.get("currentWaveIndex", 0)
-                    cur_phase = siege.get("currentPhase", "")
-                    spawned = siege.get("spawnedThisSiege", 0)
-                    # In-game red-alert (servermsg + alert sound) — fires once per siege.
-                    await self.bot.rcon.broadcast(
-                        "SIEGE NIGHT HAS BEGUN! Zombies are attacking. Hold the line!"
-                    )
+                target = siege.get("targetZombies", 0)
+                players = sched.get("playerCount", 0)
+                direction = _direction_name(siege.get("lastDirection"))
+                wave = siege.get("currentWaveIndex", 0)
+                total_waves = siege.get("totalWaves", 0)
+                cur_phase = siege.get("currentPhase", "")
+                spawned = siege.get("spawnedThisSiege", 0)
+
+                # Start notification — fires once per siege, on the phase transition
+                # into ACTIVE (robust across restarts and non-monotonic siegeCount).
+                if not self._active_announced:
+                    self._active_announced = True
                     desc = f"**{target}** zombies are descending on **{players}** survivor(s)."
                     if direction:
                         desc += f"\nHorde direction: **{direction}**."
+                    if total_waves:
+                        desc += f"\n**{total_waves}** surge waves incoming."
                     desc += "\n\nHold the line."
                     embed = discord.Embed(
                         title="\U0001f9df Siege Night Has Begun!",
@@ -155,8 +158,49 @@ class SiegeNightCog(commands.Cog):
                     if self.bot.features.is_enabled("siege"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Notification sent: active, siege={siege_count}")
+                    # In-game red-alert (servermsg + alert sound) — best-effort, after the
+                    # Discord message so a slow RCON can never suppress the notification.
+                    try:
+                        await self.bot.rcon.broadcast(
+                            "SIEGE NIGHT HAS BEGUN! Zombies are attacking. Hold the line!"
+                        )
+                    except Exception as e:
+                        print(f"[SiegeNight] Red-alert broadcast failed: {e}")
+
+                # Wave notification — fires once per new surge wave (wave 2+).
+                if wave > self._last_wave_index:
+                    self._last_wave_index = wave
+                    if wave >= 2 and cur_phase == "SURGE":
+                        wave_title = f"\U0001f30a Wave {wave}"
+                        if total_waves:
+                            wave_title += f"/{total_waves}"
+                        wave_embed = discord.Embed(
+                            title=wave_title,
+                            description="A new surge wave has begun. The horde intensifies.",
+                            colour=discord.Colour.orange(),
+                        )
+                        wave_intel = []
+                        if direction:
+                            wave_intel.append(f"Direction **{direction}**")
+                        if spawned:
+                            wave_intel.append(f"Spawned **{spawned}**")
+                        if wave_intel:
+                            wave_embed.add_field(
+                                name="\U0001f4a1 Intel",
+                                value=" · ".join(wave_intel),
+                                inline=False,
+                            )
+                        if self.bot.features.is_enabled("siege"):
+                            await self.bot.send_to_channel(
+                                channel, self.bot.config.SIEGE_ROLE_ID, wave_embed
+                            )
+                        print(f"[SiegeNight] Notification sent: wave {wave}/{total_waves}")
 
             elif phase in ("idle", "dawn"):
+                # Reset per-siege tracking once the siege is no longer active, so the
+                # next siege's start and waves are announced again.
+                self._active_announced = False
+                self._last_wave_index = 0
                 # "Ended" fires once when the completed count increments past
                 # what we've already announced.
                 if completed and completed not in self._announced_ended_sieges:
@@ -206,19 +250,21 @@ class SiegeNightCog(commands.Cog):
         try:
             status = await lua_bridge.read_siege_status()
             if status:
-                sched, _ = self._split_status(status)
+                sched, siege = self._split_status(status)
                 phase = sched.get("phase") or "idle"
                 event_day = sched.get("eventDay", 0)
-                siege_count = sched.get("siegeCount", 0)
                 completed = sched.get("totalSiegesCompleted", 0)
                 if phase == "warning" and event_day:
                     self._announced_warning_days.add(event_day)
                 if phase == "active":
-                    self._announced_active_sieges.add(siege_count)
+                    self._active_announced = True
+                    wave = siege.get("currentWaveIndex", 0)
+                    if wave:
+                        self._last_wave_index = wave
                 if completed:
                     self._announced_ended_sieges.add(completed)
                 print(f"[SiegeNight] Seeded dedup: phase={phase}, day={event_day}, "
-                      f"siege={siege_count}, completed={completed}")
+                      f"siege={sched.get('siegeCount', 0)}, completed={completed}")
         except Exception:
             pass
 
