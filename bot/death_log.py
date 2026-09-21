@@ -32,8 +32,8 @@ _DEATH_LOG_NAME = "player-death-logging.log"
 #   Gender: Male
 #   Profession: Unemployed
 #   Infected: true
-#   Cause of Death: Zombie
-#   Injuries: Torso: Bitten
+#   Cause of Death: Zombie - Shambler
+#   Injuries: Hand_L: Bleeding, Scratched, Cut
 #   Zombie Kills: 147
 #   Survival Time: 23 days, 5 hours
 #   Location: X: 12345, Y: 67890, Z: 0
@@ -101,9 +101,11 @@ class DeathLogCog(commands.Cog):
         # Read both the current field names (post-rename) and the pre-rename
         # names, so deaths logged by an old mod build don't render as "Unknown".
         cause = d.get("cause of death") or d.get("death cause") or "Unknown"
-        # The Death Log mod now writes the PvP killer separately under
-        # "Last attacker" ("username / character name / steamid") instead of in
-        # "Cause of Death". Fold it back in so the notification names the killer.
+        # The Death Log mod now writes the killer directly in "Cause of Death" as
+        # "Player - <username>" (PvP), "Zombie - <type>", or "Animal - <type>".
+        # The older separate "Last attacker" field ("username / character name /
+        # steamid") is kept as a backward-compat fallback for legacy log entries
+        # written by a pre-f41f2f3 build — new entries never populate it.
         attacker_raw = d.get("last attacker") or ""
         if attacker_raw:
             parts = [p.strip() for p in attacker_raw.split("/")]
