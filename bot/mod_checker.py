@@ -19,6 +19,7 @@ Source order (matching Jeeves):
 import os
 import re
 import json
+import asyncio
 from pathlib import Path
 
 import aiohttp
@@ -31,10 +32,24 @@ _KEYED_URL = "https://api.steampowered.com/IPublishedFileService/GetDetails/v1/"
 
 _APPID = "108600"
 
+# Steam's Web API is flaky with large batches — one request carrying 200+ ids
+# routinely times out (or returns an empty response), which made the checker
+# silently conclude "everything current". Chunk into small batches and retry
+# each on transient failure.
+_API_CHUNK_SIZE = 50           # Workshop ids per request
+_API_RETRIES = 3               # attempts per chunk
+_API_RETRY_BASE_DELAY = 2.0    # seconds, doubled per retry
+_API_INTER_CHUNK_DELAY = 1.0   # seconds between chunk requests
+
 # One flat "<id> { ... }" block. Non-greedy and brace-free inside, so it matches
 # each leaf block rather than swallowing the enclosing section.
 _BLOCK = r'"%s"\s*\{([^{}]*)\}'
 _KV = re.compile(r'"([A-Za-z_]+)"\s+"([^"]*)"')
+
+
+def _chunk(ids: list, size: int) -> list:
+    """Split a flat id list into sub-lists of at most `size` items."""
+    return [ids[i:i + size] for i in range(0, len(ids), size)]
 
 
 class ModChecker:
@@ -67,19 +82,39 @@ class ModChecker:
 
     async def _fetch_keyless(self, ids: list) -> dict:
         """Keyless lookup. Returns {id: {time, title, source}} for items it can
-        see; unlisted items (result != 1) are left out entirely."""
+        see; unlisted items (result != 1) are left out entirely.
+
+        Chunked into small batches and retried, because a single request carrying
+        hundreds of ids times out (or returns an empty response).
+        """
         if not ids:
             return {}
+        state = {}
+        for batch in _chunk(ids, _API_CHUNK_SIZE):
+            state.update(await self._fetch_keyless_batch(batch))
+            await asyncio.sleep(_API_INTER_CHUNK_DELAY)
+        return state
+
+    async def _fetch_keyless_batch(self, ids: list) -> dict:
         data = {"itemcount": str(len(ids)), "format": "json"}
         for i, item_id in enumerate(ids):
             data[f"publishedfileids[{i}]"] = item_id
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(_KEYLESS_URL, data=data,
-                                        timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    payload = await resp.json()
-        except Exception as e:
-            print(f"[ModCheck] Steam API error: {e}")
+        payload = None
+        for attempt in range(_API_RETRIES):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(_KEYLESS_URL, data=data,
+                                            timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        payload = await resp.json()
+                break
+            except Exception as e:
+                if attempt < _API_RETRIES - 1:
+                    await asyncio.sleep(_API_RETRY_BASE_DELAY * (2 ** attempt))
+                    continue
+                print(f"[ModCheck] Steam API error after {_API_RETRIES} tries: "
+                      f"{type(e).__name__}: {e}")
+                return {}
+        if payload is None:
             return {}
         state = {}
         for item in payload.get("response", {}).get("publishedfiledetails", []):
@@ -102,9 +137,22 @@ class ModChecker:
         a URL, request, or response body — an exception's string form can leak
         the key into logs and from there Discord. Status codes, exception CLASS
         names, and ids only. Keep it that way.
+
+        Chunked + retried: a single GET with hundreds of ids builds a huge query
+        string that Steam times out on.
         """
         if not ids or not self._key:
             return {}
+        out = {}
+        for batch in _chunk(ids, _API_CHUNK_SIZE):
+            out.update(await self._fetch_keyed_batch(batch))
+            await asyncio.sleep(_API_INTER_CHUNK_DELAY)
+        if out:
+            print(f"[ModCheck] keyed API resolved {len(out)} unlisted id(s): "
+                  f"{', '.join(sorted(out))}")
+        return out
+
+    async def _fetch_keyed_batch(self, ids: list) -> dict:
         params = {"key": self._key}
         for i, item_id in enumerate(ids):
             params[f"publishedfileids[{i}]"] = item_id
@@ -112,18 +160,26 @@ class ModChecker:
         params["includeadditionalpreviews"] = "false"
         params["includechildren"] = "false"
         out = {}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(_KEYED_URL, params=params,
-                                       timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    if resp.status != 200:
-                        print(f"[ModCheck] keyed API refused lookup "
-                              f"(HTTP {resp.status}); skipping unlisted ids.")
-                        return {}
-                    payload = await resp.json()
-        except Exception as e:
-            print(f"[ModCheck] keyed API error ({type(e).__name__}); "
-                  f"skipping unlisted ids.")
+        payload = None
+        for attempt in range(_API_RETRIES):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(_KEYED_URL, params=params,
+                                           timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status != 200:
+                            print(f"[ModCheck] keyed API refused lookup "
+                                  f"(HTTP {resp.status}); skipping unlisted ids.")
+                            return {}
+                        payload = await resp.json()
+                break
+            except Exception:
+                if attempt < _API_RETRIES - 1:
+                    await asyncio.sleep(_API_RETRY_BASE_DELAY * (2 ** attempt))
+                    continue
+                print(f"[ModCheck] keyed API error after {_API_RETRIES} tries; "
+                      f"skipping unlisted ids.")
+                return {}
+        if payload is None:
             return {}
         for item in payload.get("response", {}).get("publishedfiledetails", []):
             item_id = str(item.get("publishedfileid"))
@@ -141,9 +197,6 @@ class ModChecker:
                 "title": item.get("title") or f"Workshop item {item_id}",
                 "source": "api-keyed",
             }
-        if out:
-            print(f"[ModCheck] keyed API resolved {len(out)} unlisted id(s): "
-                  f"{', '.join(sorted(out))}")
         return out
 
     async def _fetch_state_from_manifest(self, ids: list) -> dict:
