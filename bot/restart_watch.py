@@ -127,11 +127,11 @@ class RestartWatch(commands.Cog):
     def _server_responsive(self) -> bool:
         """True if the server answers RCON right now.
 
-        A host-driven restart (PhunServer 2) or an outage drops RCON, so this is
-        the signal that the bot must NOT run its own restart flow — stacking a
-        second restart on top of one already in progress fails the RCON save/quit
-        and can interrupt the host's sequence. The mod check is likewise skipped
-        while the server is down so it doesn't queue a restart that can't run.
+        A server outage, crash, or a restart already in progress drops RCON, so
+        this is the signal that the bot must NOT run its own restart flow —
+        stacking a second restart on top of one already in progress fails the
+        RCON save/quit. The mod check is likewise skipped while the server is
+        down so it doesn't queue a restart that can't run.
         """
         return self.bot.rcon.is_server_online(timeout=5)
 
@@ -244,10 +244,10 @@ class RestartWatch(commands.Cog):
             print("[RestartWatch] Mod check paused (restart in progress).")
             return
 
-        # Only poll when the server is answering RCON. If it's down (a host /
-        # PhunServer-driven restart or an outage), skip — there's no point queueing
-        # a restart the server can't honour, and it would stack on top of the one
-        # already running.
+        # Only poll when the server is answering RCON. If it's down (an outage,
+        # crash, or a restart already in progress), skip — there's no point
+        # queueing a restart the server can't honour, and it would stack on top
+        # of the one already running.
         if not self._server_responsive():
             print("[RestartWatch] Mod check skipped (server not responding to RCON).")
             return
