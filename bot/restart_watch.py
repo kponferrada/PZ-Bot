@@ -124,6 +124,17 @@ class RestartWatch(commands.Cog):
             return count
         return self.bot.state.player_count
 
+    def _server_responsive(self) -> bool:
+        """True if the server answers RCON right now.
+
+        A host-driven restart (PhunServer 2) or an outage drops RCON, so this is
+        the signal that the bot must NOT run its own restart flow — stacking a
+        second restart on top of one already in progress fails the RCON save/quit
+        and can interrupt the host's sequence. The mod check is likewise skipped
+        while the server is down so it doesn't queue a restart that can't run.
+        """
+        return self.bot.rcon.is_server_online(timeout=5)
+
     # ---- Restart (RCON) ------------------------------------------------------
 
     async def _servermsg(self, message: str) -> None:
@@ -189,13 +200,20 @@ class RestartWatch(commands.Cog):
                 await self._kick_players()
         await self._quit_server()
 
-    async def _start_restart(self, reason: str, image: str = None, duration=None) -> None:
+    async def _start_restart(self, reason: str, image: str = None, duration=None) -> bool:
         """Start the restart sequence. Immediate if no players online, otherwise a
         countdown (kick-notification T-2min, save T-1:30, kick T-1min).
+
+        Returns False (and does nothing) when the server isn't answering RCON —
+        i.e. it's already down or mid-restart via another mechanism — so the bot
+        never stacks a second restart on top of one in progress.
 
         `image` overrides the announcement banner (defaults to the mod-update
         banner; scheduled restarts pass the generic restart banner).
         `duration` (seconds) overrides the countdown length."""
+        if not self._server_responsive():
+            print(f"[RestartWatch] Restart skipped — server not responding to RCON ({reason}).")
+            return False
         self.bot.state.expect_restart()
         # The pending update is only "applied" once the server actually restarts.
         # Mark the baseline stale so the next poll re-seeds against the applied
@@ -209,8 +227,9 @@ class RestartWatch(commands.Cog):
             await self._servermsg(f"{reason} — server will restart.")
         if await self._get_player_count() <= 0:
             await self._restart_server()
-            return
+            return True
         asyncio.create_task(self._run_countdown(duration))
+        return True
 
     # ---- Mod update checker --------------------------------------------------
 
@@ -223,6 +242,14 @@ class RestartWatch(commands.Cog):
         # cleared by monitor_server_state on the next server-up transition.
         if self.bot.state.restart_expected():
             print("[RestartWatch] Mod check paused (restart in progress).")
+            return
+
+        # Only poll when the server is answering RCON. If it's down (a host /
+        # PhunServer-driven restart or an outage), skip — there's no point queueing
+        # a restart the server can't honour, and it would stack on top of the one
+        # already running.
+        if not self._server_responsive():
+            print("[RestartWatch] Mod check skipped (server not responding to RCON).")
             return
 
         # Seed the baseline once on startup so an update applied while the bot
@@ -287,6 +314,10 @@ class RestartWatch(commands.Cog):
         # Don't stack a scheduled restart on top of one already in progress.
         if self.bot.state.restart_expected():
             return
+        # Skip when the server is already down/restarting via another mechanism —
+        # there's nothing to schedule a restart against, and it'd collide.
+        if not self._server_responsive():
+            return
         nxt = self._next_scheduled_restart()
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
         key = int(nxt.timestamp())
@@ -343,7 +374,11 @@ class RestartWatch(commands.Cog):
             ), ephemeral=True)
             return
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
-        await self._start_restart("Mod update forced by admin")
+        if not await self._start_restart("Mod update forced by admin"):
+            await interaction.followup.send(
+                "⚠️ Server is not responding to RCON (already down or restarting) — restart skipped.",
+                ephemeral=True,
+            )
 
     @app_commands.command(name="restart", description="Force a server restart now (in-game announcement + countdown).")
     async def cmd_restart(self, interaction: discord.Interaction) -> None:
@@ -356,10 +391,14 @@ class RestartWatch(commands.Cog):
             ), ephemeral=True)
             return
         await interaction.response.send_message("⏳ Forcing server restart...", ephemeral=True)
-        await self._start_restart(
+        if not await self._start_restart(
             "Restart forced by admin",
             image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
-        )
+        ):
+            await interaction.followup.send(
+                "⚠️ Server is not responding to RCON (already down or restarting) — restart skipped.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: commands.Bot):
