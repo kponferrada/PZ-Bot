@@ -309,7 +309,7 @@ class RestartWatch(commands.Cog):
         """At the scheduled time, run the full restart sequence (countdown + kick +
         quit) — the exact same flow a workshop update uses. An advance warning is
         posted first if the warning window is longer than the restart countdown."""
-        if not self.bot.features.is_enabled("restarts"):
+        if not self.bot.features.is_enabled("scheduled_restarts"):
             return
         # Don't stack a scheduled restart on top of one already in progress.
         if self.bot.state.restart_expected():
@@ -343,12 +343,13 @@ class RestartWatch(commands.Cog):
         if self._scheduled_announced_key == key:
             return
         self._scheduled_announced_key = key
-        minutes = max(1, int(delta // 60))
-        await self._announce(
-            f"🔧 Scheduled restart in ~{minutes} minute{'s' if minutes != 1 else ''}.",
-            discord.Colour.orange(),
-        )
-        print(f"[RestartWatch] Scheduled restart announced (~{minutes}m)")
+        if self.bot.features.is_enabled("restarts"):
+            minutes = max(1, int(delta // 60))
+            await self._announce(
+                f"🔧 Scheduled restart in ~{minutes} minute{'s' if minutes != 1 else ''}.",
+                discord.Colour.orange(),
+            )
+            print(f"[RestartWatch] Scheduled restart announced (~{minutes}m)")
 
     @tasks.loop(seconds=60.0)
     async def _scheduled_check(self):
