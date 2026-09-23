@@ -154,11 +154,15 @@ def _extract_usernames(data: bytes) -> set:
 
 # ---- log-line regexes --------------------------------------------------------
 
-_ATTEMPTING_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+attempting to join\.')
-_CONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+fully connected \(')
+# SteamID is `<id>` for normal players, but split-screen / co-op players log it
+# as `<id>(owner=<owner_id>)` — e.g. `76561199011437682(owner=76561198376972844)`.
+# The optional `(?:\(owner=\d+\))?` lets those names be caught too, otherwise a
+# split-screen player would join/leave with no notification at all.
+_ATTEMPTING_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+(?:\(owner=\d+\))?\s+"(.+?)"\s+attempting to join\.')
+_CONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+(?:\(owner=\d+\))?\s+"(.+?)"\s+fully connected \(')
 
 # Leave: <STEAMID> "Name" disconnected. — verify exact wording against your live log if needed.
-_DISCONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+\s+"(.+?)"\s+(?:disconnected|left the game|timed out)')
+_DISCONNECTED_RE = re.compile(r'^\[\S+\s+\S+\]\s+\d+(?:\(owner=\d+\))?\s+"(.+?)"\s+(?:disconnected|left the game|timed out)')
 
 # PZ Build 42 logs a death to `_user.txt` as:
 #   [date time] user <Name> died at (x, y, z) (non pvp|pvp)
