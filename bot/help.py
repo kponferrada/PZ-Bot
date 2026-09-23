@@ -34,6 +34,10 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/unlinkme", "Remove your own Discord-to-PZ link."),
         ("/myrank", "Show your in-game rank and chat colour."),
     ],
+    "📊 Stats & Leaderboards": [
+        ("/stats <username>", "Show a player's Aegis Panel stats (kills, deaths, playtime)."),
+        ("/leaderboard <kind>", "Top 10 players by a stat (zombie kills, deaths, playtime…)."),
+    ],
     "📝 Whitelist": [
         ("/whitelistsetup", "Post the whitelist application button into the whitelist channel. [admin]"),
         ("/whitelist", "Open the whitelist request form."),

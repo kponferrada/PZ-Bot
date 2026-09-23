@@ -2,6 +2,9 @@
 
 Reads from Aegis Panel's ledger (via `aegis_stats`) so the bot never duplicates
 the kill/death/playtime tracking the panel already does.
+
+Both commands are public — any Discord member can look up a player's stats or
+the leaderboard, and results post in-channel (not ephemeral) so everyone sees.
 """
 
 from __future__ import annotations
@@ -51,17 +54,9 @@ class StatsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def _is_admin(self, interaction: discord.Interaction) -> bool:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        return role is not None and role in interaction.user.roles
-
     @app_commands.command(name="stats", description="Show a player's Aegis Panel stats.")
     async def cmd_stats(self, interaction: discord.Interaction, username: str) -> None:
-        if not self._is_admin(interaction):
-            await interaction.response.send_message(
-                "\u274c You don't have permission.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         stats = await aegis_stats.get(self.bot, username, force=True)
         if stats is None:
             await interaction.followup.send(
@@ -69,7 +64,7 @@ class StatsCog(commands.Cog):
                     title=f"\U0001f50d No stats for {username}",
                     description="Aegis Panel has no ledger entry for that name.",
                     colour=discord.Colour.orange(),
-                ), ephemeral=True)
+                ))
             return
         embed = discord.Embed(
             title=f"\U0001f4ca {username} \u2014 Aegis Stats",
@@ -77,7 +72,7 @@ class StatsCog(commands.Cog):
         )
         for field, label in _FIELD_LABELS.items():
             embed.add_field(name=label, value=_fmt(field, stats.get(field, 0)), inline=True)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="leaderboard", description="Top players by an Aegis stat.")
     @app_commands.choices(kind=[
@@ -91,15 +86,10 @@ class StatsCog(commands.Cog):
     ])
     async def cmd_leaderboard(self, interaction: discord.Interaction,
                               kind: app_commands.Choice[str]) -> None:
-        if not self._is_admin(interaction):
-            await interaction.response.send_message(
-                "\u274c You don't have permission.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         rows = await aegis_stats.top(self.bot, kind.value, 10, force=True)
         if not rows:
-            await interaction.followup.send(
-                "No data from Aegis Panel yet.", ephemeral=True)
+            await interaction.followup.send("No data from Aegis Panel yet.")
             return
         lines = []
         for i, (user, value) in enumerate(rows, 1):
@@ -116,7 +106,7 @@ class StatsCog(commands.Cog):
             colour=discord.Colour.gold(),
         )
         embed.set_footer(text="Stats by Aegis Panel")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
