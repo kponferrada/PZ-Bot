@@ -728,6 +728,8 @@ class WhitelistCog(commands.Cog):
         channel = self._approval_channel()
         if channel is None:
             print("[Whitelist] Approval channel not configured/found; request saved to CSV only.")
+        elif not self.bot.features.is_enabled("whitelist"):
+            print("[Whitelist] Whitelist notifications disabled; request saved to CSV only.")
         else:
             view = WhitelistApprovalView(self, request_id)
             try:

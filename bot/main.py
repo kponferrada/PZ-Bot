@@ -511,7 +511,7 @@ class PZBot(commands.Bot):
                     print(f"[Announce] Ignoring brief offline blip ({offline_duration:.0f}s)")
                     self._offline_since = None
                 else:
-                    if self.features.is_enabled("server_status"):
+                    if self.features.is_enabled("server_up_down"):
                         if self._down_announced:
                             await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
                                                    f"{Emojis.HAPPY} Server is back online!")
@@ -541,7 +541,7 @@ class PZBot(commands.Bot):
                 if (not self._restart_announced
                         and not self.state.restart_expected()
                         and offline_duration > UP_DEBOUNCE_SECONDS):
-                    if self.features.is_enabled("server_status"):
+                    if self.features.is_enabled("server_up_down"):
                         await self.send_banner(self.config.ANNOUNCE_RESTART_IMAGE,
                                                "🔄 Server is restarting...")
                     self._restart_announced = True
@@ -550,7 +550,7 @@ class PZBot(commands.Bot):
                         and not self.state.restart_expected()
                         and self._offline_since is not None
                         and offline_duration > RESTART_GRACE_SECONDS):
-                    if self.features.is_enabled("server_status"):
+                    if self.features.is_enabled("server_up_down"):
                         await self.send_banner(self.config.ANNOUNCE_DOWN_IMAGE,
                                                f"{Emojis.PANIC} Server went offline!")
                     self._down_announced = True

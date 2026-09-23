@@ -522,6 +522,8 @@ class ServerStatusCog(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def status_loop(self):
+        if not self.bot.features.is_enabled("status_dashboard"):
+            return
         try:
             rcon_ok = self.bot.rcon.is_server_online()
             world, world_age = await lua_bridge.read_world_status_with_age()

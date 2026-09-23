@@ -89,7 +89,7 @@ class JeevesDropsCog(commands.Cog):
                 crate_type = status.get("crateType", "")
                 valid_types = status.get("validTypes", "")
                 channel = self.bot.get_airdrop_channel()
-                if channel and self.bot.features.is_enabled("airdrop"):
+                if channel and self.bot.features.is_enabled("airdrops"):
                     desc = f"Air drop failed: **{reason}**"
                     if target:
                         desc += f" (target: {target})"
@@ -291,7 +291,7 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.red()
                 )
-                if self.bot.features.is_enabled("airdrop"):
+                if self.bot.features.is_enabled("airdrops"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
                 self._sent_events.add(event_key)
                 print(f"[JeevesDrops] Supply event notification sent: {loc_name} (id={event_id})")
@@ -315,7 +315,7 @@ class JeevesDropsCog(commands.Cog):
                     ),
                     colour=discord.Colour.dark_red()
                 )
-                if self.bot.features.is_enabled("airdrop"):
+                if self.bot.features.is_enabled("airdrops"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
 
             elif phase == "ended":
@@ -332,7 +332,7 @@ class JeevesDropsCog(commands.Cog):
                         description="The supply event has concluded. Crates will be cleaned up on next restart.",
                         colour=discord.Colour.greyple()
                     )
-                if self.bot.features.is_enabled("airdrop"):
+                if self.bot.features.is_enabled("airdrops"):
                     await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
 
         except Exception as e:

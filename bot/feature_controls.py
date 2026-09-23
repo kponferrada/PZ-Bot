@@ -1,6 +1,6 @@
 """feature_controls.py — runtime /disable, /enable, and /features commands.
 
-Admins can turn individual notification features on/off without restarting the bot.
+Admins can turn individual bot functions on/off without restarting the bot.
 Requires the DEFAULT_ROLE (same permission model as the other admin commands).
 """
 
@@ -70,7 +70,7 @@ class FeatureControls(commands.Cog):
             state = "\U0001f7e2" if self.bot.features.is_enabled(key) else "\U0001f534"
             lines.append(f"{state} **{desc}** \u2014 `{key}`")
         await interaction.response.send_message(embed=discord.Embed(
-            title="Notification Features",
+            title="Bot Features",
             description="\n".join(lines),
             colour=discord.Colour.blue(),
         ))

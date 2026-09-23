@@ -1,8 +1,8 @@
-"""features.py — runtime feature toggles for notification features.
+"""features.py — runtime feature toggles for the bot's notification functions.
 
 Cogs consult ``bot.features.is_enabled(<key>)`` before sending a notification so
-an admin can turn a noisy/misbehaving feature off at runtime with ``/disable`` and
-back on with ``/enable``.
+an admin can turn a noisy/misbehaving function off at runtime with ``/disable``
+and back on with ``/enable``.
 
 State persists across restarts in a JSON file (``feature_state.json`` next to this
 module by default; override with the ``FEATURE_STATE_PATH`` env var).
@@ -12,15 +12,29 @@ import json
 import os
 from pathlib import Path
 
+# Feature key -> human-readable name shown in /features and the /enable //disable
+# dropdown. Keys are the stable identifiers (stored in feature_state.json).
 FEATURES = {
-    "join_leave": "Player join/leave notifications",
-    "deaths": "Player death notifications",
-    "siege": "Siege night notifications (Discord + in-game)",
-    "airdrop": "Air drop & supply event notifications (Discord + in-game)",
-    "restart": "Restart & mod-update notifications (Discord + in-game save/kick)",
-    "mod_check": "Bot-driven workshop mod update checker",
-    "server_status": "Server up/down notifications",
+    "join_leave": "Join & leave notifications",
+    "deaths": "Death notifications",
+    "siege_night": "Siege night notifications",
+    "airdrops": "Airdrop & supply notifications",
+    "restarts": "Restart & mod-update notifications",
+    "mod_updates": "Workshop mod update checker",
+    "server_up_down": "Server up/down notifications",
     "chat_relay": "In-game \u2194 Discord chat relay",
+    "status_dashboard": "Status dashboard (auto-updating panel)",
+    "whitelist": "Whitelist application notifications",
+}
+
+# Old key names (pre-rename) -> current key. Used to migrate an existing
+# feature_state.json so a disabled feature stays disabled across the rename.
+_LEGACY_KEY_MAP = {
+    "siege": "siege_night",
+    "airdrop": "airdrops",
+    "restart": "restarts",
+    "mod_check": "mod_updates",
+    "server_status": "server_up_down",
 }
 
 
@@ -44,8 +58,9 @@ class FeatureFlags:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             raw = data.get("disabled", [])
-            # Keep only known feature keys (ignore stale/unknown entries).
-            return {k for k in raw if k in FEATURES}
+            # Migrate any legacy key names, then keep only known feature keys.
+            migrated = {_LEGACY_KEY_MAP.get(k, k) for k in raw}
+            return {k for k in migrated if k in FEATURES}
         except (OSError, ValueError, TypeError):
             # Missing or unreadable file -> start with everything enabled.
             return set()

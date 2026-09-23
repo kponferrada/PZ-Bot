@@ -118,7 +118,7 @@ class SiegeNightCog(commands.Cog):
                         description=desc,
                         colour=discord.Colour.dark_red(),
                     )
-                    if self.bot.features.is_enabled("siege"):
+                    if self.bot.features.is_enabled("siege_night"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Siege tonight announced: day {event_day}")
 
@@ -155,7 +155,7 @@ class SiegeNightCog(commands.Cog):
                         intel.append(f"Spawned **{spawned}**")
                     if len(intel) > 1:
                         embed.add_field(name="\U0001f4a1 Intel", value=" · ".join(intel), inline=False)
-                    if self.bot.features.is_enabled("siege"):
+                    if self.bot.features.is_enabled("siege_night"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Notification sent: active, siege={siege_count}")
                     # In-game red-alert (servermsg + alert sound) — best-effort, after the
@@ -190,7 +190,7 @@ class SiegeNightCog(commands.Cog):
                                 value=" · ".join(wave_intel),
                                 inline=False,
                             )
-                        if self.bot.features.is_enabled("siege"):
+                        if self.bot.features.is_enabled("siege_night"):
                             await self.bot.send_to_channel(
                                 channel, self.bot.config.SIEGE_ROLE_ID, wave_embed
                             )
@@ -235,7 +235,7 @@ class SiegeNightCog(commands.Cog):
                         if date_str:
                             nd += f" ({date_str})"
                         embed.add_field(name="\U0001f319 Next", value=nd, inline=False)
-                    if self.bot.features.is_enabled("siege"):
+                    if self.bot.features.is_enabled("siege_night"):
                         await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
                     print(f"[SiegeNight] Notification sent: ended, completed={completed}")
 

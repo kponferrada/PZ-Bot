@@ -153,7 +153,7 @@ class RestartWatch(commands.Cog):
 
     async def _announce_kick_notification(self) -> None:
         """Announce (Discord + in-game) that players will be kicked."""
-        if self.bot.features.is_enabled("restart"):
+        if self.bot.features.is_enabled("restarts"):
             await self._announce(
                 "🔔 Kicking players in 1 minute.",
                 discord.Colour.orange(),
@@ -163,7 +163,7 @@ class RestartWatch(commands.Cog):
     async def _quit_server(self) -> None:
         """Save, announce the restart, then quit over RCON."""
         await self._save_world()
-        if self.bot.features.is_enabled("restart"):
+        if self.bot.features.is_enabled("restarts"):
             await self._announce_banner(
                 self.bot.config.ANNOUNCE_RESTART_IMAGE,
                 "🔄 Server is restarting...",
@@ -192,7 +192,7 @@ class RestartWatch(commands.Cog):
             if not saved and remaining <= self._save_at:
                 saved = True
                 await self._save_world()
-                if self.bot.features.is_enabled("restart"):
+                if self.bot.features.is_enabled("restarts"):
                     await self._servermsg("World saved.")
             if not kicked and remaining <= self._kick_at:
                 kicked = True
@@ -219,7 +219,7 @@ class RestartWatch(commands.Cog):
         # Mark the baseline stale so the next poll re-seeds against the applied
         # state instead of re-announcing the same update.
         self._seeded = False
-        if self.bot.features.is_enabled("restart"):
+        if self.bot.features.is_enabled("restarts"):
             await self._announce_banner(
                 image or self.bot.config.ANNOUNCE_MOD_UPDATE_IMAGE,
                 f"🔧 {reason}.",
@@ -234,7 +234,7 @@ class RestartWatch(commands.Cog):
     # ---- Mod update checker --------------------------------------------------
 
     async def _run_mod_check(self) -> None:
-        if not self.bot.features.is_enabled("mod_check"):
+        if not self.bot.features.is_enabled("mod_updates"):
             return
 
         # Pause while a restart is in progress (forced or detected), so a
@@ -309,7 +309,7 @@ class RestartWatch(commands.Cog):
         """At the scheduled time, run the full restart sequence (countdown + kick +
         quit) — the exact same flow a workshop update uses. An advance warning is
         posted first if the warning window is longer than the restart countdown."""
-        if not self.bot.features.is_enabled("restart"):
+        if not self.bot.features.is_enabled("restarts"):
             return
         # Don't stack a scheduled restart on top of one already in progress.
         if self.bot.state.restart_expected():
