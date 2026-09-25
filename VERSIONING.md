@@ -41,4 +41,9 @@ VPS can deploy a specific, known-good version instead of "whatever is on main".
 
 ## Current version
 
-`v0.4.1`
+Latest tag: **`v0.4.1`**.
+
+The `develop` branch carries unreleased work beyond `v0.4.1` (feature toggles,
+a separate scheduled-restarts toggle, public `/stats` + `/leaderboard`,
+split-screen join/leave tracking, and other fixes). The next release will be
+**`v0.5.0`** (several new features) once `develop` is merged and tagged.

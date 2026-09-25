@@ -19,9 +19,9 @@ talks to the Project Zomboid server over two channels:
 
 - A Discord account with permission to add bots to your server.
 - A Project Zomboid **dedicated server (Build 42)** with **RCON** and **SFTP** access.
-- The **PhunServer 2** mod (Workshop `3792193021`) — drives scheduled + mod-update restarts.
 - **Jeeve's Integration** mod — required for the world dashboard, chat relay, rank sync.
-- (Optional) **Jeeve's Hordes** / **Jeeve's Drops** — for those features.
+- (Optional) **Siege Night** (`3669589584`) + `siege-night-bridge`, **Jeeve's Drops**,
+  **Death Log** (`2972685375`), **Aegis Panel** (`3766508989`) — for those features.
 - A **Linux VPS** with Python 3.10+.
 
 ---
@@ -58,8 +58,14 @@ The bot needs SFTP read/write to the Zomboid data folder. On **Indifferent Brocc
 | `/server-files/steamapps/workshop/content/108600` | Workshop mods (`/modlist`) |
 
 ### Mods
-- **PhunServer 2** (`3792193021`) — enables the 4×-daily scheduled restart and mod-update restarts.
 - **Jeeve's Integration** — writes `jeeves_world_status.txt` etc. to `Lua/` (dashboard/chat/rank bridge).
+- **Death Log** (`2972685375`) — writes the death log the bot tails for death notifications.
+- **Aegis Panel** (`3766508989`) — writes the player-stats ledger for `/stats` and `/leaderboard`.
+- **Siege Night** (`3669589584`) + `siege-night-bridge` — siege-night notifications (optional).
+- **Jeeve's Drops** — airdrop / supply-drop events (optional).
+
+> **Restarts are bot-driven** — the bot stops the server over RCON (save → kick →
+> quit) and the host applies updates and brings it back up. No PhunServer 2 required.
 
 ---
 
@@ -67,8 +73,8 @@ The bot needs SFTP read/write to the Zomboid data folder. On **Indifferent Brocc
 
 ```bash
 # live (pinned to a release tag)
-git clone https://github.com/kponferrada/PZ-Tambayan-Bot.git /opt/pz-tambayan-bot
-cd /opt/pz-tambayan-bot && git checkout v0.1.0
+git clone https://github.com/kponferrada/PZ-Bot.git /opt/pz-tambayan-bot
+cd /opt/pz-tambayan-bot && git checkout v0.4.1   # latest tag — see VERSIONING.md
 
 # create + fill the config
 cp bot/config.env.example bot/config.env
@@ -145,12 +151,13 @@ Create the channels/roles you want, copy their IDs (Developer Mode → right-cli
 |---|---|
 | `STATUS_CHANNEL_ID` | auto-updating server-status dashboard |
 | `CHAT_RELAY_CHANNEL_ID` | in-game ↔ Discord chat relay |
-| `HORDE_LEADERBOARD_CHANNEL_ID` | horde survivor leaderboard |
 | `SERVER_NOTIFICATION_CHANNEL_ID` | server up/down + restart/mod-update banners |
 | `WORKSHOP_UPDATE_CHANNEL_ID` / `WORKSHOP_UPDATE_ROLE_ID` | mod-update restart relay |
 | `DEATH_LOGS_CHANNEL_ID` | player death logs |
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | air-drop / supply-drop events |
-| `HORDE_CHANNEL_ID` / `HORDE_ROLE_ID` | horde-night events |
+| `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | siege-night events |
+| `JOIN_LEAVE_CHANNEL_ID` | join/leave notifications |
+| `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist application + approval |
 | `NOTIFY_ROLE_ID` | @-mentioned in every server up/down banner |
 
 ---
@@ -170,8 +177,8 @@ You can run two instances on the same VPS with two Discord bots:
 
 ```bash
 # live (tag) and test (develop) checkouts
-git clone https://github.com/kponferrada/PZ-Tambayan-Bot.git /opt/pz-tambayan-bot       # -> checkout v0.1.0
-git clone https://github.com/kponferrada/PZ-Tambayan-Bot.git /opt/pz-tambayan-bot-test  # -> checkout develop
+git clone https://github.com/kponferrada/PZ-Bot.git /opt/pz-tambayan-bot       # -> checkout v0.4.1
+git clone https://github.com/kponferrada/PZ-Bot.git /opt/pz-tambayan-bot-test  # -> checkout develop
 
 # each gets its own config.env (different token + channel IDs)
 sudo ~/Live/PZ-Tambayan-Bot/deploy/install-service.sh    ~/Live/PZ-Tambayan-Bot/bot   pz-tambayan-bot-live

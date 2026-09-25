@@ -1,5 +1,10 @@
 # PZ Tambayan Discord Bot — Jeeves Review & Remote-Refactor Plan
 
+> **Note:** This is a historical planning document from the original refactor
+> (September 2026). It records the review *plan* and the state of the code at
+> that time. For the **current** feature set, commands, and setup, see
+> [`bot/README.md`](bot/README.md) and [`SETUP.md`](SETUP.md).
+
 **Project:** Project Zomboid Discord bot for the PZ Tambayan server
 **Source reviewed:** `StewBagger/Jeeves` (JeevesBot v42, cloned 2026-09-10)
 **Constraint:** Game server is hosted on **Indifferent Broccoli**; the bot runs on a **separate VPS**, reading/writing server files over **SFTP** and issuing commands over **RCON**.

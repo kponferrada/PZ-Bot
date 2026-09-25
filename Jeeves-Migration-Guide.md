@@ -1,5 +1,10 @@
 # PZ Tambayan Bot — Migration & Customization Guide
 
+> **Note:** This is a historical planning document from the original refactor
+> (September 2026). It records the migration *plan* and the state of the code at
+> that time. For the **current** feature set, commands, and setup, see
+> [`bot/README.md`](bot/README.md) and [`SETUP.md`](SETUP.md).
+
 **From:** `StewBagger/Jeeves` (same-box server manager)
 **To:** remote bot on a separate VPS, reading/writing over **SFTP**, commanding over **RCON**.
 **Decision rule:** retain anything remote-viable (SFTP read/write + RCON); remove anything that needs same-server capability (process start/kill, SteamCMD).
