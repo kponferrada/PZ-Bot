@@ -40,6 +40,7 @@ class JeevesDropsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._last_poller_key = None
+        self._sent_drops: set[tuple] = set()
         self._sent_events: set[tuple] = set()
         self._last_event_poller_key = None
 
@@ -78,10 +79,45 @@ class JeevesDropsCog(commands.Cog):
                 self._last_poller_key = poller_key
 
             if phase == "dropped":
-                # Personal airdrops are intentionally NOT announced — revealing
-                # the target's location would make them a target. Only the
-                # server-wide supply events (supply_event_poller) are broadcast.
-                print(f"[JeevesDrops] Personal airdrop landed (dropId={drop_id}) — not announced")
+                drop_id = status.get("dropId", 0)
+                drop_key = (drop_id, ts)
+                if drop_key in self._sent_drops:
+                    return
+
+                target = status.get("targetPlayer", "Unknown")
+                item_count = status.get("itemCount", "?")
+                source = status.get("source", "auto")
+                crate_label = status.get("crateLabel", "Supply")
+
+                channel = self.bot.get_airdrop_channel()
+                if not channel:
+                    print("[JeevesDrops] No notification channel found, skipping drop notification")
+                    return
+
+                source_label = "🤖 Bot" if source == "bot" else "🎲 Random"
+                emoji = CRATE_EMOJIS.get(crate_label, "📦")
+
+                # Location is deliberately omitted so the recipient isn't an
+                # easy target for other players.
+                embed = discord.Embed(
+                    title=f"{emoji} {crate_label} Crate Incoming!",
+                    description=(
+                        f"An air drop has landed near **{target}**!\n\n"
+                        f"🎁 Items: **{item_count}**\n"
+                        f"📦 Type: **{crate_label}**\n"
+                        f"Source: {source_label}"
+                    ),
+                    colour=discord.Colour.blue()
+                )
+                if self.bot.features.is_enabled("airdrops"):
+                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                self._sent_drops.add(drop_key)
+
+                print(f"[JeevesDrops] Notification sent for dropId={drop_id}, ts={ts}")
+
+                if len(self._sent_drops) > 50:
+                    sorted_keys = sorted(self._sent_drops, key=lambda k: k[1])
+                    self._sent_drops = set(sorted_keys[-30:])
 
             elif phase == "error":
                 reason = status.get("reason", "unknown")
@@ -109,6 +145,17 @@ class JeevesDropsCog(commands.Cog):
     @drops_status_poller.before_loop
     async def before_drops_poller(self):
         await self.bot.wait_until_ready()
+        # Seed sent_drops with any existing status file to suppress stale
+        # notifications from before the bot started.
+        try:
+            status = await lua_bridge.read_drops_status()
+            if status and status.get("phase") == "dropped":
+                drop_id = status.get("dropId", 0)
+                ts = status.get("timestamp", 0)
+                self._sent_drops.add((drop_id, ts))
+                print(f"[JeevesDrops] Suppressed stale drop on startup: dropId={drop_id}, ts={ts}")
+        except Exception:
+            pass
 
     # ── /airdrop ────────────────────────────────────────────────────────
 
