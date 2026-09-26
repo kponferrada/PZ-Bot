@@ -259,6 +259,53 @@ class RestartWatch(commands.Cog):
         self._restart_task = asyncio.create_task(self._countdown_guarded(duration))
         return True
 
+    async def _start_immediate_restart(self) -> bool:
+        """Immediate restart: announce + save now, kick players in 30s, then quit.
+
+        Returns False (and does nothing) when a restart is already in progress or
+        the server isn't answering RCON.
+        """
+        if self.bot.state.restart_expected():
+            print("[RestartWatch] Restart already in progress — ignoring immediate restart.")
+            return False
+        self.bot.state.expect_restart()
+        if not await self._server_responsive():
+            print("[RestartWatch] Immediate restart skipped — server not responding to RCON.")
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+            return False
+        self._seeded = False
+        # Announce immediately, then save the world right away.
+        if self.bot.features.is_enabled("restarts"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                "🔄 Restart forced — kicking players in 30 seconds.",
+            )
+            await self._servermsg("Restart forced — server restarting in 30 seconds!")
+        await self._save_world()
+        if self.bot.features.is_enabled("restarts"):
+            await self._servermsg("World saved.")
+        self._restart_task = asyncio.create_task(self._immediate_restart_guarded())
+        return True
+
+    async def _immediate_restart_sequence(self) -> None:
+        """Kick players after 30s, then save + quit."""
+        await asyncio.sleep(30)
+        self.bot.state.restart_shutdown_started = True
+        await self._kick_players()
+        await self._quit_server()
+
+    async def _immediate_restart_guarded(self) -> None:
+        """Run the immediate restart, releasing the restart lock on failure."""
+        try:
+            await self._immediate_restart_sequence()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[RestartWatch] immediate restart failed: {e}")
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+
     # ---- Mod update checker --------------------------------------------------
 
     async def _run_mod_check(self) -> None:
@@ -425,6 +472,23 @@ class RestartWatch(commands.Cog):
             "Restart forced by admin",
             image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
         ):
+            await interaction.followup.send(
+                "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="restartnow", description="Immediate restart: announce + save now, kick players in 30s, then quit.")
+    async def cmd_restart_now(self, interaction: discord.Interaction) -> None:
+        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
+        if role is None or role not in interaction.user.roles:
+            await interaction.response.send_message(embed=discord.Embed(
+                title="Permission Denied",
+                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        await interaction.response.send_message("⏳ Forcing immediate restart (30s)...", ephemeral=True)
+        if not await self._start_immediate_restart():
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
