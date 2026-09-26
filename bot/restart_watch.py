@@ -51,6 +51,7 @@ class RestartWatch(commands.Cog):
 
         self._checker = ModChecker(bot)
         self._seeded = False
+        self._restart_task = None  # active countdown task (guards against duplicate restarts)
         self._mod_check.start()
         self._scheduled_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
@@ -59,6 +60,8 @@ class RestartWatch(commands.Cog):
               f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
+        if self._restart_task is not None and not self._restart_task.done():
+            self._restart_task.cancel()
         self._mod_check.cancel()
         self._scheduled_check.cancel()
 
@@ -124,7 +127,7 @@ class RestartWatch(commands.Cog):
             return count
         return self.bot.state.player_count
 
-    def _server_responsive(self) -> bool:
+    async def _server_responsive(self) -> bool:
         """True if the server answers RCON right now.
 
         A server outage, crash, or a restart already in progress drops RCON, so
@@ -133,7 +136,7 @@ class RestartWatch(commands.Cog):
         RCON save/quit. The mod check is likewise skipped while the server is
         down so it doesn't queue a restart that can't run.
         """
-        return self.bot.rcon.is_server_online(timeout=5)
+        return await asyncio.to_thread(self.bot.rcon.is_server_online, 5)
 
     # ---- Restart (RCON) ------------------------------------------------------
 
@@ -200,21 +203,46 @@ class RestartWatch(commands.Cog):
                 await self._kick_players()
         await self._quit_server()
 
+    async def _countdown_guarded(self, duration=None) -> None:
+        """Run the countdown, but never let a failure leave the restart lock stuck.
+
+        If the countdown raises (e.g. an RCON hiccup mid-sequence), release the
+        restart state so a failed quit doesn't freeze every future restart until
+        the 15-minute auto-expiry.
+        """
+        try:
+            await self._run_countdown(duration)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[RestartWatch] countdown failed: {e}")
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+
     async def _start_restart(self, reason: str, image: str = None, duration=None) -> bool:
         """Start the restart sequence. Immediate if no players online, otherwise a
         countdown (kick-notification T-2min, save T-1:30, kick T-1min).
 
-        Returns False (and does nothing) when the server isn't answering RCON —
-        i.e. it's already down or mid-restart via another mechanism — so the bot
-        never stacks a second restart on top of one in progress.
+        Returns False (and does nothing) when a restart is already in progress or
+        the server isn't answering RCON — i.e. it's already down or mid-restart
+        via another mechanism — so the bot never stacks a second restart on top of
+        one in progress. Callers use this to make the restart idempotent.
 
         `image` overrides the announcement banner (defaults to the mod-update
         banner; scheduled restarts pass the generic restart banner).
         `duration` (seconds) overrides the countdown length."""
-        if not self._server_responsive():
-            print(f"[RestartWatch] Restart skipped — server not responding to RCON ({reason}).")
+        if self.bot.state.restart_expected():
+            print(f"[RestartWatch] Restart already in progress — ignoring trigger ({reason}).")
             return False
+        # Claim the restart lock atomically (no await between the check and the
+        # set) so two concurrent triggers can't both start a countdown.
         self.bot.state.expect_restart()
+        if not await self._server_responsive():
+            print(f"[RestartWatch] Restart skipped — server not responding to RCON ({reason}).")
+            # Roll back the lock we just claimed.
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+            return False
         # The pending update is only "applied" once the server actually restarts.
         # Mark the baseline stale so the next poll re-seeds against the applied
         # state instead of re-announcing the same update.
@@ -228,7 +256,7 @@ class RestartWatch(commands.Cog):
         if await self._get_player_count() <= 0:
             await self._restart_server()
             return True
-        asyncio.create_task(self._run_countdown(duration))
+        self._restart_task = asyncio.create_task(self._countdown_guarded(duration))
         return True
 
     # ---- Mod update checker --------------------------------------------------
@@ -248,7 +276,7 @@ class RestartWatch(commands.Cog):
         # crash, or a restart already in progress), skip — there's no point
         # queueing a restart the server can't honour, and it would stack on top
         # of the one already running.
-        if not self._server_responsive():
+        if not await self._server_responsive():
             print("[RestartWatch] Mod check skipped (server not responding to RCON).")
             return
 
@@ -316,7 +344,7 @@ class RestartWatch(commands.Cog):
             return
         # Skip when the server is already down/restarting via another mechanism —
         # there's nothing to schedule a restart against, and it'd collide.
-        if not self._server_responsive():
+        if not await self._server_responsive():
             return
         nxt = self._next_scheduled_restart()
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
@@ -326,14 +354,15 @@ class RestartWatch(commands.Cog):
         # workshop update (announce, countdown, save, kick, quit).
         if delta <= self._restart_delay:
             if self._scheduled_trigger_key != key:
-                self._scheduled_trigger_key = key
-                # Same path as a mod-update restart: full countdown (notify
-                # T-2min, save T-1:30, kick T-1min, quit T-0), no duration
-                # override — so the kick runs exactly like a mod update.
-                await self._start_restart(
+                # Only mark this scheduled slot consumed if the restart actually
+                # started — otherwise retry on the next tick (e.g. RCON was
+                # briefly unresponsive at the trigger moment).
+                started = await self._start_restart(
                     "Scheduled restart",
                     image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
                 )
+                if started:
+                    self._scheduled_trigger_key = key
             return
 
         # Advance warning (only reached when the warning window exceeds the
@@ -377,7 +406,7 @@ class RestartWatch(commands.Cog):
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
         if not await self._start_restart("Mod update forced by admin"):
             await interaction.followup.send(
-                "⚠️ Server is not responding to RCON (already down or restarting) — restart skipped.",
+                "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
             )
 
@@ -397,7 +426,7 @@ class RestartWatch(commands.Cog):
             image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
         ):
             await interaction.followup.send(
-                "⚠️ Server is not responding to RCON (already down or restarting) — restart skipped.",
+                "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
             )
 
