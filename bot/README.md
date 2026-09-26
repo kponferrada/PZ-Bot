@@ -141,6 +141,7 @@ Admin commands require the role named by `DEFAULT_ROLE` (default `Admin`).
 | `/stop` | Graceful shutdown (RCON save + quit) |
 | `/restart` | Force a restart now (announce + countdown) |
 | `/restartnow` | Immediate restart (announce + save now, kick in 30s) |
+| `/deferrestart` | Defer/cancel an upcoming/scheduled restart (auto-resumes after N minutes) |
 | `/forcemodupdate` | Force a mod-update restart now |
 | `/setrank`, `/syncranks` | Set a player's rank / rebuild the rank file |
 | `/linkname`, `/unlinkname`, `/listlinks` | Manage Discord↔PZ name links |

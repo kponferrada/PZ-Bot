@@ -16,6 +16,7 @@ quit flow as a workshop update (notify T-2min, save T-1:30, kick T-1min).
 import os
 import asyncio
 import datetime
+import time
 from pathlib import Path
 
 import discord
@@ -52,6 +53,8 @@ class RestartWatch(commands.Cog):
         self._checker = ModChecker(bot)
         self._seeded = False
         self._restart_task = None  # active countdown task (guards against duplicate restarts)
+        self._defer_until = 0.0    # epoch time until which auto-restarts are deferred (0 = none)
+        self._defer_task = None    # auto-resume task for a deferred restart
         self._mod_check.start()
         self._scheduled_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
@@ -62,6 +65,8 @@ class RestartWatch(commands.Cog):
     def cog_unload(self):
         if self._restart_task is not None and not self._restart_task.done():
             self._restart_task.cancel()
+        if self._defer_task is not None and not self._defer_task.done():
+            self._defer_task.cancel()
         self._mod_check.cancel()
         self._scheduled_check.cancel()
 
@@ -306,10 +311,92 @@ class RestartWatch(commands.Cog):
             self.bot.state.expecting_restart = False
             self.bot.state.restart_shutdown_started = False
 
+    # ---- Restart deferral ----------------------------------------------------
+
+    def _is_deferred(self) -> bool:
+        """True while restarts are manually deferred (suppress auto-triggers)."""
+        return time.time() < self._defer_until
+
+    def _cancel_deferral(self) -> None:
+        """Cancel any pending deferral (e.g. an admin re-triggered manually)."""
+        if self._defer_task is not None and not self._defer_task.done():
+            self._defer_task.cancel()
+        self._defer_task = None
+        self._defer_until = 0.0
+
+    def _scheduled_restart_imminent(self) -> bool:
+        """True when a scheduled restart is due within the countdown window."""
+        if not self.bot.features.is_enabled("scheduled_restarts"):
+            return False
+        nxt = self._next_scheduled_restart()
+        delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        return delta <= self._restart_delay
+
+    async def _defer_restart(self, minutes: int) -> None:
+        """Defer/cancel the current or upcoming restart for `minutes` minutes.
+
+        Cancels any active countdown, suppresses scheduled + mod-update restarts
+        during the window, and (when a restart was actually pending) re-triggers
+        it automatically once the window ends — unless an admin re-triggers it
+        manually first (which clears the deferral).
+        """
+        pending = self.bot.state.restart_expected() or self._scheduled_restart_imminent()
+        # Cancel any active countdown + release the restart lock.
+        if self._restart_task is not None and not self._restart_task.done():
+            self._restart_task.cancel()
+        self._restart_task = None
+        self.bot.state.expecting_restart = False
+        self.bot.state.restart_shutdown_started = False
+        # Allow a scheduled restart to re-fire after the deferral.
+        self._scheduled_trigger_key = None
+        self._scheduled_announced_key = None
+        # Replace any prior deferral.
+        self._cancel_deferral()
+        self._defer_until = time.time() + minutes * 60
+        if self.bot.features.is_enabled("restarts"):
+            if pending:
+                await self._announce(
+                    f"⏸️ Restart deferred for {minutes} minute{'s' if minutes != 1 else ''}. "
+                    "It will resume automatically.",
+                    discord.Colour.orange(),
+                )
+                await self._servermsg(f"Restart deferred for {minutes} minute{'s' if minutes != 1 else ''}.")
+            else:
+                await self._announce(
+                    f"⏸️ Restarts paused for {minutes} minute{'s' if minutes != 1 else ''} "
+                    "(scheduled/update restarts will be skipped).",
+                    discord.Colour.orange(),
+                )
+        self._defer_task = asyncio.create_task(self._resume_deferred_restart(minutes, pending))
+
+    async def _resume_deferred_restart(self, minutes: int, pending: bool) -> None:
+        """Auto-resume after the deferral window: re-trigger if a restart was pending."""
+        try:
+            await asyncio.sleep(minutes * 60)
+        except asyncio.CancelledError:
+            raise
+        self._defer_until = 0.0
+        self._defer_task = None
+        if pending:
+            if self.bot.features.is_enabled("restarts"):
+                await self._announce(
+                    "▶️ Restart deferral ended — restarting now.",
+                    discord.Colour.orange(),
+                )
+            await self._start_restart(
+                "Deferred restart",
+                image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+            )
+
     # ---- Mod update checker --------------------------------------------------
 
     async def _run_mod_check(self) -> None:
         if not self.bot.features.is_enabled("mod_updates"):
+            return
+
+        # Skip while restarts are manually deferred.
+        if self._is_deferred():
+            print("[RestartWatch] Mod check deferred.")
             return
 
         # Pause while a restart is in progress (forced or detected), so a
@@ -386,6 +473,9 @@ class RestartWatch(commands.Cog):
         posted first if the warning window is longer than the restart countdown."""
         if not self.bot.features.is_enabled("scheduled_restarts"):
             return
+        # Skip while restarts are manually deferred.
+        if self._is_deferred():
+            return
         # Don't stack a scheduled restart on top of one already in progress.
         if self.bot.state.restart_expected():
             return
@@ -451,6 +541,7 @@ class RestartWatch(commands.Cog):
             ), ephemeral=True)
             return
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
+        self._cancel_deferral()
         if not await self._start_restart("Mod update forced by admin"):
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
@@ -468,6 +559,7 @@ class RestartWatch(commands.Cog):
             ), ephemeral=True)
             return
         await interaction.response.send_message("⏳ Forcing server restart...", ephemeral=True)
+        self._cancel_deferral()
         if not await self._start_restart(
             "Restart forced by admin",
             image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
@@ -488,11 +580,30 @@ class RestartWatch(commands.Cog):
             ), ephemeral=True)
             return
         await interaction.response.send_message("⏳ Forcing immediate restart (30s)...", ephemeral=True)
+        self._cancel_deferral()
         if not await self._start_immediate_restart():
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
             )
+
+    @app_commands.command(name="deferrestart", description="Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes).")
+    @app_commands.describe(minutes="Minutes to defer (default 15)")
+    async def cmd_defer_restart(self, interaction: discord.Interaction, minutes: int = 15) -> None:
+        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
+        if role is None or role not in interaction.user.roles:
+            await interaction.response.send_message(embed=discord.Embed(
+                title="Permission Denied",
+                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        minutes = max(1, min(int(minutes), 720))
+        await interaction.response.send_message(
+            f"⏸️ Deferring restart for {minutes} minute{'s' if minutes != 1 else ''}...",
+            ephemeral=True,
+        )
+        await self._defer_restart(minutes)
 
 
 async def setup(bot: commands.Bot):
