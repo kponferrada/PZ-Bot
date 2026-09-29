@@ -221,19 +221,16 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
     )
 
     if server_online or world:
-        # Row 1
         hour = world.get("hour", 0)
         mins = world.get("minutes", 0)
         period = "AM" if hour < 12 else "PM"
         hh = hour % 12 or 12
-        embed.add_field(name="\u23f0 Time", value=f"{hh}:{mins:02d} {period}", inline=True)
 
         month = world.get("month", 0)
         day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
         mn = MONTH_NAMES[month][:3] if 0 <= month < 12 else "?"
         year = world.get("year")
         date_val = f"{mn} {day}, {year}" if year else f"{mn} {day}"
-        embed.add_field(name="\U0001f4c5 Date", value=date_val, inline=True)
 
         elapsed = world.get("elapsedDays", 0)
         age_raw = world.get("worldAgeDays", 0)
@@ -243,14 +240,9 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
             age = int(age_raw)
         else:
             age = max(1, int(age_raw))
-        embed.add_field(name="\U0001f382 Server Age", value=f"Day {age}", inline=True)
-
-        # Row 2
-        embed.add_field(name="\U0001f465 Players", value=f"{pc} / {max_players}", inline=True)
 
         weather = world.get("weather", "Clear")
         temp = world.get("temperature", 0)
-        embed.add_field(name="\U0001f324\ufe0f Weather", value=f"{weather} ({_temp_c_f(temp)})", inline=True)
 
         ws = world.get("windSpeed", 0)
         if ws > 0.6:
@@ -262,25 +254,39 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
         else:
             wd = "Calm"
         wind_val = wd if ws <= 0.05 else f"{wd} ({ws * 10:.0f} mph)"
-        embed.add_field(name="\U0001f4a8 Wind", value=wind_val, inline=True)
 
-        # Row 3
         is_night = world.get("isNight", False)
-        cyc_icon = "\U0001f319" if is_night else "\u2600\ufe0f"
-        embed.add_field(name=f"{cyc_icon} Cycle", value="Night" if is_night else "Day", inline=True)
+        cyc_icon = "\U0001f319" if is_night else "☀️"
 
         siege_day, siege_status, siege_completed = _siege_fields(siege, world)
-        embed.add_field(name="\U0001f6e1\ufe0f Siege", value=siege_day, inline=True)
         restart_cd, restart_tm = _next_restart()
-        embed.add_field(name="\U0001f504 Restart", value=f"{restart_cd} · {restart_tm}", inline=True)
 
-        # Row 4
-        embed.add_field(name="\U0001f4cb Status", value=siege_status, inline=True)
-        embed.add_field(name="\U0001f3c6 Completed", value=siege_completed, inline=True)
+        # Row 1: Server Age | Date | Time
+        embed.add_field(name="\U0001f382 Server Age", value=f"Day {age}", inline=True)
+        embed.add_field(name="\U0001f4c5 Date", value=date_val, inline=True)
+        embed.add_field(name="⏰ Time", value=f"{hh}:{mins:02d} {period}", inline=True)
 
+        # Row 2: Weather | Wind | Cycle
+        embed.add_field(name="\U0001f324️ Weather", value=f"{weather} ({_temp_c_f(temp)})", inline=True)
+        embed.add_field(name="\U0001f4a8 Wind", value=wind_val, inline=True)
+        embed.add_field(name=f"{cyc_icon} Cycle", value="Night" if is_night else "Day", inline=True)
+
+        # Row 3: Next Siege | Siege Status | Completed Sieges
+        embed.add_field(name="\U0001f6e1️ Next Siege", value=siege_day, inline=True)
+        embed.add_field(name="\U0001f4cb Siege Status", value=siege_status, inline=True)
+        embed.add_field(name="\U0001f3c6 Completed Sieges", value=siege_completed, inline=True)
+
+        # Next restart (full width)
+        embed.add_field(name="\U0001f504 Next Restart", value=f"{restart_cd} · {restart_tm}", inline=False)
+
+        # Players (x / y) — Online Now, one per line
         raw_players = str(world.get("players", "") or "")
-        names = [n.strip() for n in raw_players.split(",") if n.strip()]
-        embed.add_field(name="\U0001f3ae Online Now", value=", ".join(sorted(names)) if names else "None", inline=False)
+        names = sorted((n.strip() for n in raw_players.split(",") if n.strip()), key=str.lower)
+        players_val = "\n".join(f"• {n}" for n in names) if names else "*No survivors online*"
+        if len(players_val) > 1024:  # Discord field value limit
+            players_val = players_val[:1000].rsplit("\n", 1)[0] + "\n…"
+        embed.add_field(name=f"\U0001f465 Players ({pc} / {max_players}) — Online Now",
+                        value=players_val, inline=False)
     else:
         embed.add_field(name="\u200b", value="\U0001f534 **Server Offline**", inline=False)
 
