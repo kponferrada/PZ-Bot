@@ -243,7 +243,13 @@ class PlayerTrackerCog(commands.Cog):
                   f"not found (wrong JOIN_LEAVE_CHANNEL_ID, or bot can't view it)")
             return
         try:
-            data = player_banner.render_banner(kind, name)
+            # Rendering is CPU-bound (first render per banner builds a cached
+            # clean background) — keep it off the event loop.
+            data = await asyncio.to_thread(player_banner.render_banner, kind, name)
+        except Exception as e:
+            print(f"[PlayerTracker] Failed to render {kind} banner for {name}: {e}")
+            return
+        try:
             await channel.send(file=discord.File(io.BytesIO(data), filename="signal.png"))
         except (discord.Forbidden, discord.HTTPException) as e:
             print(f"[PlayerTracker] Failed to send {kind} banner: {e}")
@@ -419,6 +425,12 @@ class PlayerTrackerCog(commands.Cog):
     async def _before_tail(self):
         await self.bot.wait_until_ready()
         await self._seed_known_players()
+        # Pre-build the cached banner backgrounds so the first join isn't slow.
+        for kind in ("new", "connect", "disconnect"):
+            try:
+                await asyncio.to_thread(player_banner.render_banner, kind, "warmup")
+            except Exception as e:
+                print(f"[PlayerTracker] Banner warm-up failed for {kind}: {e}")
         print(f"[PlayerTracker] Started — watching {self._log_dir} for *_user.txt over SFTP")
 
 
