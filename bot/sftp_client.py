@@ -23,6 +23,12 @@ class SftpError(Exception):
     """Raised when an SFTP operation fails."""
 
 
+# Upper bound for any single SFTP operation. Without it, a half-open connection
+# (e.g. after the game host restarts) makes reads hang forever — `is_closed()`
+# stays False, so nothing reconnects and every polling loop silently freezes.
+_OP_TIMEOUT = 30
+
+
 class SftpClient:
     def __init__(
         self,
@@ -52,13 +58,16 @@ class SftpClient:
             username=self.username,
             known_hosts=None,   # see security note above
             connect_timeout=15,  # fail fast with a clear error if the host is unreachable
+            # Detect a dead peer within ~90s so is_closed() flips and we reconnect.
+            keepalive_interval=30,
+            keepalive_count_max=3,
         )
         if self.key_path:
             kwargs["client_keys"] = [self.key_path]
         elif self.password:
             kwargs["password"] = self.password
         self._conn = await asyncssh.connect(**kwargs)
-        self._sftp = await self._conn.start_sftp_client()
+        self._sftp = await asyncio.wait_for(self._conn.start_sftp_client(), _OP_TIMEOUT)
 
     async def _ensure(self) -> None:
         async with self._lock:
@@ -72,6 +81,15 @@ class SftpClient:
                     "Check SFTP_HOST/SFTP_PORT and that outbound port 22 is reachable from this machine."
                 ) from exc
 
+    async def _run(self, op: str, coro):
+        """Await one SFTP operation with a timeout. On timeout the connection is
+        dropped so the next call reconnects instead of hanging on it again."""
+        try:
+            return await asyncio.wait_for(coro, _OP_TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            await self.close()
+            raise SftpError(f"{op}: timed out after {_OP_TIMEOUT}s (connection reset)") from exc
+
     async def close(self) -> None:
         if self._conn is not None:
             try:
@@ -84,19 +102,31 @@ class SftpClient:
 
     async def read_text(self, path: str, encoding: str = "utf-8") -> str:
         await self._ensure()
-        try:
+
+        async def _read():
             async with self._sftp.open(path, "rb") as f:
-                data = await f.read()
+                return await f.read()
+
+        try:
+            data = await self._run(f"read_text({path})", _read())
             return data.decode(encoding, errors="replace")
+        except SftpError:
+            raise
         except Exception as exc:
             raise SftpError(f"read_text({path}): {exc}") from exc
 
     async def read_bytes(self, path: str) -> bytes:
         """Read `path` raw (no decoding) — for binary files like players.db."""
         await self._ensure()
-        try:
+
+        async def _read():
             async with self._sftp.open(path, "rb") as f:
                 return await f.read()
+
+        try:
+            return await self._run(f"read_bytes({path})", _read())
+        except SftpError:
+            raise
         except Exception as exc:
             raise SftpError(f"read_bytes({path}): {exc}") from exc
 
@@ -104,8 +134,10 @@ class SftpClient:
         """Return (size, mtime) for `path`, or None if the file does not exist."""
         await self._ensure()
         try:
-            st = await self._sftp.stat(path)
+            st = await self._run(f"stat({path})", self._sftp.stat(path))
             return (st.size, st.mtime)
+        except SftpError:
+            raise
         except (asyncssh.SFTPNoSuchFile, asyncssh.SFTPNoSuchPath, FileNotFoundError, OSError):
             return None
         except Exception as exc:
@@ -118,7 +150,9 @@ class SftpClient:
         """Return the base names in `path`."""
         await self._ensure()
         try:
-            entries = await self._sftp.listdir(path)
+            entries = await self._run(f"list_dir({path})", self._sftp.listdir(path))
+        except SftpError:
+            raise
         except Exception as exc:
             raise SftpError(f"list_dir({path}): {exc}") from exc
         names = []
@@ -150,11 +184,17 @@ class SftpClient:
     async def tail(self, path: str, offset: int) -> tuple[str, int]:
         """Read `path` from byte `offset` to EOF. Return (text, new_offset)."""
         await self._ensure()
-        try:
+
+        async def _read():
             async with self._sftp.open(path, "rb") as f:
                 await f.seek(offset)
-                data = await f.read()
+                return await f.read()
+
+        try:
+            data = await self._run(f"tail({path}, {offset})", _read())
             return data.decode("utf-8", errors="replace"), offset + len(data)
+        except SftpError:
+            raise
         except Exception as exc:
             raise SftpError(f"tail({path}, {offset}): {exc}") from exc
 
@@ -167,10 +207,16 @@ class SftpClient:
         """
         await self._ensure()
         data = content.encode(encoding)
-        try:
+
+        async def _write():
             async with self._sftp.open(path, "wb") as f:
                 await f.write(data)
+
+        try:
+            await self._run(f"write_text({path})", _write())
             return True
+        except SftpError:
+            raise
         except Exception as exc:
             raise SftpError(f"write_text({path}): {exc}") from exc
 

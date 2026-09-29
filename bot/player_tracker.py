@@ -238,6 +238,9 @@ class PlayerTrackerCog(commands.Cog):
     async def _send_player_banner(self, channel, kind: str, name: str) -> None:
         """Render and send a red/green signal banner to the join/leave channel."""
         if not channel:
+            ch_id = self.bot.config.JOIN_LEAVE_CHANNEL_ID or self.bot.config.CHANNEL_ID
+            print(f"[PlayerTracker] Cannot send {kind} banner for {name}: channel {ch_id} "
+                  f"not found (wrong JOIN_LEAVE_CHANNEL_ID, or bot can't view it)")
             return
         try:
             data = player_banner.render_banner(kind, name)
@@ -252,13 +255,68 @@ class PlayerTrackerCog(commands.Cog):
             await asyncio.sleep(_RESPAWN_WINDOW)
             if self._pending_leave.pop(name, None) is None:
                 return  # a join followed -> respawn, leave notification suppressed
-            if self.bot.features.is_enabled("join_leave"):
+            enabled = self.bot.features.is_enabled("join_leave")
+            if enabled:
                 await self._send_player_banner(
                     self.bot.get_join_leave_channel(), "disconnect", name
                 )
-            print(f"[PlayerTracker] Leave -> {name}")
+            print(f"[PlayerTracker] Leave -> {name}" + ("" if enabled else " (notifications disabled)"))
         except Exception as e:
             print(f"[PlayerTracker] delayed leave error: {e}")
+
+
+    async def _handle_line(self, line: str) -> None:
+        # "fully connected" -> Discord join notification
+        m = _CONNECTED_RE.match(line)
+        if m:
+            name = m.group(1)
+            if self._pending_leave.pop(name, None) is not None:
+                print(f"[PlayerTracker] Join -> {name} (respawn after leave, suppressed)")
+                return
+            is_new = upsert_player(name)
+            enabled = self.bot.features.is_enabled("join_leave")
+            if enabled:
+                await self._send_player_banner(
+                    self.bot.get_join_leave_channel(), "new" if is_new else "connect", name
+                )
+            print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})"
+                  + ("" if enabled else " (notifications disabled)"))
+            # Rank sync writes over SFTP — do it after the banner so a slow or
+            # failing write can't hold up / swallow the join notification.
+            rank_cog = self.bot.get_cog("RankSync")
+            if rank_cog:
+                try:
+                    await rank_cog.sync_by_pz_username(name)
+                except Exception as e:
+                    print(f"[PlayerTracker] Rank sync failed for {name}: {e}")
+            return
+
+        # "disconnected" -> Discord leave notification
+        m = _DISCONNECTED_RE.match(line)
+        if m:
+            name = m.group(1)
+            self._pending_leave[name] = time.time()
+            asyncio.create_task(self._delayed_leave(name))
+            return
+
+        # Death -> death notification (to the death-logs channel).
+        # The Death Log mod (death_log.py) is the rich source when present;
+        # otherwise fall back to this vanilla line (name + location + pvp).
+        if _DEATH_RE and not self.bot.state.death_log_active:
+            m = _DEATH_RE.match(line)
+            if m:
+                name = m.group(1)
+                details = {}
+                if m.group(2) is not None:
+                    details["location"] = f"X: {m.group(2)}, Y: {m.group(3)}"
+                if m.group(5) is not None:
+                    # PZ writes either "(pvp)" or "(non pvp)". Match the whole
+                    # token, not a substring, or "non pvp" reads as a player kill.
+                    details["pvp"] = m.group(5).strip().lower() == "pvp"
+                asyncio.ensure_future(self._handle_death(name, details))
+                return
+            if "died" in line.lower():
+                print(f"[PlayerTracker] Unmatched death line: {line}")
 
 
     # ---- main tail loop ------------------------------------------------------
@@ -294,57 +352,12 @@ class PlayerTrackerCog(commands.Cog):
                 line = line.strip()
                 if not line:
                     continue
-
-                # "fully connected" -> Discord join notification
-                m = _CONNECTED_RE.match(line)
-                if m:
-                    name = m.group(1)
-                    if self._pending_leave.pop(name, None) is not None:
-                        print(f"[PlayerTracker] Join -> {name} (respawn after leave, suppressed)")
-                        continue
-                    is_new = upsert_player(name)
-                    rank_cog = self.bot.get_cog("RankSync")
-                    if rank_cog:
-                        await rank_cog.sync_by_pz_username(name)
-                    if is_new:
-                        if self.bot.features.is_enabled("join_leave"):
-                            await self._send_player_banner(
-                                self.bot.get_join_leave_channel(), "new", name
-                            )
-                    else:
-                        if self.bot.features.is_enabled("join_leave"):
-                            await self._send_player_banner(
-                                self.bot.get_join_leave_channel(), "connect", name
-                            )
-                    print(f"[PlayerTracker] Join -> {name} ({'new' if is_new else 'returning'})")
-                    continue
-
-                # "disconnected" -> Discord leave notification
-                m = _DISCONNECTED_RE.match(line)
-                if m:
-                    name = m.group(1)
-                    self._pending_leave[name] = time.time()
-                    asyncio.create_task(self._delayed_leave(name))
-                    continue
-
-                # Death -> death notification (to the death-logs channel).
-                # The Death Log mod (death_log.py) is the rich source when present;
-                # otherwise fall back to this vanilla line (name + location + pvp).
-                if _DEATH_RE and not self.bot.state.death_log_active:
-                    m = _DEATH_RE.match(line)
-                    if m:
-                        name = m.group(1)
-                        details = {}
-                        if m.group(2) is not None:
-                            details["location"] = f"X: {m.group(2)}, Y: {m.group(3)}"
-                        if m.group(5) is not None:
-                            # PZ writes either "(pvp)" or "(non pvp)". Match the whole
-                            # token, not a substring, or "non pvp" reads as a player kill.
-                            details["pvp"] = m.group(5).strip().lower() == "pvp"
-                        asyncio.ensure_future(self._handle_death(name, details))
-                        continue
-                    if "died" in line.lower():
-                        print(f"[PlayerTracker] Unmatched death line: {line}")
+                # Isolate per-line failures: the file offset has already moved
+                # past this chunk, so one bad line must not drop the rest.
+                try:
+                    await self._handle_line(line)
+                except Exception as e:
+                    print(f"[PlayerTracker] Error handling line {line!r}: {e}")
 
         except Exception as e:
             print(f"[PlayerTracker] Tail error: {e}")
