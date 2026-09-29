@@ -106,6 +106,8 @@ class Config:
         self.AIRDROP_CHANNEL_ID = _env_int("AIRDROP_CHANNEL_ID", 0)
         self.AIRDROP_ROLE_ID = _env_int("AIRDROP_ROLE_ID", 0)
         self.SIEGE_CHANNEL_ID = _env_int("SIEGE_CHANNEL_ID", 0)
+        # Jamie's Fortune jackpot announcements (0 = fall back to DISCORD_CHANNEL_ID)
+        self.JACKPOT_CHANNEL_ID = _env_int("JACKPOT_CHANNEL_ID", 0)
         self.SIEGE_ROLE_ID = _env_int("SIEGE_ROLE_ID", 0)
         # Dedicated channel for join/leave notifications (0 = fall back to DISCORD_CHANNEL_ID)
         self.JOIN_LEAVE_CHANNEL_ID = _env_int("JOIN_LEAVE_CHANNEL_ID", 0)
@@ -346,7 +348,7 @@ class PZBot(commands.Bot):
         lua_bridge.init(self)
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
-                    "jeeves_drops", "jeeves_modmanager", "server_status",
+                    "jeeves_drops", "jamies_fortune", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "stats", "cleanup", "help"):
             try:
                 await self.load_extension(ext)
@@ -383,6 +385,11 @@ class PZBot(commands.Bot):
     def get_airdrop_channel(self) -> Optional[discord.TextChannel]:
         """Channel for air-drop notifications (dedicated if configured, else the main channel)."""
         ch_id = self.config.AIRDROP_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
+    def get_jackpot_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for Jamie's Fortune jackpots (dedicated if configured, else the main channel)."""
+        ch_id = self.config.JACKPOT_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
     def get_siege_channel(self) -> Optional[discord.TextChannel]:

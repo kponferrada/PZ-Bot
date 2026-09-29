@@ -7,7 +7,8 @@ they cannot tell whether the bytes arrived from a local process or over SFTP.
 Files:
   bot -> mod (commands) : jeeves_commands.txt, jeeves_chat.txt, siege_night_commands.txt
   mod -> bot (status)   : jeeves_world_status.txt, jeeves_drops_status.txt,
-                          jeeves_supply_event_status.txt, siege_night_status.txt
+                          jeeves_supply_event_status.txt, siege_night_status.txt,
+                          JamiesFortune_JackpotLog.txt (tailed by jamies_fortune)
 
 > These are `.txt`, not `.lua` — Build 42.20 restricted which extensions
 > `getFileWriter` accepts. Requires the current Workshop versions of the Jeeves mods.
@@ -37,6 +38,7 @@ WORLD_STATUS_FILE = "jeeves_world_status.txt"
 SUPPLY_EVENT_STATUS_FILE = "jeeves_supply_event_status.txt"
 SIEGE_STATUS_FILE = "siege_night_status.txt"
 SIEGE_COMMAND_FILE = "siege_night_commands.txt"
+JAMIES_JACKPOT_FILE = "JamiesFortune_JackpotLog.txt"
 
 
 def init(bot) -> str:

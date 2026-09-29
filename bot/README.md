@@ -27,6 +27,7 @@ unchanged from a remote VPS.
 | Rank sync — Discord roles → in-game name colours | `rank_sync.py` |
 | Siege Night — start / per-wave / ended notifications + control | `siege_night.py` |
 | Airdrop / supply-drop notifications (server-wide only) | `jeeves_drops.py` |
+| Jamie's Fortune jackpot notifications (@-mentions linked winners) | `jamies_fortune.py` |
 | Workshop mod-update checker (chunked Steam API, retries) | `mod_checker.py` |
 | Bot-driven scheduled + mod-update restarts | `restart_watch.py` |
 | Whitelist system — application, approval, manual admin | `whitelist.py` |
@@ -166,6 +167,7 @@ across restarts in `feature_state.json` (override with `FEATURE_STATE_PATH`).
 | `deaths` | Death notifications |
 | `siege_night` | Siege night notifications |
 | `airdrops` | Airdrop & supply notifications |
+| `jackpots` | Jamie's Fortune jackpot notifications |
 | `restarts` | Restart notifications |
 | `scheduled_restarts` | Scheduled restarts |
 | `mod_updates` | Workshop mod update checker |

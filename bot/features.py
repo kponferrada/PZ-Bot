@@ -19,6 +19,7 @@ FEATURES = {
     "deaths": "Death notifications",
     "siege_night": "Siege night notifications",
     "airdrops": "Airdrop & supply notifications",
+    "jackpots": "Jamie's Fortune jackpot notifications",
     "restarts": "Restart notifications",
     "scheduled_restarts": "Scheduled restarts",
     "mod_updates": "Workshop mod update checker",

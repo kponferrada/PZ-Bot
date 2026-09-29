@@ -155,6 +155,7 @@ Create the channels/roles you want, copy their IDs (Developer Mode → right-cli
 | `WORKSHOP_UPDATE_CHANNEL_ID` / `WORKSHOP_UPDATE_ROLE_ID` | mod-update restart relay |
 | `DEATH_LOGS_CHANNEL_ID` | player death logs |
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | air-drop / supply-drop events |
+| `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpot wins (tails `Lua/JamiesFortune_JackpotLog.txt`) |
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | siege-night events |
 | `JOIN_LEAVE_CHANNEL_ID` | join/leave notifications |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist application + approval |
