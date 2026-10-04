@@ -57,6 +57,7 @@ The bot is one side of file protocols owned by other repos in
 | `jeeves_*` files | Jeeve's Integration / Jeeve's Drops (Workshop, not local) |
 | `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
 | `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |
+| **Planned, not built:** read `BarangayTales/progression.json`, append to `bt_event_wins.txt` (weekly RP leaderboard) | `barangaytales` (`JsonExport.lua`, `EventWinBridge.lua`); planned contract in the vault hub *PZ-Bot* |
 
 ## Known traps
 
