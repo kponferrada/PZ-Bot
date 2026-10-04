@@ -43,6 +43,7 @@ on boot.
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
 | Whitelist applications, approval, admin | `whitelist.py` | RCON | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
+| `/rpleaderboard`: weekly RP standings and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BarangayTales/progression.json`) | — |
 | `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
 | Cleanup of regenerable bot files | `cleanup.py` | — | — |
@@ -57,7 +58,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 `/help` (admin) prints the same list in Discord.
 
 **Everyone:** `/myrank`, `/linkme`, `/unlinkme`, `/stats <username>`,
-`/leaderboard <kind>`, `/features`, `/whitelist`.
+`/leaderboard <kind>`, `/rpleaderboard [limit]`, `/features`, `/whitelist`.
 
 **Admin:**
 
@@ -84,6 +85,19 @@ that expires) use one sequence:
 `/restartnow` saves at once, kicks after 30 s, then quits. A restart is refused
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
+
+### Weekly RP leaderboard
+
+`/rpleaderboard [limit]` (default 10, max 25) reads the export that the Barangay
+Tales mod writes every 5 to 10 minutes. It shows:
+
+- this week's Reputation Points (RP) standings. RP comes from wealth, zombie kills, quests and event wins.
+- the title each top-5 place earns when the week ends (Monday 00:00 GMT+8): Legendary, Elite, Master, Veteran, Rising Survivor. Winners hold the title for the following week.
+- last week's winners and the titles they were actually granted.
+
+The export doesn't contain the place → title table, so the bot keeps a copy in
+`DEFAULT_WEEKLY_TITLES` (`bot/bt_progression.py`). If the titles in BT's
+`Config.WeeklyRanking.titles` change, update that copy too.
 
 ## Setup
 
@@ -126,7 +140,8 @@ Required keys: `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_CHANNEL_ID`,
 `RCON_PASSWORD`, `SFTP_HOST`, `SFTP_USER`, and `SFTP_PASSWORD` or `SFTP_KEY_PATH`.
 The bot refuses to start without them. Set `SFTP_ZOMBOID_ROOT` (and
 `SFTP_SERVER_INI`, `SFTP_MODS_DIR` on Indifferent Broccoli). Everything else
-is optional and documented in `config.env.example`.
+is optional and documented in `config.env.example` (for example
+`BT_PROGRESSION_PATH` for the Barangay Tales export).
 
 Run once in the foreground to check it:
 

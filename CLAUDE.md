@@ -15,11 +15,14 @@ the README instead. Open issues and decisions are tracked in the Hermes vault
 
 ## Verify a change
 
-There is no test suite. The minimum check after any edit:
+Run from `bot/` (install test dependencies with `pip install -r requirements-dev.txt`):
 
 ```bash
-cd bot && python -m py_compile *.py scripts/*.py
+python -m py_compile *.py scripts/*.py tests/*.py
+python -m pytest tests
 ```
+
+Tests cover only the pure functions (`tests/test_bt_progression.py` so far). Add tests for anything new that can run without Discord or SFTP.
 
 The bot can't run without real Discord, RCON and SFTP credentials. Behaviour is
 checked on the **test instance** (a second Discord bot that runs `develop`). Say
@@ -57,7 +60,8 @@ The bot is one side of file protocols owned by other repos in
 | `jeeves_*` files | Jeeve's Integration / Jeeve's Drops (Workshop, not local) |
 | `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
 | `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |
-| **Planned, not built:** read `BarangayTales/progression.json`, append to `bt_event_wins.txt` (weekly RP leaderboard) | `barangaytales` (`JsonExport.lua`, `EventWinBridge.lua`); planned contract in the vault hub *PZ-Bot* |
+| `BarangayTales/progression.json` (read by `bt_progression.py` → `/rpleaderboard`). `DEFAULT_WEEKLY_TITLES` copies BT `Config.WeeklyRanking.titles` | `barangaytales` `JsonExport.lua`, `WeeklyRanking.lua`, `Config.lua` |
+| **Planned, not built:** append event wins to `bt_event_wins.txt` (`<playerId>\|<eventId>\|<metadata>`, the `/pzrecordwin` command) | `barangaytales` `EventWinBridge.lua`; contract in the vault hub *PZ-Bot* |
 
 ## Known traps
 

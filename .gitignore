@@ -11,6 +11,7 @@ __pycache__/
 *.py[cod]
 venv/
 .venv/
+.pytest_cache/
 
 # ============================================================================
 # Runtime-generated data (not source)

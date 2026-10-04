@@ -141,6 +141,10 @@ class Config:
         # to {SFTP_LUA_DIR}/Aegis/Player/stats.txt in aegis_stats.
         self.AEGIS_STATS_PATH = _env("AEGIS_STATS_PATH")
 
+        # Barangay Tales progression export (weekly RP leaderboard). Defaults to
+        # {SFTP_LUA_DIR}/BarangayTales/progression.json in bt_progression.
+        self.BT_PROGRESSION_PATH = _env("BT_PROGRESSION_PATH")
+
         # Mod update checker (Steam Workshop) — optional key for unlisted items.
         self.STEAM_API_KEY = _env("STEAM_API_KEY", "")
         self.MOD_UPDATE_STATE_PATH = _env("MOD_UPDATE_STATE_PATH", "mod_update_state.json")
@@ -347,7 +351,8 @@ class PZBot(commands.Bot):
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jamies_fortune", "jeeves_modmanager", "server_status",
-                    "restart_watch", "feature_controls", "whitelist", "stats", "cleanup", "help"):
+                    "restart_watch", "feature_controls", "whitelist", "stats", "weekly_rp", "cleanup",
+                    "help"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
