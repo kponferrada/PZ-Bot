@@ -1,0 +1,67 @@
+# CLAUDE.md — maintainer guide for PZ-Bot
+
+Read this before changing the bot. User-facing setup, commands, config and the
+release process are in [`README.md`](README.md). Do not repeat them here: update
+the README instead. Open issues and decisions are tracked in the Hermes vault
+(`D:\Dev\main\hermes-agent\secondary-brain\projects\pz-bot\`), not in this repo.
+
+## Repo rules
+
+- Branches: work on **`develop`**. `main` takes merges for releases; tags are `vX.Y.Z` (README → Releases).
+- Commit locally as `Keym <keym@localhost>` with conventional messages (`feat(scope): …`, `fix(scope): …`, `docs: …`). **Never push or tag unless the user asks.** The live VPS deploys from GitHub.
+- Secrets: `bot/config.env`, `bot/config live.env`, `bot/config test.env` exist locally and are gitignored. Do not read, print or commit them. Change config keys in `bot/config.env.example`.
+- Runtime state files in `bot/` (`players.db`, `feature_state.json`, `deaths.json`, `whitelist_requests.csv`, `mod_update_state.json`, `dashboard_assets.json`, `status_card.png`, `jeeves.lock`) are gitignored. `rank_links.json` is the exception: it is tracked even though it is runtime data.
+- Keep one user doc (README.md) and this file. Don't add planning or review docs to the repo; put them in the vault.
+
+## Verify a change
+
+There is no test suite. The minimum check after any edit:
+
+```bash
+cd bot && python -m py_compile *.py scripts/*.py
+```
+
+The bot can't run without real Discord, RCON and SFTP credentials. Behaviour is
+checked on the **test instance** (a second Discord bot that runs `develop`). Say
+which checks you ran and which you could not.
+
+## Architecture
+
+- `main.py` is the script entry point (`python main.py`, so the module is `__main__`). It holds `Config` (all env keys), `ServerState`, `RCONHelper`, `PZBot`, the up/down monitor and the core admin commands. It loads every other module as a cog in `setup_hook`. **A new cog must be added to that extension tuple.**
+- **Never `import main` from a cog.** That runs main.py a second time and builds a second Config and bot. Reach shared things through `bot` (`bot.config`, `bot.state`, `bot.rcon`, `bot.features`, `bot.get_*_channel()`). Shared helpers go in their own module (for example `checks.require_role`).
+- `sftp_client.py` is the only path to server files. It is a module singleton (`sftp_client.get()`). It reconnects lazily, every operation has a 30 s timeout, and a timeout drops the connection so the next call reconnects. It raises `SftpError`, and callers catch that.
+- `lua_bridge.py` owns the mod files in `Lua/`:
+  - bot → mod commands: `jeeves_commands.txt`, `jeeves_chat.txt`, `siege_night_commands.txt`. These are Lua tables (`return { command=…, id=…, … }`) built by `_build_lua_table`. Non-ASCII text is written as `\ddd` byte escapes because the game misreads multibyte text.
+  - Handshake: before writing, the bridge waits up to 5 s for the mod to **empty** the previous file (the mod "deletes" a file by truncating it). Each file has its own lock and an id counter that resets when the bot restarts.
+  - mod → bot status files: `jeeves_world_status.txt`, `jeeves_drops_status.txt`, `jeeves_supply_event_status.txt`, `siege_night_status.txt` (nested tables, parsed by `_parse_lua_nested`).
+  - Files are `.txt` because Build 42.20 limits the extensions `getFileWriter` accepts. `rank_sync` writes `jeeves_ranks.lua` directly.
+- Tailed files (2 s loops): `Logs/*_user.txt` (player_tracker, newest file; a rotated log is read from its end), `Logs/*_chat.txt` (chat_relay), `Lua/player-death-logging.log` (death_log), `Lua/JamiesFortune_JackpotLog.txt` (jamies_fortune). On startup the tailers skip existing content, so events that happen while the bot is down are lost.
+- Data sources: Aegis Panel's `Lua/Aegis/Player/stats.txt` is the source of truth for kills, deaths and playtime (`aegis_stats`, cached briefly). The local `players.db` (SQLite) only records sessions and who is "known". It is seeded from Aegis, falling back to the server's `db/pzserver.db`. `deaths.json` keeps per-death timestamps for the today/this-week counts, using Philippine time (UTC+8).
+- Server online detection uses three signals. `monitor_server_state` (15 s) probes RCON for the banners. `poll_players` prefers the fresh bridge status file (≤ 90 s old, judged by the server's mtime, so it is immune to clock skew) over RCON `players`. The dashboard waits for 3 RCON failures and also counts bridge files fresh within 120 s as online.
+- Restarts (`restart_watch.py`): `ServerState.expect_restart()` is the lock (it expires after 15 min). `_start_restart` claims it **before** its first `await` so two triggers can't race. It returns False when a restart is already running or RCON is dead. A failed countdown releases the lock. A deferral cancels the countdown and suppresses the triggers, then fires again when it ends if a restart was pending. When `restart_shutdown_started` is True, the up/down monitor treats the next outage as part of the restart, not a blip.
+- Feature toggles: every notification is gated by `bot.features.is_enabled("<key>")`. When you add a key, add it to `features.FEATURES`. A renamed key goes into `_LEGACY_KEY_MAP` so stored "disabled" state carries over. Most toggles only silence messages; the work behind them (tailing, restart actions) keeps running. `mod_updates`, `scheduled_restarts` and `status_dashboard` stop the work itself.
+- Permissions: most admin checks are copy-pasted `_check_role` helpers in each cog. `main.py` and `rank_sync` use `checks.require_role`. When you add or move a command, update the `/help` table in `help.py` and the README command list. `[admin]` in help must match the real check.
+- Discord interactions must be answered within 3 s. Anything that touches SFTP, RCON or the bridge (whose writes can wait 5 s) must `defer()` first and reply with `followup.send`.
+- RCON calls: `rcon.send_command` is async. `rcon.is_server_online` is a **blocking** socket call, so call it as `await asyncio.to_thread(...)`.
+- Images are made with Pillow: `status_card.py`, `death_card.py`, `player_banner.py` (it inpaints the name into the template art; the backgrounds are cached once per kind). The art and fonts are in `bot/assets/`. `scripts/` holds one-off tools for cutting banner art.
+
+## External contracts
+
+The bot is one side of file protocols owned by other repos in
+`D:\Dev\main\projectzomboid-modding\`. Change both sides together.
+
+| Contract | Other side |
+|---|---|
+| `siege_night_status.txt` / `siege_night_commands.txt` | `siege-night-bridge` (vault: *siege-night-bridge File Protocol*) |
+| `player-death-logging.log` block format | `player-death-logging-b42` (vault: *player-death-logging-b42 Log Format*) |
+| `jeeves_*` files | Jeeve's Integration / Jeeve's Drops (Workshop, not local) |
+| `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
+| `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |
+
+## Known traps
+
+- The host's SFTP server rejects rename, so `write_text` writes directly. Don't reintroduce tmp+rename.
+- When a player dies, PZ logs a leave and then a join. player_tracker holds a leave for 15 s (`_RESPAWN_WINDOW`) and drops both if the join follows.
+- B42 logs animals as players. player_tracker reports deaths only for known players.
+- `WORKSHOP_UPDATE_CHANNEL_ID` / `_ROLE_ID` are loaded but unused.
+- Rank colours disagree across the code: `/myrank` says Blaze is Orange, while `rank_sync` and `chat_relay` say Cyan.
