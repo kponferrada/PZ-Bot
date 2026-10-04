@@ -475,13 +475,13 @@ class RankSync(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    from main import require_role, config
+    from checks import require_role
 
     cog = RankSync(bot)
 
     for cmd_name in ("cmd_setrank", "cmd_syncranks", "cmd_linkname", "cmd_unlinkname", "cmd_listlinks"):
         cmd = getattr(cog, cmd_name)
-        setattr(cog, cmd_name, require_role(config.DEFAULT_ROLE)(cmd))
+        setattr(cog, cmd_name, require_role(bot.config.DEFAULT_ROLE)(cmd))
 
     await bot.add_cog(cog)
     print("[RankSync] Extension loaded.")

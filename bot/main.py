@@ -1,18 +1,15 @@
 """
 PZ Tambayan Discord Bot — remote server monitor & Jeeves bridge.
 
-A slim, remote-only refactor of JeevesBot. Talks to the Project Zomboid server
-over **RCON** (commands) and **SFTP** (file bridge to the Jeeves mods).
+A remote-only refactor of JeevesBot. Talks to the Project Zomboid server over
+**RCON** (commands) and **SFTP** (file bridge to the server mods, log tailing).
 
-Deliberately has NO process control: it does not start, stop, or restart the
-game server process. Starting a stopped server and running SteamCMD are
-same-server operations that stay on the host panel. The bot monitors, reports,
-and drives the Jeeves mod bridge.
+This file holds config, RCON, shared server state, the up/down monitor and the
+core admin commands; every other feature is a cog loaded in `setup_hook`.
 
-Retained features: player tracking + welcome/death notes, the world/player
-status dashboard, chat relay, rank sync, siege/drop events, playsound, and
-/modlist. Removed: server lifecycle, auto-restart, SteamCMD /update, mod
-add/remove, and crash-recovery.
+The bot can STOP the server over RCON (save -> kick -> quit, see
+restart_watch.py) but can never START it: bringing the process back up and
+SteamCMD stay with the host. See ../README.md and ../CLAUDE.md.
 """
 
 import os
@@ -51,6 +48,7 @@ except ImportError:
 import lua_bridge
 import sftp_client
 import features
+from checks import require_role
 
 
 # =============================================================================
@@ -504,7 +502,8 @@ class PZBot(commands.Bot):
     @tasks.loop(seconds=15)
     async def monitor_server_state(self):
         """Announce server up/down, distinguishing restarts from real outages."""
-        online = self.rcon.is_server_online()
+        # The RCON probe is a blocking socket call; keep it off the event loop.
+        online = await asyncio.to_thread(self.rcon.is_server_online)
         prev = self._was_online
         now = time.time()
 
@@ -598,7 +597,7 @@ async def on_ready() -> None:
         bot.monitor_server_state.start()
     # Set the online baseline silently — no startup message or up/down banner here.
     # Real up/down transitions are announced by monitor_server_state after startup.
-    bot._was_online = bot.rcon.is_server_online(timeout=10)
+    bot._was_online = await asyncio.to_thread(bot.rcon.is_server_online, 10)
     if bot._was_online:
         # Server was already up at boot — we can't know its exact start time, so
         # baseline the mod-check from now.
@@ -609,17 +608,6 @@ async def on_ready() -> None:
 # =============================================================================
 # ROLE CHECKS
 # =============================================================================
-
-def require_role(role_name: str):
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if not interaction.guild:
-            return False
-        role = discord.utils.get(interaction.guild.roles, name=role_name)
-        if role is None or role not in interaction.user.roles:
-            raise app_commands.MissingRole(role_name)
-        return True
-    return app_commands.check(predicate)
-
 
 async def _send_error(interaction: discord.Interaction, embed: discord.Embed) -> None:
     try:
@@ -673,11 +661,15 @@ async def cmd_hello(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="online", description="Checks if the game server is online.")
 @require_role(config.DEFAULT_ROLE)
 async def cmd_online(interaction: discord.Interaction) -> None:
-    if bot.rcon.is_server_online():
+    await interaction.response.defer(ephemeral=True)
+    if await asyncio.to_thread(bot.rcon.is_server_online):
         await bot.send_notification(f"{Emojis.HAPPY} Server is Online!", discord.Colour.green())
     else:
         await bot.send_notification(f"{Emojis.PANIC} Server is Offline!", discord.Colour.red())
-    await _respond(interaction, "Check complete — see the notification channel.")
+    await interaction.followup.send(
+        embed=discord.Embed(title="Check complete — see the notification channel.",
+                            colour=discord.Colour.purple()),
+        ephemeral=True)
 
 
 @bot.tree.command(name="players", description="List players currently connected.")
