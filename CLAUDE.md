@@ -61,7 +61,7 @@ The bot is one side of file protocols owned by other repos in
 | `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
 | `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |
 | `BarangayTales/progression.json` (read by `bt_progression.py` → `/rpleaderboard`). `DEFAULT_WEEKLY_TITLES` copies BT `Config.WeeklyRanking.titles` | `barangaytales` `JsonExport.lua`, `WeeklyRanking.lua`, `Config.lua` |
-| **Planned, not built:** append event wins to `bt_event_wins.txt` (`<playerId>\|<eventId>\|<metadata>`, the `/pzrecordwin` command) | `barangaytales` `EventWinBridge.lua`; contract in the vault hub *PZ-Bot* |
+| Not the bot's job: event wins are recorded inside Barangay Tales (decided 2026-10-05). The bot does not write `bt_event_wins.txt`. | `barangaytales` |
 
 ## Known traps
 
