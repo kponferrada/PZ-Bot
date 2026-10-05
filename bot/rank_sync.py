@@ -35,6 +35,7 @@ from discord.ext import commands, tasks
 from typing import Optional, Dict
 
 import bt_progression
+import ranks
 import lua_bridge
 import sftp_client
 
@@ -48,15 +49,7 @@ ROLE_TO_RANK = {
     "Inferno": 6,
 }
 
-RANK_DISPLAY = {
-    0: "\u2b1c Default",
-    1: "\U0001f7e9 Fuel (Green)",
-    2: "\U0001f7e6 Spark (Blue)",
-    3: "\U0001f7ea Cinder (Violet)",
-    4: "\U0001f7e8 Flame (Yellow)",
-    5: "\U0001f7e6 Blaze (Cyan)",
-    6: "\U0001f7e5 Inferno (Red)",
-}
+RANK_DISPLAY = {n: ranks.display(n) for n in ranks.RANKS}
 
 LINK_FILE = __import__("pathlib").Path(__file__).parent / "rank_links.json"
 RANKS_FILENAME = "jeeves_ranks.lua"
@@ -519,13 +512,7 @@ class RankSync(commands.Cog):
     @app_commands.command(name="setrank", description="Set a player's in-game rank (chat name color).")
     @app_commands.describe(username="The player's PZ username (case-sensitive)", rank="Rank 0-6")
     @app_commands.choices(rank=[
-        app_commands.Choice(name="0 - Default (no color)", value=0),
-        app_commands.Choice(name="1 - Fuel (green)", value=1),
-        app_commands.Choice(name="2 - Spark (blue)", value=2),
-        app_commands.Choice(name="3 - Cinder (violet)", value=3),
-        app_commands.Choice(name="4 - Flame (yellow)", value=4),
-        app_commands.Choice(name="5 - Blaze (cyan)", value=5),
-        app_commands.Choice(name="6 - Inferno (red)", value=6),
+        app_commands.Choice(name=ranks.choice_label(n), value=n) for n in ranks.RANKS
     ])
     async def cmd_setrank(self, interaction: discord.Interaction, username: str,
                           rank: app_commands.Choice[int]):

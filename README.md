@@ -245,7 +245,7 @@ jackpots, whitelist, …). The next tag should be `v0.5.0`.
 | Banner images | `ANNOUNCE_*_IMAGE` in `config.env`; files in `bot/assets/` |
 | Join / leave / death wording | `player_tracker.py`, `death_log.py` |
 | Death certificate art | `bot/assets/death-certificate-source.webp` → `python scripts/build_death_certificate.py` (needs numpy + opencv) → `death-certificate.png`; field positions in `death_card.py` |
-| Rank names and colours | `RANK_1..6` (config), `ROLE_TO_RANK` / `RANK_DISPLAY` in `rank_sync.py`, `ANSI_COLORS` in `chat_relay.py`, `_RANK_INFO` in `main.py` |
+| Rank names and colours | `RANKS` in `bot/ranks.py` (one table for /myrank, /setrank, /listlinks and the chat relay colours; must match the server's `JeevesIntegration.RankColor_n`), Discord role names in `RANK_1..6` (config) and `ROLE_TO_RANK` in `rank_sync.py` |
 | Relayed chat channels | `RELAY_CHAT_TYPES` in `chat_relay.py` |
 | Emoji | `EMOJI_*` in `config.env` |
 

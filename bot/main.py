@@ -46,6 +46,7 @@ except ImportError:
     sys.exit("ERROR: rcon package not installed. Install with: pip install rcon")
 
 import lua_bridge
+import ranks
 import sftp_client
 import features
 from checks import require_role
@@ -830,15 +831,7 @@ async def cmd_playsound(interaction: discord.Interaction, sound: app_commands.Ch
 # RANK COMMAND
 # =============================================================================
 
-_RANK_INFO = {
-    0: ("Default", "No color", "\u2b1c"),
-    1: ("Fuel", "Green", "\U0001f7e9"),
-    2: ("Spark", "Blue", "\U0001f7e6"),
-    3: ("Cinder", "Violet", "\U0001f7ea"),
-    4: ("Flame", "Yellow", "\U0001f7e8"),
-    5: ("Blaze", "Cyan", "\U0001f7e6"),  # matches rank_sync / chat_relay
-    6: ("Inferno", "Red", "\U0001f7e5"),
-}
+_RANK_INFO = {n: (r.name, r.colour, r.emoji) for n, r in ranks.RANKS.items()}
 
 
 @bot.tree.command(name="myrank", description="Show your current in-game rank and chat color.")
