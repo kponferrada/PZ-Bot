@@ -324,7 +324,10 @@ class ModChecker:
             # Advance the baseline only when nothing is pending. If we saved here
             # with a pending update, a deferral would silently "consume" it and the
             # next poll would never re-detect it.
-            self._save_state(current)
+            # Merge rather than replace: an item no source could answer this
+            # time keeps its old baseline, so an update during the outage is
+            # still detected (instead of being adopted silently as "new").
+            self._save_state({**previous, **current})
             print(f"[ModCheck] ✅ {len(current)} mod(s) current.")
         else:
             print(f"[ModCheck] 🚨 {len(updated)} update(s) pending: {', '.join(updated)}")

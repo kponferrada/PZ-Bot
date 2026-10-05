@@ -58,11 +58,9 @@ class JamiesFortuneCog(commands.Cog):
 
     def _winner_mention(self, username: str) -> str:
         """`<@id>` for a Discord-linked PZ username, else the plain name."""
-        links = getattr(self.bot.get_cog("RankSync"), "_links", None) or {}
-        for discord_id, pz_name in links.items():
-            if pz_name.lower() == username.lower():
-                return f"<@{discord_id}>"
-        return f"@{username}"
+        rank_cog = self.bot.get_cog("RankSync")
+        discord_id = rank_cog.discord_id_for_pz_username(username) if rank_cog else None
+        return f"<@{discord_id}>" if discord_id else f"@{username}"
 
     async def _handle_line(self, line: str) -> None:
         d = self._parse_line(line)
@@ -128,6 +126,9 @@ class JamiesFortuneCog(commands.Cog):
                 # File truncated (server restart / rotation) — start over.
                 self._pos = 0
                 self._buffer = ""
+
+            if size == self._pos:
+                return  # nothing new; skip opening the file
 
             text, self._pos = await sftp.tail(path, self._pos)
             if not text:

@@ -22,7 +22,7 @@ python -m py_compile *.py scripts/*.py tests/*.py
 python -m pytest tests
 ```
 
-Tests cover only the pure functions (`tests/test_bt_progression.py` so far). Add tests for anything new that can run without Discord or SFTP.
+Tests cover the pure functions plus offline renders and command metadata (`tests/`). Add tests for anything new that can run without Discord or SFTP.
 
 The bot can't run without real Discord, RCON and SFTP credentials. Behaviour is
 checked on the **test instance** (a second Discord bot that runs `develop`). Say
@@ -44,7 +44,7 @@ which checks you ran and which you could not.
 - Restarts (`restart_watch.py`): `ServerState.expect_restart()` is the lock (it expires after 15 min). `_start_restart` claims it **before** its first `await` so two triggers can't race. It returns False when a restart is already running or RCON is dead. A failed countdown releases the lock. A deferral cancels the countdown and suppresses the triggers, then fires again when it ends if a restart was pending. When `restart_shutdown_started` is True, the up/down monitor treats the next outage as part of the restart, not a blip.
 - Ranks (`rank_sync`): `RANK_SOURCE=bt_ladder` (default) ranks every ladder player from `bt_progression.ladder_ranks` on a 5-min loop and ignores role changes; `RANK_LADDER_ROLES` additionally sets linked members' rank roles. `RANK_SOURCE=roles` is the old role → rank flow. Read ranks through `RankSync`, not the roles, so both modes work. Rank names, colours, emoji and ANSI codes live in one table, `ranks.RANKS` (tested against the live server's `RankColor_n` palette in `tests/test_ranks.py`).
 - Feature toggles: every notification is gated by `bot.features.is_enabled("<key>")`. When you add a key, add it to `features.FEATURES`. A renamed key goes into `_LEGACY_KEY_MAP` so stored "disabled" state carries over. Most toggles only silence messages; the work behind them (tailing, restart actions) keeps running. `mod_updates`, `scheduled_restarts` and `status_dashboard` stop the work itself.
-- Permissions: cog admin commands use `@checks.admin_only()` (reads `DEFAULT_ROLE` at run time; failures go to the global error handler in `main.py`). `main.py` and `rank_sync` use `checks.require_role`. `whitelist.py` still has its own `_is_admin` checks (left as is on purpose). When you add or move a command, update the `/help` table in `help.py` and the README command list. `[admin]` in help must match the real check.
+- Permissions: cog admin commands use `@checks.admin_only()` (reads `DEFAULT_ROLE` at run time; failures go to the global error handler in `main.py`). `main.py` uses `checks.require_role`. `whitelist.py` still has its own `_is_admin` checks (left as is on purpose). When you add or move a command, update the `/help` table in `help.py` and the README command list. `[admin]` in help must match the real check (`tests/test_help.py` enforces this for every cog except whitelist).
 - Text that comes from players (chat relay) is sent with `AllowedMentions.none()`; the bot's default also blocks @everyone/@here.
 - Discord interactions must be answered within 3 s. Anything that touches SFTP, RCON or the bridge (whose writes can wait 5 s) must `defer()` first and reply with `followup.send`.
 - RCON calls: `rcon.send_command` is async. `rcon.is_server_online` is a **blocking** socket call, so call it as `await asyncio.to_thread(...)`.

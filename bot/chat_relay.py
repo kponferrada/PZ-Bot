@@ -20,7 +20,6 @@ Config (config.env):
 import re
 import os
 import time
-import asyncio
 import discord
 from discord.ext import commands, tasks
 from typing import Optional

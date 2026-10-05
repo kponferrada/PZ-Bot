@@ -265,6 +265,9 @@ class DeathLogCog(commands.Cog):
                 self._pos = 0
                 self._buffer = ""
 
+            if size == self._pos:
+                return  # nothing new; skip opening the file
+
             text, self._pos = await sftp.tail(path, self._pos)
             if not text:
                 return

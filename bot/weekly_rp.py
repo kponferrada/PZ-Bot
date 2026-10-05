@@ -88,7 +88,9 @@ class WeeklyRPCog(commands.Cog):
     async def cmd_rpleaderboard(self, interaction: discord.Interaction, limit: int = 10) -> None:
         await interaction.response.defer()
         limit = max(1, min(int(limit), 25))
-        board = await bt_progression.get_weekly_leaderboard(self.bot, limit, force=True)
+        # The export changes every 5-10 min; the 60 s cache is fresh enough and
+        # keeps a burst of public /rpleaderboard calls from each hitting SFTP.
+        board = await bt_progression.get_weekly_leaderboard(self.bot, limit)
         if board is None:
             await interaction.followup.send(embed=discord.Embed(
                 title="\U0001f50d Weekly leaderboard unavailable",

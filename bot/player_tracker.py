@@ -25,7 +25,6 @@ the tail loop is source-agnostic so pointing it at that file is a one-line chang
 import asyncio
 import datetime
 import io
-import os
 import re
 import sqlite3
 import time

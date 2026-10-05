@@ -25,7 +25,6 @@ command file. Discord interactions expire after 3s, so we must acknowledge
 immediately and use followup.send for the actual reply.
 """
 
-import asyncio
 
 import discord
 from discord import app_commands
@@ -325,7 +324,6 @@ class SiegeNightCog(commands.Cog):
         event_day = sched.get("eventDay", "?")
         next_day = sched.get("nextSiegeDay", 0)
         completed = sched.get("totalSiegesCompleted", 0)
-        siege_count = sched.get("siegeCount", 0)
 
         world = await lua_bridge.read_world_status()
         date_str = siege_date_string(world, sched)

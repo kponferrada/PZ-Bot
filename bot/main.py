@@ -18,7 +18,7 @@ import asyncio
 import socket
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple, Set
+from typing import Optional, List, Tuple, Set
 
 # ---- load config.env ---------------------------------------------------------
 
