@@ -83,3 +83,21 @@ def test_exported_title_table_overrides_default():
 def test_missing_export_sections():
     board = btp.weekly_leaderboard({})
     assert board["rows"] == [] and board["weekId"] is None and board["lastWeek"] is None
+
+
+def test_ladder_ranks_last_week_places_and_active_players():
+    # Last week (W39): old 1st -> Inferno (6), p1 2nd -> Blaze (5).
+    # This week everyone p1..p7 has RP -> Fuel (1), unless placed higher.
+    assert btp.ladder_ranks(_sample()) == {
+        "old": 6, "p1": 5, "p2": 1, "p3": 1, "p4": 1, "p5": 1, "p6": 1, "p7": 1,
+    }
+
+
+def test_ladder_ranks_skip_players_without_rp():
+    data = _sample()
+    data["weeklyRanking"]["leaderboard"][-1]["rp"] = 0
+    assert "p7" not in btp.ladder_ranks(data)
+
+
+def test_ladder_ranks_empty_export():
+    assert btp.ladder_ranks({}) == {}

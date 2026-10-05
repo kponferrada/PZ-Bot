@@ -3,6 +3,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from checks import admin_only
 
 # Command guide, grouped by category. `[admin]` marks role-gated commands.
 _COMMANDS: dict[str, list[tuple[str, str]]] = {
@@ -28,7 +29,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     "👥 Players & Ranks": [
         ("/setaccesslevel <player> <level>", "Set a player's server access level. [admin]"),
         ("/setrank <username> <rank>", "Set a player's in-game rank (chat name colour). [admin]"),
-        ("/syncranks", "Rebuild the rank file from all linked members. [admin]"),
+        ("/syncranks", "Rebuild the rank file from the reputation ladder (or linked members' roles). [admin]"),
         ("/linkname <member> <username>", "Link a Discord user to their PZ username. [admin]"),
         ("/unlinkname <member>", "Remove a user's Discord-to-PZ link. [admin]"),
         ("/listlinks", "List all Discord-to-PZ username links. [admin]"),
@@ -73,15 +74,8 @@ class HelpCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="help", description="List all bot commands and their purposes (admins only).")
+    @admin_only()
     async def cmd_help(self, interaction: discord.Interaction) -> None:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        if role is None or role not in interaction.user.roles:
-            await interaction.response.send_message(
-                "\u274c You need the **admin** role to use this command.",
-                ephemeral=True,
-            )
-            return
-
         embed = discord.Embed(
             title="📖 PZ Tambayan Bot — Command Guide",
             description=(

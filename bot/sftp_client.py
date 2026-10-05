@@ -22,11 +22,37 @@ import asyncssh
 class SftpError(Exception):
     """Raised when an SFTP operation fails."""
 
+    @property
+    def not_found(self) -> bool:
+        """True when the failure was a missing file or directory."""
+        return isinstance(self.__cause__, (asyncssh.SFTPNoSuchFile, asyncssh.SFTPNoSuchPath,
+                                           FileNotFoundError))
+
 
 # Upper bound for any single SFTP operation. Without it, a half-open connection
 # (e.g. after the game host restarts) makes reads hang forever — `is_closed()`
 # stays False, so nothing reconnects and every polling loop silently freezes.
 _OP_TIMEOUT = 30
+
+
+def complete_utf8_length(data: bytes) -> int:
+    """Length of `data` minus a trailing, still-incomplete UTF-8 sequence.
+
+    A tail read can end in the middle of a multi-byte character (a name with
+    "ñ", an emoji in chat). Decoding that chunk on its own would turn the
+    character into U+FFFD, so callers stop before it and read it next time.
+    """
+    n = len(data)
+    # A UTF-8 sequence is at most 4 bytes: look back over continuation bytes.
+    for back in range(1, min(4, n) + 1):
+        b = data[n - back]
+        if b & 0xC0 == 0x80:          # continuation byte, keep looking
+            continue
+        if b & 0x80 == 0:             # ASCII: nothing pending
+            return n
+        need = 2 if b & 0xE0 == 0xC0 else 3 if b & 0xF0 == 0xE0 else 4 if b & 0xF8 == 0xF0 else 1
+        return n if back >= need else n - back
+    return n
 
 
 class SftpClient:
@@ -163,22 +189,30 @@ class SftpClient:
 
     async def newest_matching(self, directory: str, pattern: str) -> str | None:
         """Return the full path of the newest file in `directory` whose name matches
-        `pattern` (shell-style glob), or None if none exist."""
+        `pattern` (shell-style glob), or None if none exist.
+
+        One `readdir` round trip: the listing already carries each entry's
+        mtime, so no per-file `stat` is needed.
+        """
         try:
-            names = await self.list_dir(directory)
+            await self._ensure()
+            entries = await self._run(f"readdir({directory})", self._sftp.readdir(directory))
         except SftpError:
             return None
-        matches = [n for n in names if fnmatch.fnmatch(n, pattern)]
-        if not matches:
+        except Exception:
             return None
         best = None
         best_mtime = -1.0
-        for name in matches:
-            path = f"{directory.rstrip('/')}/{name}"
-            st = await self.stat(path)
-            if st is not None and st[1] > best_mtime:
-                best = path
-                best_mtime = st[1]
+        for entry in entries:
+            name = getattr(entry, "filename", "")
+            if not fnmatch.fnmatch(name, pattern):
+                continue
+            mtime = getattr(getattr(entry, "attrs", None), "mtime", None)
+            if mtime is None:
+                continue
+            if mtime > best_mtime:
+                best = f"{directory.rstrip('/')}/{name}"
+                best_mtime = mtime
         return best
 
     async def tail(self, path: str, offset: int) -> tuple[str, int]:
@@ -192,6 +226,7 @@ class SftpClient:
 
         try:
             data = await self._run(f"tail({path}, {offset})", _read())
+            data = data[:complete_utf8_length(data)]
             return data.decode("utf-8", errors="replace"), offset + len(data)
         except SftpError:
             raise

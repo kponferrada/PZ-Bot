@@ -10,6 +10,8 @@ When the Death Log file is present this cog is the authoritative death source;
 `ServerState.death_log_active`, so you never get a duplicate announcement.
 """
 
+import asyncio
+import datetime
 import io
 import re
 from typing import Optional
@@ -21,6 +23,8 @@ import aegis_stats
 import death_store
 import sftp_client
 from death_card import render_death_card
+
+_TZ = datetime.timezone(datetime.timedelta(hours=8))  # PHT, as in death_store
 
 _DEATH_LOG_NAME = "player-death-logging.log"
 
@@ -90,6 +94,23 @@ class DeathLogCog(commands.Cog):
             return f"X: {x}, Y: {y}, Z: {z}"
         return position
 
+    async def _avatar_bytes(self, survivor: str) -> Optional[bytes]:
+        """The avatar of the Discord user linked to `survivor` (/linkme), or None."""
+        rank_cog = self.bot.get_cog("RankSync")
+        discord_id = rank_cog.discord_id_for_pz_username(survivor) if rank_cog else None
+        if not discord_id:
+            return None
+        try:
+            guild = self.bot.get_guild(self.bot.config.GUILD_ID)
+            user = (guild.get_member(discord_id) if guild else None) \
+                or self.bot.get_user(discord_id) \
+                or await self.bot.fetch_user(discord_id)
+            asset = user.display_avatar.replace(size=256, static_format="png")
+            return await asset.read()
+        except (discord.DiscordException, ValueError) as e:
+            print(f"[DeathLog] Could not fetch avatar for {survivor}: {e}")
+            return None
+
     async def _handle_block(self, d: dict) -> None:
         # "Survivor" is the stable Steam username — that's what the death
         # counter keys on, since the character name changes each run.
@@ -120,6 +141,8 @@ class DeathLogCog(commands.Cog):
         position = self._simplify_position(d.get("location") or d.get("position") or "")
         game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
+        profession = d.get("profession") or ""
+        died_at = datetime.datetime.now(_TZ)
 
         # Death count comes from Aegis Panel's ledger (authoritative). Aegis
         # flushes at most once a minute, so the just-detected death usually
@@ -131,6 +154,7 @@ class DeathLogCog(commands.Cog):
         death_store.record_death(survivor, game_date_time)
         deaths_today = death_store.count_today(survivor)
         deaths_week = death_store.count_week(survivor)
+        registry_serial = death_store.count_all()
 
         if not self.bot.features.is_enabled("deaths"):
             print(f"[DeathLog] Death -> {survivor} (#{death_count}) (notifications disabled)")
@@ -168,13 +192,14 @@ class DeathLogCog(commands.Cog):
             "death_count": death_count,
             "deaths_today": deaths_today,
             "deaths_week": deaths_week,
+            "profession": profession,
+            "registry_serial": registry_serial,
+            "issued_at": died_at,
         }
 
         try:
-            card = render_death_card(data)
-            buf = io.BytesIO()
-            card.save(buf, format="PNG")
-            buf.seek(0)
+            avatar = await self._avatar_bytes(survivor)
+            buf = await asyncio.to_thread(self._render_png, data, avatar)
             await channel.send(
                 file=discord.File(buf, filename="death-notification.png"),
             )
@@ -192,6 +217,13 @@ class DeathLogCog(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as e:
                 print(f"[DeathLog] Failed to send death log: {e}")
         print(f"[DeathLog] Death -> {survivor} (#{death_count}) cause={cause}")
+
+    @staticmethod
+    def _render_png(data: dict, avatar: Optional[bytes]) -> io.BytesIO:
+        buf = io.BytesIO()
+        render_death_card(data, avatar).save(buf, format="PNG")
+        buf.seek(0)
+        return buf
 
     @tasks.loop(seconds=2.0)
     async def _tail(self):

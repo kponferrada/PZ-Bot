@@ -10,6 +10,14 @@ The server mod reads it via getFileReader("jeeves_ranks.lua").
 After writing, uses the Lua bridge to signal the mod to reload and push ranks
 to all connected clients.
 
+Rank source (RANK_SOURCE in config.env):
+    bt_ladder (default) — ranks come from the Barangay Tales weekly reputation
+        ladder (bt_progression.ladder_ranks): last week's places 1-5 ->
+        Inferno, Blaze, Flame, Cinder, Spark; RP earned this week -> Fuel.
+        Refreshed every 5 minutes. With RANK_LADDER_ROLES=true, linked members
+        also get the matching Discord role.
+    roles — ranks come from the Discord roles of linked members:
+
 Discord Roles -> In-Game Ranks:
     Fuel    -> Rank 1 (green)
     Spark   -> Rank 2 (blue)
@@ -26,6 +34,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from typing import Optional, Dict
 
+import bt_progression
 import lua_bridge
 import sftp_client
 
@@ -64,6 +73,7 @@ def get_rank_from_roles(member: discord.Member) -> int:
 
 
 _LINKS_PAGE_SIZE = 20  # links per page in /listlinks
+_LADDER_ROLE_REASON = "Barangay Tales reputation ladder"
 
 
 class LinksPaginator(discord.ui.View):
@@ -123,10 +133,39 @@ class RankSync(commands.Cog):
         self._links: Dict[str, str] = self._load_links()
         self._ranks: Dict[str, int] = {}   # pz_username -> rank
         self._ranks_file_path: Optional[str] = None
-        self._startup_sync.start()
+        self._ladder_mode = getattr(bot.config, "RANK_SOURCE", "bt_ladder") != "roles"
+        self._ladder_roles = self._ladder_mode and bool(getattr(bot.config, "RANK_LADDER_ROLES", False))
+        self._ladder: Dict[str, int] = {}      # BT player (PZ username) -> rank
+        self._ladder_loaded = False
+        self._roles_forbidden = False
+        if self._ladder_mode:
+            self._ladder_sync.start()
+            print("[RankSync] Rank source: Barangay Tales reputation ladder"
+                  + (" (+ Discord roles)" if self._ladder_roles else ""))
+        else:
+            self._startup_sync.start()
+            print("[RankSync] Rank source: Discord roles")
 
     def cog_unload(self):
         self._startup_sync.cancel()
+        self._ladder_sync.cancel()
+
+    # ---- Rank lookup (ladder or roles) ---------------------------------------
+
+    def _ladder_rank(self, pz_username: str) -> int:
+        if pz_username in self._ladder:
+            return self._ladder[pz_username]
+        low = pz_username.lower()
+        for name, rank in self._ladder.items():
+            if name.lower() == low:
+                return rank
+        return 0
+
+    def _rank_for(self, member: Optional[discord.Member], pz_username: str) -> int:
+        """A linked player's rank from the configured source."""
+        if self._ladder_mode:
+            return self._ladder_rank(pz_username)
+        return get_rank_from_roles(member) if member else 0
 
     # ---- Lua ranks file path (remote) --------------------------------------
 
@@ -191,6 +230,9 @@ class RankSync(commands.Cog):
     # ---- Build full rank table from Discord ---------------------------------
 
     def _build_all_ranks(self) -> Dict[str, int]:
+        if self._ladder_mode:
+            # Every ladder player gets a rank, linked to Discord or not.
+            return {name: rank for name, rank in self._ladder.items() if rank > 0}
         guild = self.bot.get_guild(self.bot.config.GUILD_ID)
         if not guild:
             return {}
@@ -221,6 +263,95 @@ class RankSync(commands.Cog):
     async def _before_startup_sync(self):
         await self.bot.wait_until_ready()
 
+    # ---- Barangay Tales reputation ladder ------------------------------------
+
+    async def _refresh_ladder(self) -> bool:
+        ranks = await bt_progression.get_ladder_ranks(self.bot, force=True)
+        if ranks is None:
+            return False
+        self._ladder = ranks
+        return True
+
+    async def _apply_ladder(self, force_write: bool = False) -> Optional[int]:
+        """Rebuild ranks from the ladder; write + push if they changed.
+
+        Returns the number of ranked players, or None if the ladder or the
+        rank file couldn't be read/written.
+        """
+        if not await self._refresh_ladder():
+            return None
+        new = self._build_all_ranks()
+        if force_write or new != self._ranks or not self._ladder_loaded:
+            self._ranks = new
+            if not await self._write_ranks_file():
+                return None
+            await self._push_ranks_to_server()
+            print(f"[RankSync] Ladder: wrote {len(new)} rank(s).")
+        self._ladder_loaded = True
+        if self._ladder_roles:
+            await self._sync_all_roles()
+        return len(new)
+
+    @tasks.loop(minutes=5)
+    async def _ladder_sync(self):
+        try:
+            if await self._apply_ladder() is None:
+                print("[RankSync] Ladder: progression export unavailable, ranks unchanged.")
+        except Exception as e:
+            print(f"[RankSync] Ladder sync error: {e}")
+
+    @_ladder_sync.before_loop
+    async def _before_ladder_sync(self):
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(10)
+
+    # ---- Discord rank roles (ladder mode, RANK_LADDER_ROLES) -----------------
+
+    def _rank_roles(self, guild: discord.Guild) -> Dict[int, discord.Role]:
+        names = getattr(self.bot.config, "RANKS", None) or {r: n for n, r in ROLE_TO_RANK.items()}
+        roles = {}
+        for rank, name in names.items():
+            role = discord.utils.get(guild.roles, name=name)
+            if role:
+                roles[rank] = role
+        return roles
+
+    async def _sync_member_roles(self, member: discord.Member, rank: int,
+                                 rank_roles: Optional[Dict[int, discord.Role]] = None) -> None:
+        """Give `member` the role for `rank` and remove the other rank roles."""
+        if not self._ladder_roles or self._roles_forbidden:
+            return
+        rank_roles = rank_roles if rank_roles is not None else self._rank_roles(member.guild)
+        want = rank_roles.get(rank)
+        remove = [r for r in member.roles if r in rank_roles.values() and r != want]
+        add = want is not None and want not in member.roles
+        if not remove and not add:
+            return
+        try:
+            if remove:
+                await member.remove_roles(*remove, reason=_LADDER_ROLE_REASON)
+            if add:
+                await member.add_roles(want, reason=_LADDER_ROLE_REASON)
+        except discord.Forbidden:
+            # Missing Manage Roles or the rank roles sit above the bot's role.
+            self._roles_forbidden = True
+            print("[RankSync] Ladder: no permission to manage rank roles; role sync off until restart.")
+            return
+        except discord.HTTPException as e:
+            print(f"[RankSync] Ladder: role update failed for {member}: {e}")
+            return
+        print(f"[RankSync] Ladder role: {member} -> {want.name if want else 'none'}")
+
+    async def _sync_all_roles(self) -> None:
+        guild = self.bot.get_guild(self.bot.config.GUILD_ID)
+        if not guild:
+            return
+        rank_roles = self._rank_roles(guild)
+        for discord_id, pz_username in list(self._links.items()):
+            member = guild.get_member(int(discord_id))
+            if member:
+                await self._sync_member_roles(member, self._ladder_rank(pz_username), rank_roles)
+
     # ---- Persistence for Discord <-> PZ username links ----------------------
 
     def _load_links(self) -> Dict[str, str]:
@@ -244,18 +375,35 @@ class RankSync(commands.Cog):
 
     # ---- Public helpers -----------------------------------------------------
 
-    def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
-        discord_id = None
+    @property
+    def ranks_from_ladder(self) -> bool:
+        """True when ranks follow the Barangay Tales ladder (RANK_SOURCE=bt_ladder)."""
+        return self._ladder_mode
+
+    def rank_for_discord_id(self, discord_id: int) -> Optional[int]:
+        """Ladder rank of a linked Discord user, or None if they aren't linked."""
+        pz_username = self._links.get(str(discord_id))
+        if pz_username is None:
+            return None
+        return self._rank_for(None, pz_username)
+
+    def discord_id_for_pz_username(self, pz_username: str) -> Optional[int]:
+        """The Discord user ID linked to a PZ username, if any."""
         for did, pzname in self._links.items():
             if pzname.lower() == pz_username.lower():
-                discord_id = did
-                break
+                return int(did)
+        return None
+
+    def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
+        if self._ladder_mode:
+            return self._ladder_rank(pz_username) if self._ladder_loaded else None
+        discord_id = self.discord_id_for_pz_username(pz_username)
         if not discord_id:
             return None
         guild = self.bot.get_guild(self.bot.config.GUILD_ID)
         if not guild:
             return None
-        member = guild.get_member(int(discord_id))
+        member = guild.get_member(discord_id)
         if not member:
             return None
         return get_rank_from_roles(member)
@@ -271,6 +419,8 @@ class RankSync(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if self._ladder_mode:
+            return  # ranks follow the ladder, not roles
         if before.roles == after.roles:
             return
         old_rank = get_rank_from_roles(before)
@@ -282,6 +432,19 @@ class RankSync(commands.Cog):
             return
         print(f"[RankSync] {after.display_name} ({pz_username}): {old_rank} -> {new_rank}")
         await self._update_rank_and_push(pz_username, new_rank)
+
+    async def _on_unlinked(self, user, old_name: str) -> None:
+        """Undo what a link gave: role-based rank, or the ladder rank role."""
+        if self._ladder_mode:
+            # The in-game rank follows the ladder, link or not; only the
+            # Discord role came from the link.
+            if isinstance(user, discord.Member):
+                await self._sync_member_roles(user, 0)
+            return
+        if old_name in self._ranks:
+            del self._ranks[old_name]
+            await self._write_ranks_file()
+            await self._push_ranks_to_server()
 
     # ====================================================================
     # PUBLIC COMMANDS (no role requirement, 60s cooldown)
@@ -296,7 +459,7 @@ class RankSync(commands.Cog):
 
         if key in self._links:
             current_name = self._links[key]
-            rank = get_rank_from_roles(interaction.user)
+            rank = self._rank_for(interaction.user, current_name)
             display = RANK_DISPLAY.get(rank, str(rank))
             embed = discord.Embed(
                 title="\u26a0\ufe0f Already Linked",
@@ -313,8 +476,11 @@ class RankSync(commands.Cog):
 
         self._links[key] = username
         self._save_links()
-        rank = get_rank_from_roles(interaction.user)
-        await self._update_rank_and_push(username, rank)
+        rank = self._rank_for(interaction.user, username)
+        if not self._ladder_mode:  # ladder ranks don't depend on links
+            await self._update_rank_and_push(username, rank)
+        if isinstance(interaction.user, discord.Member):
+            await self._sync_member_roles(interaction.user, rank)
         display = RANK_DISPLAY.get(rank, str(rank))
         await interaction.followup.send(embed=discord.Embed(
             title="\U0001f517 Account Linked",
@@ -338,10 +504,7 @@ class RankSync(commands.Cog):
 
         old_name = self._links.pop(key)
         self._save_links()
-        if old_name in self._ranks:
-            del self._ranks[old_name]
-            await self._write_ranks_file()
-            await self._push_ranks_to_server()
+        await self._on_unlinked(interaction.user, old_name)
 
         await interaction.followup.send(embed=discord.Embed(
             title="\U0001f517 Account Unlinked",
@@ -370,8 +533,10 @@ class RankSync(commands.Cog):
         success = await self._update_rank_and_push(username, rank.value)
         display = RANK_DISPLAY.get(rank.value, str(rank.value))
         if success:
+            note = ("\n*Ranks follow the Barangay Tales reputation ladder; the next "
+                    "ladder sync (every 5 min) replaces this.*" if self._ladder_mode else "")
             embed = discord.Embed(title="\U0001f3c5 Rank Updated",
-                                  description=f"**{username}** \u2192 {display}",
+                                  description=f"**{username}** \u2192 {display}{note}",
                                   colour=discord.Colour.green())
         else:
             embed = discord.Embed(title="\u274c Rank Update Failed",
@@ -382,6 +547,21 @@ class RankSync(commands.Cog):
     @app_commands.command(name="syncranks", description="Rebuild the rank file from all linked members and push.")
     async def cmd_syncranks(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        if self._ladder_mode:
+            count = await self._apply_ladder(force_write=True)
+            if count is None:
+                embed = discord.Embed(title="\u274c Sync Failed",
+                                      description="Could not read the Barangay Tales progression "
+                                                  "export or write the rank file over SFTP.",
+                                      colour=discord.Colour.red())
+            else:
+                roles = " Discord rank roles updated." if self._ladder_roles else ""
+                embed = discord.Embed(title="\U0001f504 Rank Sync Complete",
+                                      description=f"**{count}** rank(s) from the Barangay Tales "
+                                                  f"reputation ladder written and pushed.{roles}",
+                                      colour=discord.Colour.green())
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
         self._ranks = self._build_all_ranks()
         success = await self._write_ranks_file()
         count = len([r for r in self._ranks.values() if r > 0])
@@ -402,8 +582,10 @@ class RankSync(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         self._links[str(member.id)] = username
         self._save_links()
-        rank = get_rank_from_roles(member)
-        await self._update_rank_and_push(username, rank)
+        rank = self._rank_for(member, username)
+        if not self._ladder_mode:  # ladder ranks don't depend on links
+            await self._update_rank_and_push(username, rank)
+        await self._sync_member_roles(member, rank)
         display = RANK_DISPLAY.get(rank, str(rank))
         await interaction.followup.send(embed=discord.Embed(
             title="\U0001f517 Player Linked",
@@ -419,10 +601,7 @@ class RankSync(commands.Cog):
         if key in self._links:
             old_name = self._links.pop(key)
             self._save_links()
-            if old_name in self._ranks:
-                del self._ranks[old_name]
-                await self._write_ranks_file()
-                await self._push_ranks_to_server()
+            await self._on_unlinked(member, old_name)
             embed = discord.Embed(title="\U0001f517 Player Unlinked",
                                   description=f"Removed link: {member.mention} \u2194 **{old_name}**",
                                   colour=discord.Colour.orange())
@@ -447,7 +626,7 @@ class RankSync(commands.Cog):
         rows = []
         for discord_id, pz_username in self._links.items():
             member = guild.get_member(int(discord_id)) if guild else None
-            rank = get_rank_from_roles(member) if member else 0
+            rank = self._rank_for(member, pz_username)
             rows.append((pz_username.lower(), discord_id, pz_username, member, rank))
         rows.sort(key=lambda r: r[0])
 

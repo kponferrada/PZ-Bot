@@ -93,10 +93,25 @@ async def get_all(bot, force: bool = False) -> dict:
     return await _refresh(bot, force)
 
 
+def find_user(data: dict, username: str) -> Optional[str]:
+    """The ledger's spelling of `username` (exact match first, then any case)."""
+    if username in data:
+        return username
+    low = (username or "").strip().lower()
+    for user in data:
+        if user.lower() == low:
+            return user
+    return None
+
+
 async def get(bot, username: str, force: bool = False) -> Optional[dict]:
-    """Return one player's stats dict, or None if they have no ledger row."""
+    """Return one player's stats dict, or None if they have no ledger row.
+
+    The lookup ignores case, so `/stats silvast` finds "Silvast".
+    """
     data = await _refresh(bot, force)
-    return data.get(username)
+    key = find_user(data, username)
+    return data.get(key) if key else None
 
 
 async def get_field(bot, username: str, field: str, force: bool = False):

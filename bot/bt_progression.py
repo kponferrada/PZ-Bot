@@ -203,6 +203,35 @@ def weekly_leaderboard(data: dict, limit: Optional[int] = None) -> dict:
     }
 
 
+# Reputation ladder -> rank sync rank (1 Fuel .. 6 Inferno). Last week's
+# finalized places 1-5 hold the weekly titles BT granted, so they hold the top
+# ranks for the whole week; anyone who has earned RP this week is Fuel.
+LADDER_PLACE_RANKS = {1: 6, 2: 5, 3: 4, 4: 3, 5: 2}
+LADDER_ACTIVE_RANK = 1
+
+
+def ladder_ranks(data: dict) -> dict:
+    """{BT player id (PZ username): rank} from the weekly reputation ladder."""
+    board = weekly_leaderboard(data or {})
+    ranks = {}
+    for row in board["rows"]:
+        if row["rp"] > 0:
+            ranks[row["player"]] = LADDER_ACTIVE_RANK
+    for row in (board["lastWeek"] or {}).get("rows", []):
+        rank = LADDER_PLACE_RANKS.get(row["rank"])
+        if rank:
+            ranks[row["player"]] = max(rank, ranks.get(row["player"], 0))
+    return ranks
+
+
+async def get_ladder_ranks(bot, force: bool = False) -> Optional[dict]:
+    """Read the export and return `ladder_ranks(...)`, or None if unavailable."""
+    data = await read_progression(bot, force)
+    if data is None:
+        return None
+    return ladder_ranks(data)
+
+
 async def get_weekly_leaderboard(bot, limit: Optional[int] = None,
                                  force: bool = False) -> Optional[dict]:
     """Read the export and return `weekly_leaderboard(...)`, or None if unavailable."""

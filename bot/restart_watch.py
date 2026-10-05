@@ -24,6 +24,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from mod_checker import ModChecker
+from checks import admin_only
 
 DEFAULT_MOD_CHECK_INTERVAL = 300         # seconds between workshop polls (5 min)
 DEFAULT_MOD_RESTART_DELAY = 300          # seconds of countdown before the restart (5 min)
@@ -143,6 +144,13 @@ class RestartWatch(commands.Cog):
         """
         return await asyncio.to_thread(self.bot.rcon.is_server_online, 5)
 
+    async def _server_seems_up(self) -> bool:
+        """Like `_server_responsive`, but reuses the up/down monitor's probe
+        when it's under 20 s old. For the periodic checks; starting a restart
+        still probes fresh."""
+        recent = self.bot.state.recent_rcon_probe(20.0)
+        return recent if recent is not None else await self._server_responsive()
+
     # ---- Restart (RCON) ------------------------------------------------------
 
     async def _servermsg(self, message: str) -> None:
@@ -187,13 +195,17 @@ class RestartWatch(commands.Cog):
 
         `duration` (seconds) overrides the default restart delay (unused by the
         normal flows, which rely on the default countdown)."""
-        remaining = self._restart_delay if duration is None else duration
+        total = self._restart_delay if duration is None else duration
+        # Measure against a deadline: the RCON/bridge calls inside the loop
+        # take seconds each, so counting 1-second ticks would run late.
+        deadline = time.monotonic() + total
+        remaining = total
         notified = False
         saved = False
         kicked = False
         while remaining > 0:
             await asyncio.sleep(1)
-            remaining -= 1
+            remaining = max(0.0, deadline - time.monotonic())
             if not notified and remaining <= self._kick_notify_at:
                 notified = True
                 await self._announce_kick_notification()
@@ -410,7 +422,7 @@ class RestartWatch(commands.Cog):
         # crash, or a restart already in progress), skip — there's no point
         # queueing a restart the server can't honour, and it would stack on top
         # of the one already running.
-        if not await self._server_responsive():
+        if not await self._server_seems_up():
             print("[RestartWatch] Mod check skipped (server not responding to RCON).")
             return
 
@@ -481,7 +493,7 @@ class RestartWatch(commands.Cog):
             return
         # Skip when the server is already down/restarting via another mechanism —
         # there's nothing to schedule a restart against, and it'd collide.
-        if not await self._server_responsive():
+        if not await self._server_seems_up():
             return
         nxt = self._next_scheduled_restart()
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
@@ -531,15 +543,8 @@ class RestartWatch(commands.Cog):
     # ---- Slash command -------------------------------------------------------
 
     @app_commands.command(name="forcemodupdate", description="Force a mod update restart now.")
+    @admin_only()
     async def cmd_force_mod_update(self, interaction: discord.Interaction) -> None:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        if role is None or role not in interaction.user.roles:
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
         self._cancel_deferral()
         if not await self._start_restart("Mod update forced by admin"):
@@ -549,15 +554,8 @@ class RestartWatch(commands.Cog):
             )
 
     @app_commands.command(name="restart", description="Force a server restart now (in-game announcement + countdown).")
+    @admin_only()
     async def cmd_restart(self, interaction: discord.Interaction) -> None:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        if role is None or role not in interaction.user.roles:
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
         await interaction.response.send_message("⏳ Forcing server restart...", ephemeral=True)
         self._cancel_deferral()
         if not await self._start_restart(
@@ -570,15 +568,8 @@ class RestartWatch(commands.Cog):
             )
 
     @app_commands.command(name="restartnow", description="Immediate restart: announce + save now, kick players in 30s, then quit.")
+    @admin_only()
     async def cmd_restart_now(self, interaction: discord.Interaction) -> None:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        if role is None or role not in interaction.user.roles:
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
         await interaction.response.send_message("⏳ Forcing immediate restart (30s)...", ephemeral=True)
         self._cancel_deferral()
         if not await self._start_immediate_restart():
@@ -589,15 +580,8 @@ class RestartWatch(commands.Cog):
 
     @app_commands.command(name="deferrestart", description="Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes).")
     @app_commands.describe(minutes="Minutes to defer (default 15)")
+    @admin_only()
     async def cmd_defer_restart(self, interaction: discord.Interaction, minutes: int = 15) -> None:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        if role is None or role not in interaction.user.roles:
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
         minutes = max(1, min(int(minutes), 720))
         await interaction.response.send_message(
             f"⏸️ Deferring restart for {minutes} minute{'s' if minutes != 1 else ''}...",

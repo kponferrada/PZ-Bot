@@ -19,6 +19,7 @@ Config (config.env):
 
 import re
 import os
+import time
 import asyncio
 import discord
 from discord.ext import commands, tasks
@@ -37,6 +38,9 @@ CHAT_LINE_RE = re.compile(
     r"\[.*?\]\[info\] Got message:ChatMessage\{chat=(\w+), author='([^']+)', text='(.*)'\}\."
 )
 
+# How often to re-list the Logs folder for a newer (rotated) chat log.
+_RESCAN_SECONDS = 10
+
 # Chat types we relay
 RELAY_CHAT_TYPES = {'General'}
 
@@ -50,6 +54,10 @@ ANSI_COLORS = {
     5: "1;36",      # Blaze - bold cyan
     6: "1;31",      # Inferno - bold red
 }
+
+
+# In-game chat must never ping anyone on Discord.
+_NO_MENTIONS = discord.AllowedMentions.none()
 
 
 def strip_rgb_tags(text: str) -> str:
@@ -68,6 +76,8 @@ class ChatRelay(commands.Cog):
         self._log_dir = getattr(bot.config, 'SFTP_LOGS_DIR', None) or os.getenv('CHAT_LOG_PATH', '')
         self._file_pos = 0
         self._current_log = None
+        self._buffer = ""  # trailing partial line from the last read
+        self._last_scan = 0.0  # monotonic time of the last Logs/ listing
         self._active = False
 
         if not self._channel_id:
@@ -100,7 +110,11 @@ class ChatRelay(commands.Cog):
         rank = self._get_rank_for_author(author)
         ansi_code = ANSI_COLORS.get(rank)
         if ansi_code:
+            # Inside a code block only a ``` run can break out; defuse it.
+            author, text = (t.replace("`", "\u02cb") for t in (author, text))
             return f"```ansi\n\u001b[{ansi_code}m[{author}]\u001b[0m: {text}\n```"
+        author = discord.utils.escape_markdown(author)
+        text = discord.utils.escape_markdown(text)
         return f"**[{author}]**: {text}"
 
     # ================================================================
@@ -121,25 +135,49 @@ class ChatRelay(commands.Cog):
 
         try:
             sftp = sftp_client.get()
-            log_file = await self._find_latest_chat_log()
+            now = time.monotonic()
+            if self._current_log is None or now - self._last_scan >= _RESCAN_SECONDS:
+                self._last_scan = now
+                log_file = await self._find_latest_chat_log()
+            else:
+                log_file = self._current_log
             if not log_file:
                 return
 
-            # Detect log rotation (new file) — seek to its end.
+            # Log rotation (a new file each server session): read the new file
+            # from the start so the first messages after a restart aren't lost.
+            # On the first file seen (startup), skip its history instead.
             if log_file != self._current_log:
+                first = self._current_log is None
                 self._current_log = log_file
-                st = await sftp.stat(log_file)
-                self._file_pos = st[0] if st else 0
+                self._buffer = ""
+                if first:
+                    st = await sftp.stat(log_file)
+                    self._file_pos = st[0] if st else 0
+                    print(f"[ChatRelay] Now tailing: {log_file} (from {self._file_pos})")
+                    return
+                self._file_pos = 0
                 print(f"[ChatRelay] Now tailing: {log_file}")
-                return
 
             try:
+                st = await sftp.stat(log_file)
+                if st is None:
+                    self._last_scan = 0.0  # gone (moved away) -> rescan next tick
+                    return
+                if st[0] == self._file_pos:
+                    return
+                if st[0] < self._file_pos:
+                    self._file_pos = 0  # truncated
+                    self._buffer = ""
                 new_text, self._file_pos = await sftp.tail(log_file, self._file_pos)
             except sftp_client.SftpError:
                 return
             if not new_text:
                 return
-            new_lines = new_text.splitlines()
+            # The game may be mid-line when we read; keep the partial line.
+            self._buffer += new_text
+            new_lines = self._buffer.split("\n")
+            self._buffer = new_lines.pop()
 
             channel = self._get_channel()
             if not channel:
@@ -168,7 +206,7 @@ class ChatRelay(commands.Cog):
 
                 if self.bot.features.is_enabled("chat_relay"):
                     try:
-                        await channel.send(msg)
+                        await channel.send(msg, allowed_mentions=_NO_MENTIONS)
                     except discord.HTTPException as e:
                         print(f"[ChatRelay] Discord send error: {e}")
 
@@ -179,14 +217,18 @@ class ChatRelay(commands.Cog):
     async def _before_tail(self):
         await self.bot.wait_until_ready()
 
-        # Seek to end of current log so we don't replay history.
-        log_file = await self._find_latest_chat_log()
-        if log_file:
-            sftp = sftp_client.get()
-            st = await sftp.stat(log_file)
-            self._file_pos = st[0] if st else 0
-            self._current_log = log_file
-            print(f"[ChatRelay] Tailing {log_file} from position {self._file_pos}")
+        # Seek to end of current log so we don't replay history. If SFTP is
+        # down now, the loop does the same on the first file it finds.
+        try:
+            log_file = await self._find_latest_chat_log()
+            if log_file:
+                sftp = sftp_client.get()
+                st = await sftp.stat(log_file)
+                self._file_pos = st[0] if st else 0
+                self._current_log = log_file
+                print(f"[ChatRelay] Tailing {log_file} from position {self._file_pos}")
+        except sftp_client.SftpError as e:
+            print(f"[ChatRelay] Initial seek failed ({e}); will retry in the loop.")
 
     # ================================================================
     # Discord -> Game: listen for messages in the relay channel
@@ -210,7 +252,8 @@ class ChatRelay(commands.Cog):
             return
         try:
             display_name = message.author.display_name
-            await lua_bridge.chat_relay(display_name, message.content)
+            # clean_content turns <@123>/<#456> into readable @name/#channel.
+            await lua_bridge.chat_relay(display_name, message.clean_content)
         except Exception as e:
             print(f"[ChatRelay] Relay error: {e}")
 

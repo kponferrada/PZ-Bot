@@ -19,15 +19,12 @@ from discord import app_commands
 from discord.ext import commands
 
 import server_config
+from checks import admin_only
 
 
 class JeevesModManagerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    def _check_role(self, interaction: discord.Interaction) -> bool:
-        role = discord.utils.get(interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE)
-        return role is not None and role in interaction.user.roles
 
     @staticmethod
     def _split_items(items) -> list:
@@ -44,15 +41,8 @@ class JeevesModManagerCog(commands.Cog):
         name="modlist",
         description="Show all mods and Workshop items in the server config.",
     )
+    @admin_only()
     async def cmd_modlist(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         text = await server_config.read_ini(self.bot)
