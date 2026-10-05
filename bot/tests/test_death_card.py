@@ -112,3 +112,14 @@ def test_render_with_and_without_avatar():
     box = dc._PHOTO_BOX
     assert with_avatar.crop(box).tobytes() != no_avatar.crop(box).tobytes()
     assert garbage.crop(box).tobytes() == no_avatar.crop(box).tobytes()
+
+
+def test_left_username_is_discord_name_when_linked():
+    # Left "Username" row (DEATH INFORMATION side) shows the linked Discord
+    # name; unlinked survivors get "Not linked". The right side keeps the PZ name.
+    row = (330, 345, 565, 376)
+    right_row = (1000, 405, 1212, 432)
+    linked = dc.render_death_card(_data(discord_name="keym"), None)
+    unlinked = dc.render_death_card(_data(), None)
+    assert linked.crop(row).tobytes() != unlinked.crop(row).tobytes()
+    assert linked.crop(right_row).tobytes() == unlinked.crop(right_row).tobytes()

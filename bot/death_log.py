@@ -14,7 +14,7 @@ import asyncio
 import datetime
 import io
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 import discord
 from discord.ext import commands, tasks
@@ -94,22 +94,28 @@ class DeathLogCog(commands.Cog):
             return f"X: {x}, Y: {y}, Z: {z}"
         return position
 
-    async def _avatar_bytes(self, survivor: str) -> Optional[bytes]:
-        """The avatar of the Discord user linked to `survivor` (/linkme), or None."""
+    async def _linked_discord(self, survivor: str) -> Tuple[str, Optional[bytes]]:
+        """(Discord username, avatar bytes) of the user linked to `survivor`
+        with /linkme; ("", None) when unlinked or unreachable."""
         rank_cog = self.bot.get_cog("RankSync")
         discord_id = rank_cog.discord_id_for_pz_username(survivor) if rank_cog else None
         if not discord_id:
-            return None
+            return "", None
         try:
             guild = self.bot.get_guild(self.bot.config.GUILD_ID)
             user = (guild.get_member(discord_id) if guild else None) \
                 or self.bot.get_user(discord_id) \
                 or await self.bot.fetch_user(discord_id)
+        except (discord.DiscordException, ValueError) as e:
+            print(f"[DeathLog] Could not fetch linked user for {survivor}: {e}")
+            return "", None
+        try:
             asset = user.display_avatar.replace(size=256, static_format="png")
-            return await asset.read()
+            avatar = await asset.read()
         except (discord.DiscordException, ValueError) as e:
             print(f"[DeathLog] Could not fetch avatar for {survivor}: {e}")
-            return None
+            avatar = None
+        return user.name, avatar
 
     async def _handle_block(self, d: dict) -> None:
         # "Survivor" is the stable Steam username — that's what the death
@@ -198,7 +204,8 @@ class DeathLogCog(commands.Cog):
         }
 
         try:
-            avatar = await self._avatar_bytes(survivor)
+            discord_name, avatar = await self._linked_discord(survivor)
+            data["discord_name"] = discord_name
             buf = await asyncio.to_thread(self._render_png, data, avatar)
             await channel.send(
                 file=discord.File(buf, filename="death-notification.png"),
@@ -257,6 +264,9 @@ class DeathLogCog(commands.Cog):
                 # File truncated (server restart / rotation) — start over.
                 self._pos = 0
                 self._buffer = ""
+
+            if size == self._pos:
+                return  # nothing new; skip opening the file
 
             text, self._pos = await sftp.tail(path, self._pos)
             if not text:

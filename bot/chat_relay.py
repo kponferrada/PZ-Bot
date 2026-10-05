@@ -20,12 +20,12 @@ Config (config.env):
 import re
 import os
 import time
-import asyncio
 import discord
 from discord.ext import commands, tasks
 from typing import Optional
 
 import lua_bridge
+import ranks
 import sftp_client
 
 # Regex to strip PZ rich-text tags from author names
@@ -45,15 +45,7 @@ _RESCAN_SECONDS = 10
 RELAY_CHAT_TYPES = {'General'}
 
 # Discord ANSI color codes (used inside ```ansi blocks)
-ANSI_COLORS = {
-    0: None,        # Default - no color
-    1: "1;32",      # Fuel - bold green
-    2: "1;34",      # Spark - bold blue
-    3: "1;35",      # Cinder - bold pink/violet
-    4: "1;33",      # Flame - bold yellow
-    5: "1;36",      # Blaze - bold cyan
-    6: "1;31",      # Inferno - bold red
-}
+ANSI_COLORS = {n: r.ansi for n, r in ranks.RANKS.items()}
 
 
 # In-game chat must never ping anyone on Discord.

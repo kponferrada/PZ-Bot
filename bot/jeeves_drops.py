@@ -44,6 +44,7 @@ class JeevesDropsCog(commands.Cog):
         self._sent_drops: set[tuple] = set()
         self._sent_events: set[tuple] = set()
         self._last_event_poller_key = None
+        self._sent_error_key = None   # (dropId, timestamp) of the last error announced
 
     async def cog_load(self):
         self.drops_status_poller.start()
@@ -115,6 +116,12 @@ class JeevesDropsCog(commands.Cog):
                     self._sent_drops = set(sorted_keys[-30:])
 
             elif phase == "error":
+                # The status file keeps saying "error" until the next drop, and
+                # this poll runs every 10 s: announce each error only once.
+                error_key = (status.get("dropId", 0), ts)
+                if error_key == self._sent_error_key:
+                    return
+                self._sent_error_key = error_key
                 reason = status.get("reason", "unknown")
                 target = status.get("targetPlayer", "")
                 crate_type = status.get("crateType", "")
@@ -149,6 +156,8 @@ class JeevesDropsCog(commands.Cog):
                 ts = status.get("timestamp", 0)
                 self._sent_drops.add((drop_id, ts))
                 print(f"[JeevesDrops] Suppressed stale drop on startup: dropId={drop_id}, ts={ts}")
+            elif status and status.get("phase") == "error":
+                self._sent_error_key = (status.get("dropId", 0), status.get("timestamp", 0))
         except Exception:
             pass
 
@@ -371,11 +380,16 @@ class JeevesDropsCog(commands.Cog):
         await self.bot.wait_until_ready()
         try:
             status = await lua_bridge.read_supply_event_status()
-            if status and status.get("phase") == "active":
+            if status and status.get("phase"):
                 event_id = status.get("eventId", 0)
                 ts = status.get("timestamp", 0)
-                self._sent_events.add((event_id, ts))
-                print(f"[JeevesDrops] Suppressed stale supply event on startup: id={event_id}")
+                # Whatever phase the file is in at startup was already announced
+                # (or happened while the bot was down): don't re-post it.
+                self._last_event_poller_key = (status.get("phase"), status.get("eventId", "?"), ts)
+                if status.get("phase") == "active":
+                    self._sent_events.add((event_id, ts))
+                print(f"[JeevesDrops] Suppressed stale supply event on startup: "
+                      f"id={event_id}, phase={status.get('phase')}")
         except Exception:
             pass
 

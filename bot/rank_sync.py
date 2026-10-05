@@ -35,6 +35,8 @@ from discord.ext import commands, tasks
 from typing import Optional, Dict
 
 import bt_progression
+from checks import admin_only
+import ranks
 import lua_bridge
 import sftp_client
 
@@ -48,15 +50,7 @@ ROLE_TO_RANK = {
     "Inferno": 6,
 }
 
-RANK_DISPLAY = {
-    0: "\u2b1c Default",
-    1: "\U0001f7e9 Fuel (Green)",
-    2: "\U0001f7e6 Spark (Blue)",
-    3: "\U0001f7ea Cinder (Violet)",
-    4: "\U0001f7e8 Flame (Yellow)",
-    5: "\U0001f7e6 Blaze (Cyan)",
-    6: "\U0001f7e5 Inferno (Red)",
-}
+RANK_DISPLAY = {n: ranks.display(n) for n in ranks.RANKS}
 
 LINK_FILE = __import__("pathlib").Path(__file__).parent / "rank_links.json"
 RANKS_FILENAME = "jeeves_ranks.lua"
@@ -133,6 +127,7 @@ class RankSync(commands.Cog):
         self._links: Dict[str, str] = self._load_links()
         self._ranks: Dict[str, int] = {}   # pz_username -> rank
         self._ranks_file_path: Optional[str] = None
+        self._ranks_file_written = False  # True once this run has written the file
         self._ladder_mode = getattr(bot.config, "RANK_SOURCE", "bt_ladder") != "roles"
         self._ladder_roles = self._ladder_mode and bool(getattr(bot.config, "RANK_LADDER_ROLES", False))
         self._ladder: Dict[str, int] = {}      # BT player (PZ username) -> rank
@@ -200,6 +195,7 @@ class RankSync(commands.Cog):
             content = "\n".join(lines)
             sftp = sftp_client.get()
             await sftp.write_text(path, content)
+            self._ranks_file_written = True
             return True
         except Exception as e:
             print(f"[RankSync] Error writing rank file: {e}")
@@ -214,7 +210,10 @@ class RankSync(commands.Cog):
             print(f"[RankSync] Lua bridge push error: {e}")
 
     async def _update_rank(self, username: str, rank: int) -> bool:
-        """Update a player's rank in memory and write to file."""
+        """Update a player's rank in memory and write to file (skipped when
+        nothing changed — every join calls this)."""
+        if self._ranks.get(username, 0) == rank and self._ranks_file_written:
+            return True
         if rank > 0:
             self._ranks[username] = rank
         elif username in self._ranks:
@@ -519,14 +518,9 @@ class RankSync(commands.Cog):
     @app_commands.command(name="setrank", description="Set a player's in-game rank (chat name color).")
     @app_commands.describe(username="The player's PZ username (case-sensitive)", rank="Rank 0-6")
     @app_commands.choices(rank=[
-        app_commands.Choice(name="0 - Default (no color)", value=0),
-        app_commands.Choice(name="1 - Fuel (green)", value=1),
-        app_commands.Choice(name="2 - Spark (blue)", value=2),
-        app_commands.Choice(name="3 - Cinder (violet)", value=3),
-        app_commands.Choice(name="4 - Flame (yellow)", value=4),
-        app_commands.Choice(name="5 - Blaze (cyan)", value=5),
-        app_commands.Choice(name="6 - Inferno (red)", value=6),
+        app_commands.Choice(name=ranks.choice_label(n), value=n) for n in ranks.RANKS
     ])
+    @admin_only()
     async def cmd_setrank(self, interaction: discord.Interaction, username: str,
                           rank: app_commands.Choice[int]):
         await interaction.response.defer(ephemeral=True)
@@ -545,6 +539,7 @@ class RankSync(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="syncranks", description="Rebuild the rank file from all linked members and push.")
+    @admin_only()
     async def cmd_syncranks(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         if self._ladder_mode:
@@ -578,6 +573,7 @@ class RankSync(commands.Cog):
 
     @app_commands.command(name="linkname", description="Link a Discord user to their PZ username.")
     @app_commands.describe(member="The Discord user", username="Their PZ username (case-sensitive)")
+    @admin_only()
     async def cmd_linkname(self, interaction: discord.Interaction, member: discord.Member, username: str):
         await interaction.response.defer(ephemeral=True)
         self._links[str(member.id)] = username
@@ -595,6 +591,7 @@ class RankSync(commands.Cog):
 
     @app_commands.command(name="unlinkname", description="Remove the Discord-to-PZ username link for a user.")
     @app_commands.describe(member="The Discord user to unlink")
+    @admin_only()
     async def cmd_unlinkname(self, interaction: discord.Interaction, member: discord.Member):
         await interaction.response.defer(ephemeral=True)
         key = str(member.id)
@@ -612,6 +609,7 @@ class RankSync(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="listlinks", description="List all Discord-to-PZ username links.")
+    @admin_only()
     async def cmd_listlinks(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         if not self._links:
@@ -654,13 +652,5 @@ class RankSync(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    from checks import require_role
-
-    cog = RankSync(bot)
-
-    for cmd_name in ("cmd_setrank", "cmd_syncranks", "cmd_linkname", "cmd_unlinkname", "cmd_listlinks"):
-        cmd = getattr(cog, cmd_name)
-        setattr(cog, cmd_name, require_role(bot.config.DEFAULT_ROLE)(cmd))
-
-    await bot.add_cog(cog)
+    await bot.add_cog(RankSync(bot))
     print("[RankSync] Extension loaded.")

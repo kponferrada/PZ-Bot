@@ -57,7 +57,8 @@ class StatsCog(commands.Cog):
     @app_commands.command(name="stats", description="Show a player's Aegis Panel stats.")
     async def cmd_stats(self, interaction: discord.Interaction, username: str) -> None:
         await interaction.response.defer()
-        stats = await aegis_stats.get(self.bot, username, force=True)
+        # Aegis flushes at most once a minute, matching the 60 s cache.
+        stats = await aegis_stats.get(self.bot, username)
         if stats is None:
             await interaction.followup.send(
                 embed=discord.Embed(
@@ -87,7 +88,7 @@ class StatsCog(commands.Cog):
     async def cmd_leaderboard(self, interaction: discord.Interaction,
                               kind: app_commands.Choice[str]) -> None:
         await interaction.response.defer()
-        rows = await aegis_stats.top(self.bot, kind.value, 10, force=True)
+        rows = await aegis_stats.top(self.bot, kind.value, 10)
         if not rows:
             await interaction.followup.send("No data from Aegis Panel yet.")
             return

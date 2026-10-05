@@ -50,8 +50,8 @@ _FIELDS: Dict[str, Tuple[int, int, int, int]] = {
     "server_deaths":  (338, 533, 222, 16),
     "deaths_today":   (338, 565, 222, 16),
     "deaths_week":    (338, 596, 222, 16),
-    # DEATH INFORMATION
-    "game_date_time": (376, 672, 420, 15),
+    # DEATH INFORMATION (left side = real world: Discord name, IRL time)
+    "death_time_irl": (376, 672, 420, 15),
     "location":       (376, 704, 420, 15),
     "cause":          (376, 734, 420, 15),
     # SUBJECT
@@ -61,8 +61,8 @@ _FIELDS: Dict[str, Tuple[int, int, int, int]] = {
     # FORENSIC FINDINGS
     "f_cause":          (1064, 519, 148, 14),
     "f_infection":      (1064, 553, 148, 14),
-    # DEATH DETAILS
-    "real_date_time":   (1082, 700, 215, 14),
+    # DEATH DETAILS (right side = in game: PZ username, in-game time)
+    "death_time_game":  (1082, 700, 215, 14),
     "d_location":       (1082, 729, 215, 14),
 }
 
@@ -577,9 +577,13 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
 
     `data` keys: survivor, character_name, infected, survival_time,
     zombie_kills, cause, injuries, location, game_date_time, death_count,
-    deaths_today, deaths_week; optional: profession, registry_serial,
-    issued_at (aware datetime, default now in PHT).
+    deaths_today, deaths_week; optional: discord_name, profession,
+    registry_serial, issued_at (aware datetime, default now in PHT).
     `avatar` is the raw image bytes of the survivor's Discord avatar, if linked.
+
+    The left (certificate) side is the real-world record: the linked Discord
+    username and the IRL time of death. The right (autopsy) side is the
+    in-game record: the PZ username and the in-game time of death.
     """
     img = _template().copy()
     draw = ImageDraw.Draw(img)
@@ -595,19 +599,22 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
     loc_long, loc_short = format_location(str(data.get("location") or ""))
     cause_text = format_cause(cause)
     infection = ("Infected", _RED) if infected else ("Not Infected", _INK)
+    discord_name = str(data.get("discord_name") or "").strip()
+    discord_value = (f"@{discord_name.lstrip('@')}", _INK) if discord_name else ("Not linked", _FADED)
 
     values = {
         "registry_no": (reg_no, _RED),
         "date_issued": (f"{_MONTHS[issued.month - 1]} {issued.day}, {issued.year}", _INK),
         "character_name": (character, _INK),
-        "username": (survivor, _INK),
+        "username": discord_value,
         "infection": infection,
         "survival_time": (str(data.get("survival_time") or "").strip() or "Unknown", _INK),
         "zombie_kills": (str(data.get("zombie_kills") or "0"), _INK),
         "server_deaths": (str(data.get("death_count") or "1"), _INK),
         "deaths_today": (str(data.get("deaths_today") or 0), _INK),
         "deaths_week": (str(data.get("deaths_week") or 0), _INK),
-        "game_date_time": (format_game_date(str(data.get("game_date_time") or "")) or "Unknown", _INK),
+        "death_time_irl": (f"{_MONTHS[issued.month - 1]} {issued.day}, {issued.year}   "
+                           f"{issued:%H:%M} PHT", _INK),
         "location": (loc_long, _INK),
         "cause": (cause_text, _INK),
         "s_character_name": (character, _INK),
@@ -615,7 +622,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
         "s_registry_no": (reg_no, _INK),
         "f_cause": (split_cause(cause)[0], _INK),
         "f_infection": infection,
-        "real_date_time": (f"{issued:%b} {issued.day}, {issued.year}  {issued:%H:%M} PHT", _INK),
+        "death_time_game": (format_game_date(str(data.get("game_date_time") or "")) or "Unknown", _INK),
         "d_location": (loc_short, _INK),
     }
     for name, (x, y, max_w, size) in _FIELDS.items():
