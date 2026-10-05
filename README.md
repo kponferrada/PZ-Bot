@@ -30,7 +30,7 @@ on boot.
 | Feature | Module(s) | Needs (server side) | Toggle key |
 |---|---|---|---|
 | Join / leave / welcome banners, split-screen players | `player_tracker.py`, `player_banner.py` | `Logs/*_user.txt` | `join_leave` |
-| Death cards (injuries, cause, survival time, day/week counts) | `death_log.py`, `death_card.py`, `death_store.py` | Death Log mod (`2972685375`) | `deaths` |
+| Death certificates (portrait from the `/linkme` Discord avatar, injury diagram, cause, survival time, day/week counts) | `death_log.py`, `death_card.py`, `death_store.py` | Death Log mod (`2972685375`) | `deaths` |
 | Auto-updating status dashboard (embed or rendered card) | `server_status.py`, `status_card.py`, `game_calendar.py` | Jeeve's Integration | `status_dashboard` |
 | Server up / restarting / down banners | `main.py` (`monitor_server_state`) | RCON | `server_up_down` |
 | In-game ↔ Discord chat relay | `chat_relay.py` | Jeeve's Integration | `chat_relay` |
@@ -222,6 +222,7 @@ jackpots, whitelist, …). The next tag should be `v0.5.0`.
 | Dashboard title, icon, banner, player cap, embed vs card | `DASHBOARD_*`, `MAX_PLAYERS`, `STATUS_MODE` in `config.env` |
 | Banner images | `ANNOUNCE_*_IMAGE` in `config.env`; files in `bot/assets/` |
 | Join / leave / death wording | `player_tracker.py`, `death_log.py` |
+| Death certificate art | `bot/assets/death-certificate-source.webp` → `python scripts/build_death_certificate.py` (needs numpy + opencv) → `death-certificate.png`; field positions in `death_card.py` |
 | Rank names and colours | `RANK_1..6` (config), `ROLE_TO_RANK` / `RANK_DISPLAY` in `rank_sync.py`, `ANSI_COLORS` in `chat_relay.py`, `_RANK_INFO` in `main.py` |
 | Relayed chat channels | `RELAY_CHAT_TYPES` in `chat_relay.py` |
 | Emoji | `EMOJI_*` in `config.env` |

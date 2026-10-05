@@ -244,18 +244,21 @@ class RankSync(commands.Cog):
 
     # ---- Public helpers -----------------------------------------------------
 
-    def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
-        discord_id = None
+    def discord_id_for_pz_username(self, pz_username: str) -> Optional[int]:
+        """The Discord user ID linked to a PZ username, if any."""
         for did, pzname in self._links.items():
             if pzname.lower() == pz_username.lower():
-                discord_id = did
-                break
+                return int(did)
+        return None
+
+    def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
+        discord_id = self.discord_id_for_pz_username(pz_username)
         if not discord_id:
             return None
         guild = self.bot.get_guild(self.bot.config.GUILD_ID)
         if not guild:
             return None
-        member = guild.get_member(int(discord_id))
+        member = guild.get_member(discord_id)
         if not member:
             return None
         return get_rank_from_roles(member)
