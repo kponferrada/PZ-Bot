@@ -19,6 +19,7 @@ Config (config.env):
 
 import re
 import os
+import time
 import asyncio
 import discord
 from discord.ext import commands, tasks
@@ -36,6 +37,9 @@ SIZE_TAG_RE = re.compile(r'<SIZE:[^>]+>')
 CHAT_LINE_RE = re.compile(
     r"\[.*?\]\[info\] Got message:ChatMessage\{chat=(\w+), author='([^']+)', text='(.*)'\}\."
 )
+
+# How often to re-list the Logs folder for a newer (rotated) chat log.
+_RESCAN_SECONDS = 10
 
 # Chat types we relay
 RELAY_CHAT_TYPES = {'General'}
@@ -73,6 +77,7 @@ class ChatRelay(commands.Cog):
         self._file_pos = 0
         self._current_log = None
         self._buffer = ""  # trailing partial line from the last read
+        self._last_scan = 0.0  # monotonic time of the last Logs/ listing
         self._active = False
 
         if not self._channel_id:
@@ -130,7 +135,12 @@ class ChatRelay(commands.Cog):
 
         try:
             sftp = sftp_client.get()
-            log_file = await self._find_latest_chat_log()
+            now = time.monotonic()
+            if self._current_log is None or now - self._last_scan >= _RESCAN_SECONDS:
+                self._last_scan = now
+                log_file = await self._find_latest_chat_log()
+            else:
+                log_file = self._current_log
             if not log_file:
                 return
 
@@ -150,6 +160,15 @@ class ChatRelay(commands.Cog):
                 print(f"[ChatRelay] Now tailing: {log_file}")
 
             try:
+                st = await sftp.stat(log_file)
+                if st is None:
+                    self._last_scan = 0.0  # gone (moved away) -> rescan next tick
+                    return
+                if st[0] == self._file_pos:
+                    return
+                if st[0] < self._file_pos:
+                    self._file_pos = 0  # truncated
+                    self._buffer = ""
                 new_text, self._file_pos = await sftp.tail(log_file, self._file_pos)
             except sftp_client.SftpError:
                 return

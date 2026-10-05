@@ -46,6 +46,10 @@ _DEFAULT_LOG_DIR = "Logs"
 # (within this many seconds) as a respawn and suppress both notifications.
 _RESPAWN_WINDOW = 15
 
+# How often to re-list the Logs folder for a newer (rotated) log. Between scans
+# the known file is just stat'ed, so an idle 2 s tick costs one round trip.
+_RESCAN_SECONDS = 10
+
 # ---- DB ----------------------------------------------------------------------
 
 DB_PATH = Path(__file__).parent / "players.db"
@@ -193,6 +197,7 @@ class PlayerTrackerCog(commands.Cog):
         self._last_seed_attempt = 0.0
         self._pending_leave: dict = {}
         self._buffer = ""        # trailing partial line from the last read
+        self._last_scan = 0.0     # monotonic time of the last Logs/ listing
         self._tasks: set = set()  # strong refs so fire-and-forget tasks aren't GC'd
 
         init_db()
@@ -341,7 +346,12 @@ class PlayerTrackerCog(commands.Cog):
                 self._last_seed_attempt = time.time()
                 await self._seed_known_players()
             sftp = sftp_client.get()
-            log_file = await self._find_latest_user_log()
+            now = time.monotonic()
+            if self._current_log is None or now - self._last_scan >= _RESCAN_SECONDS:
+                self._last_scan = now
+                log_file = await self._find_latest_user_log()
+            else:
+                log_file = self._current_log
             if not log_file:
                 return
 
@@ -359,8 +369,17 @@ class PlayerTrackerCog(commands.Cog):
                 self._file_pos = 0
                 print(f"[PlayerTracker] Log rotated, now tailing: {log_file}")
 
-            # Read any new bytes.
+            # Read any new bytes (a stat first, so an idle tick doesn't open the file).
             try:
+                st = await sftp.stat(log_file)
+                if st is None:
+                    self._last_scan = 0.0  # gone (moved away) -> rescan next tick
+                    return
+                if st[0] == self._file_pos:
+                    return
+                if st[0] < self._file_pos:
+                    self._file_pos = 0  # truncated
+                    self._buffer = ""
                 text, self._file_pos = await sftp.tail(log_file, self._file_pos)
             except sftp_client.SftpError:
                 return

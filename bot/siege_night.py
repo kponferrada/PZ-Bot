@@ -33,6 +33,7 @@ from discord.ext import commands, tasks
 
 import lua_bridge
 from game_calendar import siege_date_string
+from checks import admin_only
 
 # Siege Night's `lastDirection` index -> compass name (matches SN.DIR_NAMES).
 _DIR_NAMES = ("North", "Northeast", "East", "Southeast",
@@ -83,12 +84,6 @@ class SiegeNightCog(commands.Cog):
         self.siege_status_poller.cancel()
 
     # ── helpers ──────────────────────────────────────────────────────────
-
-    def _check_role(self, interaction: discord.Interaction) -> bool:
-        role = discord.utils.get(
-            interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE
-        )
-        return role is not None and role in interaction.user.roles
 
     # ── background poller ───────────────────────────────────────────────
 
@@ -312,15 +307,8 @@ class SiegeNightCog(commands.Cog):
     # ── /siegestatus ────────────────────────────────────────────────────
 
     @app_commands.command(name="siegestatus", description="Show the current Siege Night status.")
+    @admin_only()
     async def cmd_siegestatus(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role to use this command.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         status = await lua_bridge.read_siege_status()
@@ -383,15 +371,8 @@ class SiegeNightCog(commands.Cog):
     # ── /siegestart ─────────────────────────────────────────────────────
 
     @app_commands.command(name="siegestart", description="Force a siege night to start immediately.")
+    @admin_only()
     async def cmd_siegestart(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role to use this command.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         success = await lua_bridge.siege_start()
@@ -415,15 +396,8 @@ class SiegeNightCog(commands.Cog):
     # ── /siegestop ──────────────────────────────────────────────────────
 
     @app_commands.command(name="siegestop", description="Stop the currently active siege night.")
+    @admin_only()
     async def cmd_siegestop(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role to use this command.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         success = await lua_bridge.siege_stop()
@@ -444,15 +418,8 @@ class SiegeNightCog(commands.Cog):
 
     @app_commands.command(name="siegeschedule", description="Change the next siege night to a specific world day.")
     @app_commands.describe(day="The world day number to schedule the next siege on")
+    @admin_only()
     async def cmd_siegeschedule(self, interaction: discord.Interaction, day: int) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role to use this command.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-            return
-
         if day < 1:
             await interaction.response.send_message(embed=discord.Embed(
                 title="Invalid Day",

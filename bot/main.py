@@ -218,6 +218,20 @@ class ServerState:
         self.restart_shutdown_started = False  # set True once players are kicked (real shutdown)
         self.death_log_active = False  # True once the Death Log mod's file is seen
         self.server_started_at = 0.0  # epoch time the server last came up (mod-check baseline)
+        # Latest RCON probe by monitor_server_state, shared so other loops
+        # (the dashboard) don't open their own connection for the same answer.
+        self.rcon_online: Optional[bool] = None
+        self.rcon_checked_at = 0.0  # time.monotonic() of that probe
+
+    def record_rcon_probe(self, online: bool) -> None:
+        self.rcon_online = online
+        self.rcon_checked_at = time.monotonic()
+
+    def recent_rcon_probe(self, max_age: float) -> Optional[bool]:
+        """The shared probe result if it's at most `max_age` seconds old, else None."""
+        if self.rcon_online is None or time.monotonic() - self.rcon_checked_at > max_age:
+            return None
+        return self.rcon_online
 
     def mark_alive(self, source: str) -> None:
         """Record that the server was observably alive just now."""
@@ -518,6 +532,7 @@ class PZBot(commands.Bot):
         """Announce server up/down, distinguishing restarts from real outages."""
         # The RCON probe is a blocking socket call; keep it off the event loop.
         online = await asyncio.to_thread(self.rcon.is_server_online)
+        self.state.record_rcon_probe(online)
         prev = self._was_online
         now = time.time()
 
@@ -612,6 +627,7 @@ async def on_ready() -> None:
     # Set the online baseline silently — no startup message or up/down banner here.
     # Real up/down transitions are announced by monitor_server_state after startup.
     bot._was_online = await asyncio.to_thread(bot.rcon.is_server_online, 10)
+    bot.state.record_rcon_probe(bot._was_online)
     if bot._was_online:
         # Server was already up at boot — we can't know its exact start time, so
         # baseline the mod-check from now.
@@ -820,7 +836,7 @@ _RANK_INFO = {
     2: ("Spark", "Blue", "\U0001f7e6"),
     3: ("Cinder", "Violet", "\U0001f7ea"),
     4: ("Flame", "Yellow", "\U0001f7e8"),
-    5: ("Blaze", "Orange", "\U0001f7e7"),
+    5: ("Blaze", "Cyan", "\U0001f7e6"),  # matches rank_sync / chat_relay
     6: ("Inferno", "Red", "\U0001f7e5"),
 }
 

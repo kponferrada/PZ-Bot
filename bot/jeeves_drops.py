@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import lua_bridge
+from checks import admin_only
 
 CRATE_TYPES = [
     app_commands.Choice(name="Military",    value="military"),
@@ -51,12 +52,6 @@ class JeevesDropsCog(commands.Cog):
     async def cog_unload(self):
         self.drops_status_poller.cancel()
         self.supply_event_poller.cancel()
-
-    def _check_role(self, interaction: discord.Interaction) -> bool:
-        role = discord.utils.get(
-            interaction.guild.roles, name=self.bot.config.DEFAULT_ROLE
-        )
-        return role is not None and role in interaction.user.roles
 
     # ── background poller ───────────────────────────────────────────────
 
@@ -168,20 +163,13 @@ class JeevesDropsCog(commands.Cog):
         type="Crate type (leave empty for random)"
     )
     @app_commands.choices(type=CRATE_TYPES)
+    @admin_only()
     async def cmd_airdrop(
         self,
         interaction: discord.Interaction,
         player: str = None,
         type: app_commands.Choice[str] = None
     ) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red()
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer(ephemeral=True)
 
         crate_type = type.value if type else None
@@ -219,15 +207,8 @@ class JeevesDropsCog(commands.Cog):
         name="airdropstatus",
         description="Show the current air drop status."
     )
+    @admin_only()
     async def cmd_airdropstatus(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red()
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         success = await lua_bridge.airdrop_status()
@@ -404,15 +385,8 @@ class JeevesDropsCog(commands.Cog):
         name="supplyevent",
         description="Force-trigger a supply drop event at a random map location."
     )
+    @admin_only()
     async def cmd_supply_event(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red()
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         success = await lua_bridge.supply_event()
@@ -439,15 +413,8 @@ class JeevesDropsCog(commands.Cog):
         name="supplyeventstatus",
         description="Show the current supply event status."
     )
+    @admin_only()
     async def cmd_supply_event_status(self, interaction: discord.Interaction) -> None:
-        if not self._check_role(interaction):
-            await interaction.response.send_message(embed=discord.Embed(
-                title="Permission Denied",
-                description=f"You need the **{self.bot.config.DEFAULT_ROLE}** role.",
-                colour=discord.Colour.red()
-            ), ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         success = await lua_bridge.supply_event_status()

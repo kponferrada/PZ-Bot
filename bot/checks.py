@@ -19,3 +19,21 @@ def require_role(role_name: str):
             raise app_commands.MissingRole(role_name)
         return True
     return app_commands.check(predicate)
+
+
+def admin_only():
+    """App-command check: the member must have the admin role (DEFAULT_ROLE).
+
+    Reads the role name from the bot's config when the command runs, so cogs
+    can use it as a plain decorator. A failure raises MissingRole, which the
+    global handler in main.py answers with a "Permission Denied" embed.
+    """
+    async def predicate(interaction: discord.Interaction) -> bool:
+        role_name = interaction.client.config.DEFAULT_ROLE
+        if not interaction.guild:
+            raise app_commands.MissingRole(role_name)
+        role = discord.utils.get(interaction.guild.roles, name=role_name)
+        if role is None or role not in interaction.user.roles:
+            raise app_commands.MissingRole(role_name)
+        return True
+    return app_commands.check(predicate)

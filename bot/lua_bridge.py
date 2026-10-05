@@ -402,37 +402,34 @@ def _parse_nested_table(s: str, i: int):
     return result, i
 
 
-async def _read_status(filename: str) -> dict | None:
+async def _read_status_text(filename: str) -> str | None:
+    """The status file's text, or None if it's missing/empty/unreadable.
+
+    Reads directly instead of `exists()` + read: these files are polled every
+    few seconds, and a missing file just fails the open.
+    """
     if _lua_dir is None:
         return None
-    sftp = sftp_client.get()
-    path = _path(filename)
-    if not await sftp.exists(path):
-        return None
     try:
-        text = (await sftp.read_text(path)).strip()
-        if not text:
-            return None
-        return _parse_lua_table(text)
-    except Exception as exc:
-        print(f"[LuaBridge] Failed to read {filename}: {exc}")
+        text = (await sftp_client.get().read_text(_path(filename))).strip()
+    except sftp_client.SftpError as exc:
+        if not exc.not_found:
+            print(f"[LuaBridge] Failed to read {filename}: {exc}")
         return None
+    return text or None
+
+
+async def _read_status(filename: str) -> dict | None:
+    text = await _read_status_text(filename)
+    return _parse_lua_table(text) if text else None
 
 
 async def _read_status_nested(filename: str) -> dict | None:
-    if _lua_dir is None:
-        return None
-    sftp = sftp_client.get()
-    path = _path(filename)
-    if not await sftp.exists(path):
-        return None
+    text = await _read_status_text(filename)
     try:
-        text = (await sftp.read_text(path)).strip()
-        if not text:
-            return None
-        return _parse_lua_nested(text)
+        return _parse_lua_nested(text) if text else None
     except Exception as exc:
-        print(f"[LuaBridge] Failed to read {filename}: {exc}")
+        print(f"[LuaBridge] Failed to parse {filename}: {exc}")
         return None
 
 

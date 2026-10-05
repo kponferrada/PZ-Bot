@@ -73,3 +73,28 @@ def test_chat_relay_escapes_markdown_and_code_fences():
     assert "\\*\\*hi\\*\\*" in plain
     ranked = fmt(_Relay(6), "General", "bob", "```\n@everyone")
     assert ranked.count("```") == 2  # only the wrapper fences survive
+
+
+def test_newest_matching_uses_one_readdir():
+    import asyncio
+    from types import SimpleNamespace
+    from sftp_client import SftpClient
+
+    calls = []
+
+    class FakeSftp:
+        async def readdir(self, path):
+            calls.append(path)
+            return [
+                SimpleNamespace(filename="a_user.txt", attrs=SimpleNamespace(mtime=10)),
+                SimpleNamespace(filename="b_user.txt", attrs=SimpleNamespace(mtime=30)),
+                SimpleNamespace(filename="c_chat.txt", attrs=SimpleNamespace(mtime=99)),
+                SimpleNamespace(filename="d_user.txt", attrs=SimpleNamespace(mtime=None)),
+            ]
+
+    client = SftpClient("h")
+    client._conn = SimpleNamespace(is_closed=lambda: False)
+    client._sftp = FakeSftp()
+    newest = asyncio.run(client.newest_matching("/logs/", "*_user.txt"))
+    assert newest == "/logs/b_user.txt"
+    assert calls == ["/logs/"]

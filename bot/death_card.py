@@ -555,6 +555,17 @@ def _draw_wounds(img: Image.Image, injuries: str) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+_template_cache: Optional[Image.Image] = None
+
+
+def _template() -> Image.Image:
+    """The decoded blank certificate, loaded once (callers copy it)."""
+    global _template_cache
+    if _template_cache is None:
+        _template_cache = Image.open(_CARD_PATH).convert("RGBA")
+    return _template_cache
+
+
 def _truthy(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -570,7 +581,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
     issued_at (aware datetime, default now in PHT).
     `avatar` is the raw image bytes of the survivor's Discord avatar, if linked.
     """
-    img = Image.open(_CARD_PATH).convert("RGBA")
+    img = _template().copy()
     draw = ImageDraw.Draw(img)
 
     survivor = str(data.get("survivor") or "").strip() or "Unknown"

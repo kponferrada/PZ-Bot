@@ -474,8 +474,8 @@ class ServerStatusCog(commands.Cog):
         # Try to edit existing message
         if self._message_id:
             try:
-                msg = await channel.fetch_message(self._message_id)
-                await msg.edit(attachments=[_new_file()])
+                # Edit by id: one API call instead of fetch + edit.
+                await channel.get_partial_message(self._message_id).edit(attachments=[_new_file()])
                 return
             except (discord.NotFound, discord.HTTPException):
                 self._message_id = None
@@ -505,8 +505,8 @@ class ServerStatusCog(commands.Cog):
             return
         if self._message_id:
             try:
-                msg = await channel.fetch_message(self._message_id)
-                await msg.edit(embed=embed)
+                # Edit by id: one API call instead of fetch + edit.
+                await channel.get_partial_message(self._message_id).edit(embed=embed)
                 return
             except (discord.NotFound, discord.HTTPException):
                 self._message_id = None
@@ -531,8 +531,11 @@ class ServerStatusCog(commands.Cog):
         if not self.bot.features.is_enabled("status_dashboard"):
             return
         try:
-            # Blocking socket probe — keep it off the event loop.
-            rcon_ok = await asyncio.to_thread(self.bot.rcon.is_server_online)
+            # Reuse the up/down monitor's probe (every 15 s) when it's fresh;
+            # otherwise probe ourselves, off the event loop (blocking socket).
+            rcon_ok = self.bot.state.recent_rcon_probe(20.0)
+            if rcon_ok is None:
+                rcon_ok = await asyncio.to_thread(self.bot.rcon.is_server_online)
             world, world_age = await lua_bridge.read_world_status_with_age()
             siege = await lua_bridge.read_siege_status()
             # The bridge now writes a nested {schedule, siege} table. The dashboard
