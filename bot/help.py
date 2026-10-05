@@ -28,7 +28,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     "👥 Players & Ranks": [
         ("/setaccesslevel <player> <level>", "Set a player's server access level. [admin]"),
         ("/setrank <username> <rank>", "Set a player's in-game rank (chat name colour). [admin]"),
-        ("/syncranks", "Rebuild the rank file from all linked members. [admin]"),
+        ("/syncranks", "Rebuild the rank file from the reputation ladder (or linked members' roles). [admin]"),
         ("/linkname <member> <username>", "Link a Discord user to their PZ username. [admin]"),
         ("/unlinkname <member>", "Remove a user's Discord-to-PZ link. [admin]"),
         ("/listlinks", "List all Discord-to-PZ username links. [admin]"),

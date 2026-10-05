@@ -144,6 +144,12 @@ class Config:
         # Barangay Tales progression export (weekly RP leaderboard). Defaults to
         # {SFTP_LUA_DIR}/BarangayTales/progression.json in bt_progression.
         self.BT_PROGRESSION_PATH = _env("BT_PROGRESSION_PATH")
+        # Where in-game ranks come from: "bt_ladder" (Barangay Tales weekly
+        # reputation ladder) or "roles" (the RANK_1..6 Discord roles).
+        self.RANK_SOURCE = _env("RANK_SOURCE", "bt_ladder").strip().lower()
+        # bt_ladder only: also give linked members the matching RANK_n role
+        # (and take the other rank roles away). Needs Manage Roles.
+        self.RANK_LADDER_ROLES = _env("RANK_LADDER_ROLES", "false").strip().lower() in ("1", "true", "yes", "on")
 
         # Mod update checker (Steam Workshop) — optional key for unlisted items.
         self.STEAM_API_KEY = _env("STEAM_API_KEY", "")
