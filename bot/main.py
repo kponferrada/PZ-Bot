@@ -332,7 +332,10 @@ class PZBot(commands.Bot):
     Emojis = Emojis
 
     def __init__(self, config: Config):
-        super().__init__(command_prefix="!", intents=discord.Intents.all())
+        # Never let relayed text ping @everyone/@here; role/user pings stay
+        # allowed for the announcements that use them on purpose.
+        super().__init__(command_prefix="!", intents=discord.Intents.all(),
+                         allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
         self.config = config
         self.state = ServerState()
         self.rcon = RCONHelper(config)
@@ -686,8 +689,11 @@ async def cmd_online(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="players", description="List players currently connected.")
 @require_role(config.DEFAULT_ROLE)
 async def cmd_players(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)  # RCON can take longer than 3 s
     response = await bot.rcon.send_command("players")
-    await _respond(interaction, "Connected players", description=response or "Failed to get player list")
+    await interaction.followup.send(embed=discord.Embed(
+        title="Connected players", colour=discord.Colour.purple(),
+        description=response or "Failed to get player list"), ephemeral=True)
 
 
 @bot.tree.command(name="playerlist", description="Show everyone who has ever joined.")
@@ -710,8 +716,11 @@ async def cmd_playerlist(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="teleport", description="Teleport player1 to player2's location.")
 @require_role(config.DEFAULT_ROLE)
 async def cmd_teleport(interaction: discord.Interaction, player1: str, player2: str) -> None:
+    await interaction.response.defer(ephemeral=True)
     await bot.rcon.send_command(f'teleport ("{player1}", "{player2}")')
-    await _respond(interaction, f"Attempting to teleport {player1} to {player2}.")
+    await interaction.followup.send(embed=discord.Embed(
+        title=f"Attempting to teleport {player1} to {player2}.", colour=discord.Colour.purple()),
+        ephemeral=True)
 
 
 @bot.tree.command(name="setaccesslevel", description="Set a player's server access level.")
@@ -722,8 +731,11 @@ async def cmd_setaccesslevel(interaction: discord.Interaction, player: str, leve
         await _respond(interaction, f"Invalid access level: {level}. Valid: {', '.join(valid_levels)}",
                        discord.Colour.red())
         return
+    await interaction.response.defer(ephemeral=True)
     await bot.rcon.send_command(f'setaccesslevel "{player}" "{level.lower()}"')
-    await _respond(interaction, f"Set {player}'s access level to **{level.lower()}**.")
+    await interaction.followup.send(embed=discord.Embed(
+        title=f"Set {player}'s access level to **{level.lower()}**.", colour=discord.Colour.purple()),
+        ephemeral=True)
 
 
 @cmd_setaccesslevel.autocomplete("level")
@@ -815,11 +827,21 @@ _RANK_INFO = {
 
 @bot.tree.command(name="myrank", description="Show your current in-game rank and chat color.")
 async def cmd_myrank(interaction: discord.Interaction) -> None:
-    highest = 0
-    for role in interaction.user.roles:
-        for rank_num, rank_role in config.RANKS.items():
-            if role.name == rank_role and rank_num > highest:
-                highest = rank_num
+    rank_cog = bot.get_cog("RankSync")
+    if rank_cog is not None and rank_cog.ranks_from_ladder:
+        # Ranks follow the Barangay Tales ladder, keyed on the linked PZ name.
+        highest = rank_cog.rank_for_discord_id(interaction.user.id)
+        if highest is None:
+            await _respond(interaction, "Not linked",
+                           description="Link your PZ username with `/linkme` to see your rank. "
+                                       "Ranks come from the Barangay Tales reputation ladder.")
+            return
+    else:
+        highest = 0
+        for role in interaction.user.roles:
+            for rank_num, rank_role in config.RANKS.items():
+                if role.name == rank_role and rank_num > highest:
+                    highest = rank_num
     name, color, emoji = _RANK_INFO.get(highest, ("Unknown", "None", "\u2753"))
     await _respond(
         interaction,

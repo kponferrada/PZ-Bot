@@ -115,19 +115,19 @@ def _build_lua_table(command: str, cmd_id: int, **kwargs) -> str:
 
 async def _write_file(remote_path: str, lock: asyncio.Lock, content: str, label: str) -> bool:
     async with lock:
-        sftp = sftp_client.get()
-        # Wait for the mod to consume any previous command file. The PZ mod
-        # "deletes" by overwriting with empty content (no os.remove), so an empty
-        # or missing file means "consumed". Mod polls ~every 0.5-2s.
-        for _ in range(10):
-            st = await sftp.stat(remote_path)
-            if st is None or st[0] == 0:
-                break
-            await asyncio.sleep(0.5)
-        else:
-            print(f"[LuaBridge] WARNING: previous command not consumed after 5s, overwriting for {label}")
-
         try:
+            sftp = sftp_client.get()
+            # Wait for the mod to consume any previous command file. The PZ mod
+            # "deletes" by overwriting with empty content (no os.remove), so an
+            # empty or missing file means "consumed". Mod polls ~every 0.5-2s.
+            for _ in range(10):
+                st = await sftp.stat(remote_path)
+                if st is None or st[0] == 0:
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                print(f"[LuaBridge] WARNING: previous command not consumed after 5s, overwriting for {label}")
+
             await sftp.write_text(remote_path, content)
             print(f"[LuaBridge] Wrote {label}")
             await asyncio.sleep(0.6)
@@ -224,7 +224,22 @@ async def supply_event_status() -> bool:
 # ---- Lua table parser (shared, deduplicated) ----------------------------------
 
 def _parse_lua_table(text: str) -> dict | None:
-    """Parse a flat Lua table of the form `return { key = value, ... }` into a dict."""
+    """Parse a flat Lua table of the form `return { key = value, ... }` into a dict.
+
+    Uses the full parser (string escapes, UTF-8 byte escapes) and falls back
+    to the simple line-based one if that finds nothing.
+    """
+    try:
+        parsed = _parse_lua_nested(text)
+    except Exception:
+        parsed = None
+    if parsed:
+        return parsed
+    return _parse_lua_table_lines(text)
+
+
+def _parse_lua_table_lines(text: str) -> dict | None:
+    """Line-based fallback for `_parse_lua_table` (one `key = value` per line)."""
     inner = text.strip()
     if inner.startswith("return"):
         inner = inner[6:].strip()
@@ -310,33 +325,45 @@ def _parse_nested_value(s: str, i: int):
 
 
 def _parse_lua_string(s: str, i: int):
-    """Parse a Lua double-quoted string (with \\n \\r \\t \\\" \\\\ \\ddd escapes)."""
+    """Parse a Lua double-quoted string (with \\n \\r \\t \\\" \\\\ \\ddd escapes).
+
+    `\\ddd` escapes are bytes; a run of them is decoded as UTF-8, so a name
+    the mod wrote as `\\195\\177` comes back as "ñ" rather than "Ã±".
+    """
     j = i + 1
     out = []
+    pending = bytearray()  # consecutive \ddd bytes, decoded together
+
+    def _flush():
+        if pending:
+            out.append(pending.decode("utf-8", errors="replace"))
+            pending.clear()
+
     while j < len(s):
         c = s[j]
         if c == "\\":
             nxt = s[j + 1] if j + 1 < len(s) else ""
-            if nxt == "n":
-                out.append("\n"); j += 2; continue
-            if nxt == "r":
-                out.append("\r"); j += 2; continue
-            if nxt == "t":
-                out.append("\t"); j += 2; continue
-            if nxt == '"':
-                out.append('"'); j += 2; continue
-            if nxt == "\\":
-                out.append("\\"); j += 2; continue
             if nxt.isdigit():
                 num = 0
                 k = j + 1
                 while k < len(s) and k < j + 4 and s[k].isdigit():
                     num = num * 10 + int(s[k]); k += 1
-                out.append(chr(num & 0xFF)); j = k; continue
-            out.append(nxt); j += 2; continue
+                pending.append(num & 0xFF); j = k; continue
+            _flush()
+            if nxt == "n":
+                out.append("\n")
+            elif nxt == "r":
+                out.append("\r")
+            elif nxt == "t":
+                out.append("\t")
+            else:
+                out.append(nxt)
+            j += 2; continue
+        _flush()
         if c == '"':
             return "".join(out), j + 1
         out.append(c); j += 1
+    _flush()
     return "".join(out), j
 
 
@@ -439,5 +466,32 @@ async def read_world_status_with_age() -> tuple[dict | None, float | None]:
     st = await sftp.stat(path)
     if st is None:
         return None, None
-    age = max(0.0, time.time() - st[1])
-    return await read_world_status(), age
+    return await read_world_status(), _mtime_age(path, st[1])
+
+
+# path -> (last mtime seen, local monotonic time it was first seen)
+_mtime_seen: dict = {}
+
+
+def _mtime_age(path: str, mtime: float, now_mono: float | None = None,
+               now_wall: float | None = None) -> float:
+    """Seconds since `path` was last written, immune to VPS/host clock skew.
+
+    The mtime comes from the game host's clock, so `time.time() - mtime` is off
+    by however far the two clocks disagree. Instead, note (on the bot's own
+    monotonic clock) when the mtime last changed and measure from there. The
+    first sighting has nothing to compare against, so it falls back to the
+    wall-clock difference.
+    """
+    now_mono = time.monotonic() if now_mono is None else now_mono
+    now_wall = time.time() if now_wall is None else now_wall
+    prev = _mtime_seen.get(path)
+    if prev is None:
+        # First sighting: back-date the "seen" time by the wall-clock age.
+        age = max(0.0, now_wall - mtime)
+        _mtime_seen[path] = (mtime, now_mono - age)
+        return age
+    if mtime != prev[0]:
+        _mtime_seen[path] = (mtime, now_mono)
+        return 0.0
+    return max(0.0, now_mono - prev[1])

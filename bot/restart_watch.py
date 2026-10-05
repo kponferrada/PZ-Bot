@@ -187,13 +187,17 @@ class RestartWatch(commands.Cog):
 
         `duration` (seconds) overrides the default restart delay (unused by the
         normal flows, which rely on the default countdown)."""
-        remaining = self._restart_delay if duration is None else duration
+        total = self._restart_delay if duration is None else duration
+        # Measure against a deadline: the RCON/bridge calls inside the loop
+        # take seconds each, so counting 1-second ticks would run late.
+        deadline = time.monotonic() + total
+        remaining = total
         notified = False
         saved = False
         kicked = False
         while remaining > 0:
             await asyncio.sleep(1)
-            remaining -= 1
+            remaining = max(0.0, deadline - time.monotonic())
             if not notified and remaining <= self._kick_notify_at:
                 notified = True
                 await self._announce_kick_notification()

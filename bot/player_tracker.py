@@ -192,12 +192,19 @@ class PlayerTrackerCog(commands.Cog):
         self._seeded = False
         self._last_seed_attempt = 0.0
         self._pending_leave: dict = {}
+        self._buffer = ""        # trailing partial line from the last read
+        self._tasks: set = set()  # strong refs so fire-and-forget tasks aren't GC'd
 
         init_db()
         self._tail_user_log.start()
 
     def cog_unload(self):
         self._tail_user_log.cancel()
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     # ---- file helpers --------------------------------------------------------
 
@@ -302,7 +309,7 @@ class PlayerTrackerCog(commands.Cog):
         if m:
             name = m.group(1)
             self._pending_leave[name] = time.time()
-            asyncio.create_task(self._delayed_leave(name))
+            self._spawn(self._delayed_leave(name))
             return
 
         # Death -> death notification (to the death-logs channel).
@@ -319,7 +326,7 @@ class PlayerTrackerCog(commands.Cog):
                     # PZ writes either "(pvp)" or "(non pvp)". Match the whole
                     # token, not a substring, or "non pvp" reads as a player kill.
                     details["pvp"] = m.group(5).strip().lower() == "pvp"
-                asyncio.ensure_future(self._handle_death(name, details))
+                self._spawn(self._handle_death(name, details))
                 return
             if "died" in line.lower():
                 print(f"[PlayerTracker] Unmatched death line: {line}")
@@ -338,13 +345,19 @@ class PlayerTrackerCog(commands.Cog):
             if not log_file:
                 return
 
-            # Log rotation: new file detected — seek to its end.
+            # New file. On startup skip its history; on a rotation (new server
+            # session) read it from the start so the first joins aren't lost.
             if log_file != self._current_log:
+                first = self._current_log is None
                 self._current_log = log_file
-                st = await sftp.stat(log_file)
-                self._file_pos = st[0] if st else 0
-                print(f"[PlayerTracker] Now tailing: {log_file} (from {self._file_pos})")
-                return
+                self._buffer = ""
+                if first:
+                    st = await sftp.stat(log_file)
+                    self._file_pos = st[0] if st else 0
+                    print(f"[PlayerTracker] Now tailing: {log_file} (from {self._file_pos})")
+                    return
+                self._file_pos = 0
+                print(f"[PlayerTracker] Log rotated, now tailing: {log_file}")
 
             # Read any new bytes.
             try:
@@ -354,7 +367,11 @@ class PlayerTrackerCog(commands.Cog):
             if not text:
                 return
 
-            for line in text.splitlines():
+            # The game may be mid-line when we read; keep the partial line.
+            self._buffer += text
+            lines = self._buffer.split("\n")
+            self._buffer = lines.pop()
+            for line in lines:
                 line = line.strip()
                 if not line:
                     continue

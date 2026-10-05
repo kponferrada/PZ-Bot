@@ -375,6 +375,18 @@ class RankSync(commands.Cog):
 
     # ---- Public helpers -----------------------------------------------------
 
+    @property
+    def ranks_from_ladder(self) -> bool:
+        """True when ranks follow the Barangay Tales ladder (RANK_SOURCE=bt_ladder)."""
+        return self._ladder_mode
+
+    def rank_for_discord_id(self, discord_id: int) -> Optional[int]:
+        """Ladder rank of a linked Discord user, or None if they aren't linked."""
+        pz_username = self._links.get(str(discord_id))
+        if pz_username is None:
+            return None
+        return self._rank_for(None, pz_username)
+
     def discord_id_for_pz_username(self, pz_username: str) -> Optional[int]:
         """The Discord user ID linked to a PZ username, if any."""
         for did, pzname in self._links.items():

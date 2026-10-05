@@ -29,6 +29,26 @@ class SftpError(Exception):
 _OP_TIMEOUT = 30
 
 
+def complete_utf8_length(data: bytes) -> int:
+    """Length of `data` minus a trailing, still-incomplete UTF-8 sequence.
+
+    A tail read can end in the middle of a multi-byte character (a name with
+    "ñ", an emoji in chat). Decoding that chunk on its own would turn the
+    character into U+FFFD, so callers stop before it and read it next time.
+    """
+    n = len(data)
+    # A UTF-8 sequence is at most 4 bytes: look back over continuation bytes.
+    for back in range(1, min(4, n) + 1):
+        b = data[n - back]
+        if b & 0xC0 == 0x80:          # continuation byte, keep looking
+            continue
+        if b & 0x80 == 0:             # ASCII: nothing pending
+            return n
+        need = 2 if b & 0xE0 == 0xC0 else 3 if b & 0xF0 == 0xE0 else 4 if b & 0xF8 == 0xF0 else 1
+        return n if back >= need else n - back
+    return n
+
+
 class SftpClient:
     def __init__(
         self,
@@ -192,6 +212,7 @@ class SftpClient:
 
         try:
             data = await self._run(f"tail({path}, {offset})", _read())
+            data = data[:complete_utf8_length(data)]
             return data.decode("utf-8", errors="replace"), offset + len(data)
         except SftpError:
             raise

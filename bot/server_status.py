@@ -531,7 +531,8 @@ class ServerStatusCog(commands.Cog):
         if not self.bot.features.is_enabled("status_dashboard"):
             return
         try:
-            rcon_ok = self.bot.rcon.is_server_online()
+            # Blocking socket probe — keep it off the event loop.
+            rcon_ok = await asyncio.to_thread(self.bot.rcon.is_server_online)
             world, world_age = await lua_bridge.read_world_status_with_age()
             siege = await lua_bridge.read_siege_status()
             # The bridge now writes a nested {schedule, siege} table. The dashboard
@@ -544,8 +545,10 @@ class ServerStatusCog(commands.Cog):
                       f"({'STALE' if world_age > 120 else 'fresh'}) "
                       f"day={d.get('day')} month={d.get('month')} ts={d.get('timestamp')}")
 
-            # online determination with grace period
-            world_fresh = _bridge_file_is_fresh(world)
+            # online determination with grace period. The world file's age comes
+            # from its write time (skew-immune); the siege file only has the
+            # timestamp the mod wrote into it.
+            world_fresh = world_age is not None and world_age < BRIDGE_FRESHNESS_SECONDS
             siege_fresh = _bridge_file_is_fresh(siege)
             bridge_fresh = world_fresh or siege_fresh
 
@@ -569,7 +572,8 @@ class ServerStatusCog(commands.Cog):
                 pc = world.get("playerCount", 0)
                 fields = _build_card_fields(world, siege, server_online, max_players)
                 now = datetime.datetime.now().strftime("%b %d, %I:%M %p")
-                status_card.render_status_card(
+                await asyncio.to_thread(
+                    status_card.render_status_card,
                     self._image_path,
                     title=DASHBOARD_TITLE,
                     online=server_online,

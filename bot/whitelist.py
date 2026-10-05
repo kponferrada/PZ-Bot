@@ -34,6 +34,7 @@ Config (see config.env.example):
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime
 import sqlite3
@@ -434,7 +435,8 @@ class WhitelistCog(commands.Cog):
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
         embed.add_field(name="Username", value=f"`{request.get('Username', '')}`", inline=False)
-        embed.add_field(name="Password", value=f"`{request.get('Password', '')}`", inline=False)
+        # Spoilered so it isn't readable at a glance in the approval channel.
+        embed.add_field(name="Password", value=f"||`{request.get('Password', '')}`||", inline=False)
         embed.add_field(name="SteamID", value=f"`{request.get('SteamID', '')}`", inline=False)
         embed.add_field(name="Character Lore", value=request.get("withCharacterLore", ""), inline=False)
         embed.add_field(name="Submitted at", value=request.get("Timestamp", ""), inline=False)
@@ -533,7 +535,7 @@ class WhitelistCog(commands.Cog):
         p = password.replace('"', "").strip()
         s = steam_id.replace('"', "").strip()
 
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -573,6 +575,12 @@ class WhitelistCog(commands.Cog):
 
         return "", "; ".join(cmds)
 
+    @staticmethod
+    def _redact_code(code: str, password: str) -> str:
+        """The RCON commands for the `Code` column, without the password."""
+        p = password.replace('"', "").strip()
+        return code.replace(f'"{p}"', '"***"') if p else code
+
     async def _remove_whitelist_user_rcon(self, username: str, steam_id: str) -> tuple[str, str]:
         """Remove a whitelist account + its SteamID over RCON.
 
@@ -582,7 +590,7 @@ class WhitelistCog(commands.Cog):
         u = username.replace('"', "").strip()
         s = steam_id.replace('"', "").strip()
 
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -653,7 +661,7 @@ class WhitelistCog(commands.Cog):
         `(error, rcon_commands)`.
         """
         rcon = self.bot.rcon
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -773,7 +781,7 @@ class WhitelistCog(commands.Cog):
             return
 
         self._update_csv_row(request_id, {
-            "Code": code,
+            "Code": self._redact_code(code, request.get("Password", "")),
             "isWhitelisted": "true",
             "Whitelisted By": str(interaction.user),
         })
@@ -803,6 +811,8 @@ class WhitelistCog(commands.Cog):
             await interaction.response.send_message(
                 "\u274c Request not found (it may have been removed).", ephemeral=True)
             return
+        # Editing the message, fetching the user and DMing can take over 3 s.
+        await interaction.response.defer(ephemeral=True)
         self._update_csv_row(request_id, {
             "isWhitelisted": "false",
             "Notes": reason,
@@ -814,7 +824,7 @@ class WhitelistCog(commands.Cog):
         if submitter is not None:
             await self._send_denial_dm(submitter, reason)
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "\u274c Denied. Reason recorded in the CSV.", ephemeral=True)
         print(f"[Whitelist] Denied request {request_id}: {reason}")
 
@@ -1010,7 +1020,9 @@ class WhitelistCog(commands.Cog):
                 description="\n".join(lines[i:i + 20]),
                 colour=discord.Colour.blue(),
             ))
-        await interaction.followup.send(embeds=embeds, ephemeral=True)
+        # Discord allows at most 10 embeds per message.
+        for i in range(0, len(embeds), 10):
+            await interaction.followup.send(embeds=embeds[i:i + 10], ephemeral=True)
 
     @app_commands.command(
         name="whitelistremove",
