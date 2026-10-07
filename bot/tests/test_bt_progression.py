@@ -196,14 +196,34 @@ def test_export_path_override(monkeypatch):
     assert btp._paths(bot) == ["/x/p.json"]
 
 
-def test_rpleaderboard_embed_renders_fire_ranks_and_factions():
+def test_rpleaderboard_embed_renders_fire_ranks_players_only():
     import weekly_rp
     embed = weekly_rp.build_embed(btp.weekly_leaderboard(_sample(), limit=10))
     assert "\U0001fa75 p1**" in embed.description          # p1 holds 2nd -> Blaze
     names = [f.name for f in embed.fields]
-    assert "Factions this week" in names
-    assert any(n.startswith("Factions last week (2026-W39)") for n in names)
+    assert not any("Faction" in n for n in names)
     assert all(len(f.value) <= 1024 for f in embed.fields)
+
+
+def test_factionleaderboard_embed():
+    import weekly_rp
+    board = btp.faction_leaderboard(_sample(), 10)
+    board.update(weekId="2026-W40", generatedAt=1790000000)
+    embed = weekly_rp.build_faction_embed(board)
+    assert "2026-W40" in embed.title
+    lines = embed.description.splitlines()
+    assert "**Sari-Sari**" in lines[0] and "1 member ·" in lines[0] and "Legendary Faction" in lines[0]
+    assert "2 members" in lines[1] and "Elite Faction" in lines[1]
+    assert "Legendary Faction" not in lines[2] and "-20 RP" in lines[2]
+    names = [f.name for f in embed.fields]
+    assert names[0].startswith("Faction titles") and names[1] == "Last week (2026-W39) — titles granted"
+    assert all(len(f.value) <= 1024 for f in embed.fields)
+
+
+def test_factionleaderboard_embed_empty():
+    import weekly_rp
+    embed = weekly_rp.build_faction_embed(btp.faction_leaderboard({}))
+    assert "No Faction Reputation" in embed.description
 
 
 def test_reputation_board_personal_week_uses_usernames_and_worn_titles():

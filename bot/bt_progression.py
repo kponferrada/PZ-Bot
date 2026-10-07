@@ -476,6 +476,19 @@ async def get_ladder_ranks(bot, force: bool = False) -> Optional[dict]:
     return ladder_ranks(data)
 
 
+async def get_faction_leaderboard(bot, limit: Optional[int] = None,
+                                  force: bool = False) -> Optional[dict]:
+    """Read the export and return `faction_leaderboard(...)` with the export's
+    `weekId` and `generatedAt`, or None if unavailable."""
+    data = await read_progression(bot, force)
+    if data is None:
+        return None
+    board = faction_leaderboard(data, limit)
+    board["weekId"] = (data.get("weeklyRanking") or {}).get("weekId")
+    board["generatedAt"] = _int(data.get("generatedAt"))
+    return board
+
+
 async def get_weekly_leaderboard(bot, limit: Optional[int] = None,
                                  force: bool = False) -> Optional[dict]:
     """Read the export and return `weekly_leaderboard(...)`, or None if unavailable."""
