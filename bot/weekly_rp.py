@@ -6,12 +6,18 @@ were granted, and the same for factions (top 5 by weekly Faction Reputation).
 Each player carries their fire rank (BT's leaderboard stars, the in-game chat
 colour). Data comes from the Barangay Tales export (see bt_progression).
 
-Public, like /leaderboard: anyone can run it and the result posts in-channel.
+/repboard draws the top 5 survivors and/or factions on the PZ Tambayan
+"Reputation Ranking" poster (rep_board.py), with the Discord avatars of players
+linked with /linkme.
+
+Public, like /leaderboard: anyone can run them and the result posts in-channel.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime
+from typing import Dict, Iterable, Optional
 
 import discord
 from discord import app_commands
@@ -19,6 +25,7 @@ from discord.ext import commands
 
 import bt_progression
 import ranks
+import rep_board
 from stats import _badge
 
 # Places shown in the faction fields (only the top 5 earn a title).
@@ -112,6 +119,28 @@ class WeeklyRPCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _avatar(self, pz_username: str) -> Optional[bytes]:
+        """Discord avatar of the user linked to `pz_username`, or None."""
+        rank_cog = self.bot.get_cog("RankSync")
+        discord_id = rank_cog.discord_id_for_pz_username(pz_username) if rank_cog else None
+        if not discord_id:
+            return None
+        try:
+            guild = self.bot.get_guild(self.bot.config.GUILD_ID)
+            user = (guild.get_member(discord_id) if guild else None) \
+                or self.bot.get_user(discord_id) \
+                or await self.bot.fetch_user(discord_id)
+            asset = user.display_avatar.replace(size=256, static_format="png")
+            return await asset.read()
+        except (discord.DiscordException, ValueError) as e:
+            print(f"[WeeklyRP] Could not fetch avatar for {pz_username}: {e}")
+            return None
+
+    async def _avatars(self, usernames: Iterable[str]) -> Dict[str, bytes]:
+        names = list(dict.fromkeys(usernames))
+        pics = await asyncio.gather(*(self._avatar(n) for n in names))
+        return {n: p for n, p in zip(names, pics) if p}
+
     @app_commands.command(name="rpleaderboard",
                           description="Barangay Tales weekly RP leaderboard (players and factions) and the titles each place earns.")
     @app_commands.describe(limit="How many places to show (default 10, max 25)")
@@ -129,6 +158,42 @@ class WeeklyRPCog(commands.Cog):
             ))
             return
         await interaction.followup.send(embed=build_embed(board))
+
+    @app_commands.command(name="repboard",
+                          description="Barangay Tales reputation board: top 5 survivors and factions as a poster.")
+    @app_commands.describe(board="Which board to draw (default both)",
+                           period="This week's RP (default) or all-time Reputation")
+    @app_commands.choices(
+        board=[app_commands.Choice(name="Survivors and factions", value="both"),
+               app_commands.Choice(name="Survivors", value="personal"),
+               app_commands.Choice(name="Factions", value="faction")],
+        period=[app_commands.Choice(name="This week (RP)", value="week"),
+                app_commands.Choice(name="All time (Reputation)", value="alltime")],
+    )
+    async def cmd_repboard(self, interaction: discord.Interaction,
+                           board: Optional[app_commands.Choice[str]] = None,
+                           period: Optional[app_commands.Choice[str]] = None) -> None:
+        await interaction.response.defer()
+        which = board.value if board else "both"
+        when = period.value if period else "week"
+        data = await bt_progression.read_progression(self.bot)
+        if data is None:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\U0001f50d Reputation board unavailable",
+                description="Couldn't read the Barangay Tales progression export from the server.",
+                colour=discord.Colour.orange(),
+            ))
+            return
+        kinds = ("personal", "faction") if which == "both" else (which,)
+        boards = [bt_progression.reputation_board(data, k, when) for k in kinds]
+        avatars = await self._avatars(p for b in boards for r in b["rows"]
+                                      for p in r["players"][:8 if b["kind"] == "faction" else 1])
+        files = []
+        for b in boards:
+            buf = await asyncio.to_thread(rep_board.render_board_png, b, avatars)
+            name = "reputation-survivors.png" if b["kind"] == "personal" else "reputation-factions.png"
+            files.append(discord.File(buf, filename=name))
+        await interaction.followup.send(files=files)
 
 
 async def setup(bot: commands.Bot):

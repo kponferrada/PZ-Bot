@@ -376,6 +376,85 @@ def weekly_leaderboard(data: dict, limit: Optional[int] = None) -> dict:
     }
 
 
+def title_name(player: dict, title_id) -> Optional[str]:
+    """Display name of one of a player's title ids (from their `titles` list)."""
+    if not isinstance(title_id, str) or not title_id:
+        return None
+    for t in _as_list(player.get("titles")):
+        if isinstance(t, dict) and t.get("id") == title_id and t.get("name"):
+            name = str(t["name"])
+            # A weekly title without its own definition is named by its id.
+            for prefix in (_WEEKLY_TITLE_PREFIX, _FACTION_TITLE_PREFIX):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+            return name
+    for prefix in (_WEEKLY_TITLE_PREFIX, _FACTION_TITLE_PREFIX):
+        if title_id.startswith(prefix):
+            return title_id[len(prefix):]
+    return None
+
+
+def player_title(player: dict) -> Optional[str]:
+    """The title a player wears in game, else their Reputation rank."""
+    return title_name(player, player.get("equippedTitle")) or (
+        str(player["repTier"]) if player.get("repTier") and player.get("repTier") != "Unknown" else None)
+
+
+BOARD_PERIODS = ("week", "alltime")
+BOARD_SIZE = 5
+
+
+def reputation_board(data: dict, kind: str = "personal", period: str = "week") -> dict:
+    """Top 5 for the reputation board image (rep_board.py).
+
+    kind:   "personal" (players) or "faction".
+    period: "week" (weekly RP, the ranking that hands out titles) or
+            "alltime" (lifetime Reputation).
+
+    Returns {"kind", "period", "weekId", "rows": [{place, name, title, value,
+    players}]}: `name` is the PZ username (BT player id) or the faction name,
+    `title` the player's worn title (else Reputation rank) or the faction's
+    weekly title (else its rank), and `players` the PZ usernames whose Discord
+    avatars stand for the row (the player, or a faction's top members).
+    """
+    data = data or {}
+    players = data.get("players") if isinstance(data.get("players"), dict) else {}
+    factions = data.get("factions") if isinstance(data.get("factions"), dict) else {}
+    weekly = period != "alltime"
+    rows = []
+
+    if kind == "faction":
+        held = {}
+        last = last_finalized(data)
+        for r in _as_list((last[1] if last else {}).get("factionTop5")):
+            if isinstance(r, dict) and r.get("faction") and r.get("title"):
+                held[str(r["faction"])] = str(r["title"])
+        key = "weeklyRep" if weekly else "rep"
+        ranked = [(str(fid), _int(f.get(key)), f) for fid, f in factions.items() if isinstance(f, dict)]
+        ranked = [e for e in ranked if e[1] != 0] if weekly else ranked
+        ranked.sort(key=lambda e: (-e[1], e[0]))
+        for place, (fid, value, f) in enumerate(ranked[:BOARD_SIZE], 1):
+            members = [str(m) for m in _as_list(f.get("members"))]
+            members.sort(key=lambda m: (-_int((players.get(m) or {}).get("rep")), m))
+            tier = f.get("repTier") if f.get("repTier") != "Unknown" else None
+            rows.append({"place": place, "name": str(f.get("name") or fid),
+                         "title": held.get(fid) or tier, "value": value, "players": members})
+    else:
+        if weekly:
+            ranked = [(r["player"], r["rp"]) for r in weekly_leaderboard(data)["rows"]]
+        else:
+            ranked = sorted(((str(pid), _int(p.get("rep"))) for pid, p in players.items()
+                             if isinstance(p, dict)), key=lambda e: (-e[1], e[0]))
+        for place, (pid, value) in enumerate(ranked[:BOARD_SIZE], 1):
+            rows.append({"place": place, "name": pid, "title": player_title(players.get(pid) or {}),
+                         "value": value, "players": [pid]})
+
+    return {"kind": "faction" if kind == "faction" else "personal",
+            "period": "week" if weekly else "alltime",
+            "weekId": (data.get("weeklyRanking") or {}).get("weekId"),
+            "rows": rows}
+
+
 def ladder_ranks(data: dict) -> dict:
     """{BT player id (PZ username): rank} — BT's fire ranks (`fire_rank`) for
     every current title holder and every player with RP this week."""

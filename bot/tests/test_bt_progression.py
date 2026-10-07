@@ -204,3 +204,36 @@ def test_rpleaderboard_embed_renders_fire_ranks_and_factions():
     assert "Factions this week" in names
     assert any(n.startswith("Factions last week (2026-W39)") for n in names)
     assert all(len(f.value) <= 1024 for f in embed.fields)
+
+
+def test_reputation_board_personal_week_uses_usernames_and_worn_titles():
+    data = _sample()
+    data["players"]["p1"]["equippedTitle"] = "survivor"
+    data["players"]["p2"] = {"displayName": "Two", "repTier": "Trusted", "titles": []}
+    rows = btp.reputation_board(data, "personal", "week")["rows"]
+    assert [(r["place"], r["name"], r["value"]) for r in rows] == [
+        (1, "p1", 90), (2, "p2", 80), (3, "p3", 70), (4, "p4", 60), (5, "p5", 50)]
+    assert rows[0]["title"] == "Survivor" and rows[1]["title"] == "Trusted"
+    assert rows[2]["title"] is None and rows[0]["players"] == ["p1"]
+
+
+def test_reputation_board_alltime_and_weekly_title_name():
+    data = _sample()
+    data["players"]["p1"].update(rep=500, equippedTitle="weekly:Elite Survivor")
+    data["players"]["old"].update(rep=900, repTier="Unknown")
+    rows = btp.reputation_board(data, "personal", "alltime")["rows"]
+    assert [(r["name"], r["value"], r["title"]) for r in rows] == [
+        ("old", 900, None), ("p1", 500, "Elite Survivor")]
+
+
+def test_reputation_board_factions():
+    data = _sample()
+    data["players"]["p2"] = {"rep": 50}
+    data["players"]["p1"]["rep"] = 10
+    week = btp.reputation_board(data, "faction", "week")
+    assert [(r["name"], r["value"], r["title"]) for r in week["rows"]] == [
+        ("Sari-Sari", 90, "Elite Faction"), ("Tondo Boys", 40, "Legendary Faction"), ("Shunned", -20, None)]
+    assert week["rows"][1]["players"] == ["p2", "p1"]      # highest Reputation first
+    data["factions"]["f3"].update(rep=5, repTier="Unknown")
+    alltime = btp.reputation_board(data, "faction", "alltime")
+    assert {r["name"] for r in alltime["rows"]} == {"Tondo Boys", "Sari-Sari", "Idle", "Shunned"}

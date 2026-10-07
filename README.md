@@ -44,6 +44,7 @@ on boot.
 | Whitelist applications, approval, admin | `whitelist.py` | RCON | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
 | `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
+| `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
 | `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
 | Cleanup of regenerable bot files | `cleanup.py` | — | — |
@@ -58,7 +59,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 `/help` (admin) prints the same list in Discord.
 
 **Everyone:** `/myrank`, `/linkme`, `/unlinkme`, `/stats <username>`,
-`/leaderboard <kind>`, `/rpleaderboard [limit]`, `/features`, `/whitelist`.
+`/leaderboard <kind>`, `/rpleaderboard [limit]`, `/repboard [board] [period]`, `/features`, `/whitelist`.
 
 **Admin:**
 
@@ -108,6 +109,28 @@ The export doesn't contain the place → title tables, so the bot keeps copies i
 If BT's `Config.WeeklyRanking.titles` or `.factionTitles` change, update those
 copies too. Holders may rename their title in game; the bot shows the configured
 name (the export only carries that).
+
+### Reputation board poster
+
+`/repboard [board] [period]` draws the top 5 on the PZ Tambayan "Reputation
+Ranking" poster: survivors, factions, or both (default, two images), for this
+week's RP (default) or all-time Reputation. Each row shows:
+
+- the Discord avatar of the player linked with `/linkme` (a faction shows up to
+  four linked members, highest Reputation first); "no photo" when unlinked
+- the in-game (PZ) username, or the faction name
+- on the ribbon, the title the player wears in game (else their Reputation
+  rank); for a faction, the weekly faction title it holds (else its rank)
+- the score, with a bar relative to 1st place
+
+Each place is painted in the colour of the fire rank it holds in game: 1st
+Inferno (red), 2nd Blaze (cyan), 3rd Flame (yellow), 4th Cinder (violet), 5th
+Spark (blue), from `ranks.RANKS`.
+
+The template (`assets/reputation-board.png`, plus `-tint.png` and `-ribbon.png`)
+is made from the source art by `scripts/build_reputation_board.py`. If you
+re-run it or swap the art, re-check the row coordinates (`ROWS`) in both the
+script and `rep_board.py`.
 
 ### Ranks from the reputation ladder
 

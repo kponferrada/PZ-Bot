@@ -10,7 +10,7 @@ There is no cyan square emoji, so Cyan uses the light blue heart, which keeps
 it distinct from Spark's blue square.
 """
 
-from typing import Dict, NamedTuple, Optional
+from typing import Dict, NamedTuple, Optional, Tuple
 
 
 class Rank(NamedTuple):
@@ -18,16 +18,17 @@ class Rank(NamedTuple):
     colour: str           # chat name colour in game
     emoji: str
     ansi: Optional[str]   # Discord ```ansi colour code, None = default text
+    rgb: Tuple[int, int, int]  # paint colour for rendered images (rep_board)
 
 
 RANKS: Dict[int, Rank] = {
-    0: Rank("Default", "No color", "⬜", None),        # ⬜
-    1: Rank("Fuel", "Green", "\U0001f7e9", "1;32"),        # 🟩
-    2: Rank("Spark", "Blue", "\U0001f7e6", "1;34"),        # 🟦
-    3: Rank("Cinder", "Violet", "\U0001f7ea", "1;35"),     # 🟪
-    4: Rank("Flame", "Yellow", "\U0001f7e8", "1;33"),      # 🟨
-    5: Rank("Blaze", "Cyan", "\U0001fa75", "1;36"),        # 🩵
-    6: Rank("Inferno", "Red", "\U0001f7e5", "1;31"),       # 🟥
+    0: Rank("Default", "No color", "⬜", None, (176, 170, 160)),        # ⬜
+    1: Rank("Fuel", "Green", "\U0001f7e9", "1;32", (98, 178, 74)),        # 🟩
+    2: Rank("Spark", "Blue", "\U0001f7e6", "1;34", (62, 124, 222)),       # 🟦
+    3: Rank("Cinder", "Violet", "\U0001f7ea", "1;35", (150, 92, 204)),    # 🟪
+    4: Rank("Flame", "Yellow", "\U0001f7e8", "1;33", (236, 186, 52)),     # 🟨
+    5: Rank("Blaze", "Cyan", "\U0001fa75", "1;36", (58, 196, 214)),       # 🩵
+    6: Rank("Inferno", "Red", "\U0001f7e5", "1;31", (214, 56, 44)),       # 🟥
 }
 
 
