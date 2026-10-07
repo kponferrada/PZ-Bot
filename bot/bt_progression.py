@@ -400,7 +400,7 @@ def player_title(player: dict) -> Optional[str]:
         str(player["repTier"]) if player.get("repTier") and player.get("repTier") != "Unknown" else None)
 
 
-BOARD_PERIODS = ("week", "alltime")
+BOARD_PERIODS = ("week", "lastweek", "alltime")
 BOARD_SIZE = 5
 
 
@@ -408,13 +408,15 @@ def reputation_board(data: dict, kind: str = "personal", period: str = "week") -
     """Top 5 for the reputation board image (rep_board.py).
 
     kind:   "personal" (players) or "faction".
-    period: "week" (weekly RP, the ranking that hands out titles) or
+    period: "week" (weekly RP, the ranking that hands out titles),
+            "lastweek" (the last finalized week's top 5: the winners, their
+            RP that week and the title they were granted) or
             "alltime" (lifetime Reputation).
 
     Returns {"kind", "period", "weekId", "rows": [{place, name, title, value,
     players}]}: `name` is the PZ username (BT player id) or the faction name,
     `title` the player's worn title (else Reputation rank) or the faction's
-    weekly title (else its rank), and `players` the PZ usernames whose Discord
+    weekly title (else its rank) - for "lastweek", the title granted - and `players` the PZ usernames whose Discord
     avatars stand for the row (the player, or a faction's top members).
     """
     data = data or {}
@@ -422,8 +424,31 @@ def reputation_board(data: dict, kind: str = "personal", period: str = "week") -
     factions = data.get("factions") if isinstance(data.get("factions"), dict) else {}
     weekly = period != "alltime"
     rows = []
+    week_id = (data.get("weeklyRanking") or {}).get("weekId")
 
-    if kind == "faction":
+    if period == "lastweek":
+        last = last_finalized(data)
+        week_id = last[0] if last else None
+        key = "factionTop5" if kind == "faction" else "top5"
+        winners = [r for r in _as_list((last[1] if last else {}).get(key)) if isinstance(r, dict)]
+        winners = [r for r in winners if r.get("faction" if kind == "faction" else "player")]
+        winners.sort(key=lambda r: _int(r.get("rank")) or 99)
+        for r in winners[:BOARD_SIZE]:
+            place = _int(r.get("rank"))
+            if not 1 <= place <= BOARD_SIZE:
+                continue
+            if kind == "faction":
+                fid = str(r["faction"])
+                f = factions.get(fid) or {}
+                members = [str(m) for m in _as_list(f.get("members"))]
+                members.sort(key=lambda m: (-_int((players.get(m) or {}).get("rep")), m))
+                rows.append({"place": place, "name": str(f.get("name") or fid),
+                             "title": r.get("title"), "value": _int(r.get("rp")), "players": members})
+            else:
+                pid = str(r["player"])
+                rows.append({"place": place, "name": pid, "title": r.get("title"),
+                             "value": _int(r.get("rp")), "players": [pid]})
+    elif kind == "faction":
         held = {}
         last = last_finalized(data)
         for r in _as_list((last[1] if last else {}).get("factionTop5")):
@@ -450,8 +475,8 @@ def reputation_board(data: dict, kind: str = "personal", period: str = "week") -
                          "value": value, "players": [pid]})
 
     return {"kind": "faction" if kind == "faction" else "personal",
-            "period": "week" if weekly else "alltime",
-            "weekId": (data.get("weeklyRanking") or {}).get("weekId"),
+            "period": period if period in BOARD_PERIODS else "week",
+            "weekId": week_id,
             "rows": rows}
 
 

@@ -257,3 +257,18 @@ def test_reputation_board_factions():
     data["factions"]["f3"].update(rep=5, repTier="Unknown")
     alltime = btp.reputation_board(data, "faction", "alltime")
     assert {r["name"] for r in alltime["rows"]} == {"Tondo Boys", "Sari-Sari", "Idle", "Shunned"}
+
+
+def test_reputation_board_last_week_winners():
+    data = _sample()
+    data["players"]["p2"] = {"rep": 50}
+    board = btp.reputation_board(data, "personal", "lastweek")
+    assert board["period"] == "lastweek" and board["weekId"] == "2026-W39"
+    assert [(r["place"], r["name"], r["value"], r["title"]) for r in board["rows"]] == [
+        (1, "old", 90, "Legendary Survivor"), (2, "p1", 80, "Elite Survivor")]
+    fboard = btp.reputation_board(data, "faction", "lastweek")
+    assert [(r["place"], r["name"], r["value"], r["title"], r["players"]) for r in fboard["rows"]] == [
+        (1, "Tondo Boys", 50, "Legendary Faction", ["p2", "p1"]),
+        (2, "Sari-Sari", 30, "Elite Faction", ["old"])]
+    empty = btp.reputation_board({}, "personal", "lastweek")
+    assert empty["rows"] == [] and empty["weekId"] is None

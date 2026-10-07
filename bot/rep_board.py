@@ -219,17 +219,20 @@ def render_board(board: Dict, avatars: Optional[Dict[str, bytes]] = None) -> Ima
     draw = ImageDraw.Draw(img)
 
     faction = board.get("kind") == "faction"
-    weekly = board.get("period") != "alltime"
+    period = board.get("period") or "week"
 
-    header = "Top 5 Factions" if faction else "Top 5 Survivors"
+    if period == "lastweek":
+        header = "Last Week's Top Factions" if faction else "Last Week's Winners"
+    else:
+        header = "Top 5 Factions" if faction else "Top 5 Survivors"
     font = _fit(draw, header, _MARKER, 44, _HEADER_MAX_W, 28)
     draw.text(_HEADER_CENTRE, header, font=font, fill=_INK, anchor="mm")
 
     rows = {r["place"]: r for r in board.get("rows") or [] if 1 <= r.get("place", 0) <= 5}
     top = max([r["value"] for r in rows.values()] + [0])
-    label = "RP THIS WEEK" if weekly else "REPUTATION"
+    label = {"week": "RP THIS WEEK", "lastweek": "RP LAST WEEK"}.get(period, "REPUTATION")
     if faction:
-        label = "FACTION RP THIS WEEK" if weekly else "FACTION REPUTATION"
+        label = "FACTION " + label
 
     for place, geo in enumerate(ROWS, 1):
         rgb = place_colour(place)

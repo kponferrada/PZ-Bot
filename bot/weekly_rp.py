@@ -212,12 +212,13 @@ class WeeklyRPCog(commands.Cog):
     @app_commands.command(name="repboard",
                           description="Barangay Tales reputation board: top 5 survivors and factions as a poster.")
     @app_commands.describe(board="Which board to draw (default both)",
-                           period="This week's RP (default) or all-time Reputation")
+                           period="This week's RP (default), last week's winners, or all-time Reputation")
     @app_commands.choices(
         board=[app_commands.Choice(name="Survivors and factions", value="both"),
                app_commands.Choice(name="Survivors", value="personal"),
                app_commands.Choice(name="Factions", value="faction")],
         period=[app_commands.Choice(name="This week (RP)", value="week"),
+                app_commands.Choice(name="Last week's winners", value="lastweek"),
                 app_commands.Choice(name="All time (Reputation)", value="alltime")],
     )
     async def cmd_repboard(self, interaction: discord.Interaction,

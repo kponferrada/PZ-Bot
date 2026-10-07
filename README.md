@@ -118,7 +118,9 @@ name (the export only carries that).
 
 `/repboard [board] [period]` draws the top 5 on the PZ Tambayan "Reputation
 Ranking" poster: survivors, factions, or both (default, two images), for this
-week's RP (default) or all-time Reputation. Each row shows:
+week's RP (default), last week's winners, or all-time Reputation. Last week's
+winners are the top 5 of the last finalized week, with their RP that week and
+the weekly title they were granted on the ribbon. Each row shows:
 
 - the Discord avatar of the player linked with `/linkme` (a faction shows up to
   four linked members, highest Reputation first); "no photo" when unlinked

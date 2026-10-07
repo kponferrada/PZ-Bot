@@ -56,3 +56,11 @@ def test_partial_and_faction_boards_render():
     assert rep_board.render_board({"rows": []}).size == (1024, 1536)
     buf = rep_board.render_board_png(_board())
     assert buf.getvalue()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_last_week_board_renders():
+    board = _board()
+    board["period"] = "lastweek"
+    assert rep_board.render_board(board).size == (1024, 1536)
+    board["kind"] = "faction"
+    assert rep_board.render_board(board).size == (1024, 1536)
