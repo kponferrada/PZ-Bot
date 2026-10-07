@@ -63,7 +63,7 @@ The bot is one side of file protocols owned by other repos in
 | `jeeves_*` files | Jeeve's Integration / Jeeve's Drops (Workshop, not local) |
 | `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
 | `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |
-| `BarangayTales/progression.json` (read by `bt_progression.py` → `/rpleaderboard`, and → `rank_sync` ranks via `ladder_ranks` when `RANK_SOURCE=bt_ladder`; the ladder's `player` id is used as the PZ username). `DEFAULT_WEEKLY_TITLES` copies BT `Config.WeeklyRanking.titles` | `barangaytales` `JsonExport.lua`, `WeeklyRanking.lua`, `Config.lua` |
+| `BLib/mods/barangaytales/progression.json` (BT 0.83+, written via BLib.Files scope "server"; `BarangayTales/progression.json` before, still read as a fallback until the BLib file is seen). Read by `bt_progression.py` → `/rpleaderboard`, and → `rank_sync` ranks via `ladder_ranks` when `RANK_SOURCE=bt_ladder`; the ladder's `player` id is used as the PZ username. `fire_rank`/`title_holders` mirror BT `Notebook.fireTier`/`WeeklyRanking.GetTitleHolders` (holder = last finalized week by `finalizedAt` whose player still has `weekly:<title>`). `DEFAULT_WEEKLY_TITLES`/`DEFAULT_FACTION_TITLES` copy BT `Config.WeeklyRanking.titles`/`.factionTitles` | `barangaytales` `JsonExport.lua`, `WeeklyRanking.lua`, `FactionWeekly.lua`, `Notebook.lua`, `Config.lua`; path from `blib` `ModFiles.lua` |
 | Not the bot's job: event wins are recorded inside Barangay Tales (decided 2026-10-05). The bot does not write `bt_event_wins.txt`. | `barangaytales` |
 
 ## Known traps

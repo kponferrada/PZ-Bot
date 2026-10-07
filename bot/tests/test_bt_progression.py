@@ -25,18 +25,30 @@ def _sample():
             "p1": {"displayName": "Player One",
                    "titles": [{"id": "survivor", "name": "Survivor"},
                               {"id": "weekly:Elite Survivor", "name": "weekly:Elite Survivor"}]},
-            "old": {"displayName": "Old Champ", "titles": []},
+            "old": {"displayName": "Old Champ",
+                    "titles": [{"id": "weekly:Legendary Survivor", "name": "Legendary Survivor"},
+                               {"id": "fweekly:Elite Faction", "name": "Elite Faction"}]},
+        },
+        "factions": {
+            "f1": {"name": "Tondo Boys", "weeklyRep": 40, "members": ["p1", "p2"]},
+            "f2": {"name": "Sari-Sari", "weeklyRep": 90, "members": ["old"]},
+            "f3": {"name": "Idle", "weeklyRep": 0, "members": []},
+            "f4": {"name": "Shunned", "weeklyRep": -20, "members": ["p3"]},
         },
         "weeklyRanking": {
             "weekId": "2026-W40",
             "top5": lb[:5],
             "leaderboard": lb,
             "history": {
-                "2026-W38": {"top5": [{"rank": 1, "player": "x", "rp": 5, "title": "Legendary Survivor"}]},
+                "2026-W38": {"top5": [{"rank": 1, "player": "x", "rp": 5, "title": "Legendary Survivor"}],
+                             "finalizedAt": 1789000000},
                 "2026-W39": {"top5": [
                     {"rank": 2, "player": "p1", "rp": 80, "title": "Elite Survivor"},
                     {"rank": 1, "player": "old", "rp": 90, "title": "Legendary Survivor"},
-                ], "factionTop5": []},
+                ], "factionTop5": [
+                    {"rank": 2, "faction": "f2", "rp": 30, "title": "Elite Faction"},
+                    {"rank": 1, "faction": "f1", "rp": 50, "title": "Legendary Faction"},
+                ], "finalizedAt": 1789600000},
             },
         },
     }
@@ -101,3 +113,94 @@ def test_ladder_ranks_skip_players_without_rp():
 
 def test_ladder_ranks_empty_export():
     assert btp.ladder_ranks({}) == {}
+
+
+def test_ladder_ranks_need_a_title_still_held():
+    # p1 placed 2nd last week but no longer holds the title (expired): only Fuel.
+    data = _sample()
+    data["players"]["p1"]["titles"] = []
+    assert btp.ladder_ranks(data)["p1"] == 1
+
+
+def test_holder_without_rp_this_week_keeps_fire_rank():
+    data = _sample()
+    data["weeklyRanking"]["leaderboard"] = []
+    assert btp.ladder_ranks(data) == {"old": 6, "p1": 5}
+
+
+def test_fire_rank_matches_bt_notebook():
+    assert [btp.fire_rank(p) for p in (1, 2, 3, 4, 5)] == [6, 5, 4, 3, 2]
+    assert btp.fire_rank(None, 10) == 1
+    assert btp.fire_rank(None, 0) == 0
+    assert btp.fire_rank(6, 10) == 1
+
+
+def test_leaderboard_rows_carry_fire_rank_and_last_week_holds():
+    board = btp.weekly_leaderboard(_sample())
+    assert [r["fire"] for r in board["rows"][:3]] == [5, 1, 1]   # p1 holds 2nd
+    assert [r["holds"] for r in board["lastWeek"]["rows"]] == [True, True]
+
+
+def test_last_week_by_finalized_at_not_week_id():
+    data = _sample()
+    data["weeklyRanking"]["history"]["2026-W38"]["finalizedAt"] = 1799999999
+    assert btp.weekly_leaderboard(data)["lastWeek"]["weekId"] == "2026-W38"
+
+
+def test_held_faction_title():
+    assert btp.held_faction_title(_sample()["players"]["old"]) == "Elite Faction"
+    assert btp.held_faction_title(_sample()["players"]["p1"]) is None
+
+
+def test_faction_leaderboard_this_week_and_last_week():
+    fb = btp.weekly_leaderboard(_sample())["factions"]
+    assert [(r["rank"], r["name"], r["rp"], r["members"], r["title"]) for r in fb["rows"]] == [
+        (1, "Sari-Sari", 90, 1, "Legendary Faction"),
+        (2, "Tondo Boys", 40, 2, "Elite Faction"),
+        (3, "Shunned", -20, 1, None),      # listed (rp != 0) but no title without positive RP
+    ]
+    assert fb["lastWeek"]["weekId"] == "2026-W39"
+    assert [(r["rank"], r["name"], r["title"]) for r in fb["lastWeek"]["rows"]] == [
+        (1, "Tondo Boys", "Legendary Faction"),
+        (2, "Sari-Sari", "Elite Faction"),
+    ]
+
+
+def test_exported_faction_title_table_overrides_default():
+    data = _sample()
+    data["weeklyRanking"]["factionTitles"] = [{"rank": 1, "title": "Top Barangay"}]
+    assert btp.faction_title_table(data) == ["Top Barangay"]
+    assert btp.faction_title_table({}) == list(btp.DEFAULT_FACTION_TITLES)
+
+
+class _Cfg:
+    SFTP_LUA_DIR = "/srv/Lua/"
+    BT_PROGRESSION_PATH = ""
+
+
+class _Bot:
+    config = _Cfg()
+
+
+def test_export_paths_blib_first_then_legacy_until_blib_seen(monkeypatch):
+    monkeypatch.setitem(btp._cache, "blib_seen", False)
+    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json",
+                                  "/srv/Lua/BarangayTales/progression.json"]
+    monkeypatch.setitem(btp._cache, "blib_seen", True)
+    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json"]
+
+
+def test_export_path_override(monkeypatch):
+    bot = _Bot()
+    bot.config = type("C", (), {"SFTP_LUA_DIR": "/srv/Lua", "BT_PROGRESSION_PATH": " /x/p.json "})()
+    assert btp._paths(bot) == ["/x/p.json"]
+
+
+def test_rpleaderboard_embed_renders_fire_ranks_and_factions():
+    import weekly_rp
+    embed = weekly_rp.build_embed(btp.weekly_leaderboard(_sample(), limit=10))
+    assert "\U0001fa75 p1**" in embed.description          # p1 holds 2nd -> Blaze
+    names = [f.name for f in embed.fields]
+    assert "Factions this week" in names
+    assert any(n.startswith("Factions last week (2026-W39)") for n in names)
+    assert all(len(f.value) <= 1024 for f in embed.fields)

@@ -43,7 +43,7 @@ on boot.
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
 | Whitelist applications, approval, admin | `whitelist.py` | RCON | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
-| `/rpleaderboard`: weekly RP standings and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BarangayTales/progression.json`) | — |
+| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
 | Cleanup of regenerable bot files | `cleanup.py` | — | — |
@@ -94,19 +94,31 @@ Tales mod writes every 5 to 10 minutes. It shows:
 - this week's Reputation Points (RP) standings. RP comes from wealth, zombie kills, quests and event wins.
 - the title each top-5 place earns when the week ends (Monday 00:00 GMT+8): Legendary, Elite, Master, Veteran, Rising Survivor. Winners hold the title for the following week.
 - last week's winners and the titles they were actually granted.
+- each player's fire rank (the same stars BT's in-game leaderboard shows, see below).
+- the top 5 factions by weekly Faction Reputation with the faction title each place earns (Legendary, Elite, Master, Veteran, Rising Faction), and last week's faction title holders.
 
-The export doesn't contain the place → title table, so the bot keeps a copy in
-`DEFAULT_WEEKLY_TITLES` (`bot/bt_progression.py`). If the titles in BT's
-`Config.WeeklyRanking.titles` change, update that copy too.
+Since Barangay Tales 0.83 the export is written through BLib to
+`Lua/BLib/mods/barangaytales/progression.json`. The bot reads that and falls back
+to the old `Lua/BarangayTales/progression.json` (BT 0.82 and older) until the
+BLib file has been read once, so it works on either version. `BT_PROGRESSION_PATH`
+overrides both.
+
+The export doesn't contain the place → title tables, so the bot keeps copies in
+`DEFAULT_WEEKLY_TITLES` and `DEFAULT_FACTION_TITLES` (`bot/bt_progression.py`).
+If BT's `Config.WeeklyRanking.titles` or `.factionTitles` change, update those
+copies too. Holders may rename their title in game; the bot shows the configured
+name (the export only carries that).
 
 ### Ranks from the reputation ladder
 
 With `RANK_SOURCE=bt_ladder` (the default), in-game ranks (chat name colours)
-follow the same weekly ladder instead of Discord roles:
+follow the same weekly ladder instead of Discord roles. These are the fire
+ranks BT itself shows on its leaderboard (`Notebook.fireTier`), and BT colours
+them with the same Jeeve's Integration `RankColor_n` palette:
 
 | Ladder position | Rank |
 |---|---|
-| Last week's 1st (Legendary Survivor) | 6 Inferno |
+| Last week's 1st (Legendary Survivor), while they still hold the title | 6 Inferno |
 | 2nd (Elite) | 5 Blaze |
 | 3rd (Master) | 4 Flame |
 | 4th (Veteran) | 3 Cinder |

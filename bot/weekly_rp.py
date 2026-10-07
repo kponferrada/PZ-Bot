@@ -2,7 +2,9 @@
 
 Shows this week's Reputation Points standings with the weekly title each top-5
 place earns when the week ends, plus last week's winners and the titles they
-were granted. Data comes from the Barangay Tales export (see bt_progression).
+were granted, and the same for factions (top 5 by weekly Faction Reputation).
+Each player carries their fire rank (BT's leaderboard stars, the in-game chat
+colour). Data comes from the Barangay Tales export (see bt_progression).
 
 Public, like /leaderboard: anyone can run it and the result posts in-channel.
 """
@@ -16,7 +18,11 @@ from discord import app_commands
 from discord.ext import commands
 
 import bt_progression
+import ranks
 from stats import _badge
+
+# Places shown in the faction fields (only the top 5 earn a title).
+_FACTION_ROWS = 5
 
 # Barangay Tales weeks end Monday 00:00 GMT+8 (BT Config.WeeklyRanking.timezoneOffsetHours).
 _WEEK_TZ = datetime.timezone(datetime.timedelta(hours=8))
@@ -35,6 +41,9 @@ def _row_line(row: dict) -> str:
     badge = _badge(rank) if rank <= 10 else f"`#{rank}`"
     name = discord.utils.escape_markdown(row["displayName"])
     rp = f"{row['rp']:,} RP"
+    fire = ranks.RANKS.get(row.get("fire") or 0)
+    if fire and row.get("fire"):
+        name = f"{fire.emoji} {name}"
     line = f"{badge} **{name}** — **{rp}**" if rank <= 3 else f"{badge} **{name}** — {rp}"
     if row.get("title"):
         line += f" · \U0001f396️ *{row['title']}*"
@@ -74,7 +83,28 @@ def build_embed(board: dict) -> discord.Embed:
         embed.add_field(name=f"Last week ({last['weekId']}) — titles granted",
                         value=value or "—", inline=False)
 
-    embed.set_footer(text="Barangay Tales · RP from wealth, kills, quests and event wins")
+    factions = board.get("factions") or {}
+    frows = (factions.get("rows") or [])[:_FACTION_ROWS]
+    if frows:
+        value = "\n".join(
+            f"{_badge(r['rank'])} **{discord.utils.escape_markdown(r['name'])}** — {r['rp']:,} RP"
+            + (f" · \U0001f396️ *{r['title']}*" if r.get("title") else "")
+            for r in frows
+        )
+        embed.add_field(name="Factions this week", value=value, inline=False)
+    flast = factions.get("lastWeek")
+    if flast and flast.get("rows"):
+        value = "\n".join(
+            f"{_badge(r['rank'])} **{discord.utils.escape_markdown(r['name'])}** "
+            f"— {r['rp']:,} RP · *{r['title'] or 'no title'}*"
+            for r in flast["rows"][:_FACTION_ROWS]
+        )
+        embed.add_field(name=f"Factions last week ({flast['weekId']}) — titles granted",
+                        value=value, inline=False)
+
+    legend = " ".join(f"{ranks.RANKS[n].emoji} {ranks.RANKS[n].name}" for n in range(6, 0, -1))
+    embed.set_footer(text="Barangay Tales · RP from wealth, kills, quests and event wins\n"
+                          f"Fire ranks: {legend} (title holders 1st-5th, else Fuel)")
     return embed
 
 
@@ -83,7 +113,7 @@ class WeeklyRPCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="rpleaderboard",
-                          description="Barangay Tales weekly RP leaderboard and the titles each place earns.")
+                          description="Barangay Tales weekly RP leaderboard (players and factions) and the titles each place earns.")
     @app_commands.describe(limit="How many places to show (default 10, max 25)")
     async def cmd_rpleaderboard(self, interaction: discord.Interaction, limit: int = 10) -> None:
         await interaction.response.defer()

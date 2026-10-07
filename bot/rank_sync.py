@@ -12,8 +12,10 @@ to all connected clients.
 
 Rank source (RANK_SOURCE in config.env):
     bt_ladder (default) — ranks come from the Barangay Tales weekly reputation
-        ladder (bt_progression.ladder_ranks): last week's places 1-5 ->
-        Inferno, Blaze, Flame, Cinder, Spark; RP earned this week -> Fuel.
+        ladder (bt_progression.ladder_ranks), the same fire ranks BT shows on
+        its leaderboard (Notebook.fireTier): the weekly title holders (last
+        week's places 1-5 who still hold the title) -> Inferno, Blaze, Flame,
+        Cinder, Spark; RP earned this week -> Fuel.
         Refreshed every 5 minutes. With RANK_LADDER_ROLES=true, linked members
         also get the matching Discord role.
     roles — ranks come from the Discord roles of linked members:
