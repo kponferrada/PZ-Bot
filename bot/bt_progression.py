@@ -105,6 +105,30 @@ def _paths(bot) -> list:
     return [p for p in paths if p]
 
 
+# The only parts of the export the bot reads. The rest (per-player stats,
+# windows, achievements, definitions) is most of the file, and the parsed copy
+# stays in memory between reads, so it is dropped right after parsing.
+_PLAYER_KEYS = ("displayName", "titles", "equippedTitle", "rep", "repTier")
+_FACTION_KEYS = ("name", "rep", "weeklyRep", "repTier", "members")
+_RANKING_KEYS = ("weekId", "leaderboard", "history", "titles", "factionTitles")
+
+
+def slim(data: dict) -> dict:
+    """Keep only what bt_progression's shaping functions read."""
+    def pick(obj, keys):
+        return {k: obj[k] for k in keys if k in obj} if isinstance(obj, dict) else obj
+
+    out = {"generatedAt": data.get("generatedAt")}
+    wr = data.get("weeklyRanking")
+    if isinstance(wr, dict):
+        out["weeklyRanking"] = pick(wr, _RANKING_KEYS)
+    for key, keys in (("players", _PLAYER_KEYS), ("factions", _FACTION_KEYS)):
+        section = data.get(key)
+        if isinstance(section, dict):
+            out[key] = {k: pick(v, keys) for k, v in section.items()}
+    return out
+
+
 async def _read_json(path: str) -> Optional[dict]:
     try:
         text = await sftp_client.get().read_text(path)
@@ -116,7 +140,7 @@ async def _read_json(path: str) -> Optional[dict]:
         # A read that races the mod's write can see a half-written file.
         print(f"[BTProgression] bad JSON in {path}: {e}")
         return None
-    return data if isinstance(data, dict) else None
+    return slim(data) if isinstance(data, dict) else None
 
 
 async def read_progression(bot, force: bool = False) -> Optional[dict]:

@@ -272,3 +272,19 @@ def test_reputation_board_last_week_winners():
         (2, "Sari-Sari", 30, "Elite Faction", ["old"])]
     empty = btp.reputation_board({}, "personal", "lastweek")
     assert empty["rows"] == [] and empty["weekId"] is None
+
+
+def test_slim_keeps_every_result_the_same():
+    data = _sample()
+    data["players"]["p1"].update(rep=10, equippedTitle="survivor", windows={"daily": {"x": 1}},
+                                 achievements={"a": {"progress": 1}})
+    data["factions"]["f1"]["stats"] = {"kills": 5}
+    data["achievementDefinitions"] = {"personal": [{"id": "a"}]}
+    slim = btp.slim(data)
+    assert "windows" not in slim["players"]["p1"] and "achievementDefinitions" not in slim
+    assert "stats" not in slim["factions"]["f1"]
+    assert btp.weekly_leaderboard(slim) == btp.weekly_leaderboard(data)
+    assert btp.ladder_ranks(slim) == btp.ladder_ranks(data)
+    for kind in ("personal", "faction"):
+        for period in btp.BOARD_PERIODS:
+            assert btp.reputation_board(slim, kind, period) == btp.reputation_board(data, kind, period)

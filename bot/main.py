@@ -350,7 +350,17 @@ class PZBot(commands.Bot):
     def __init__(self, config: Config):
         # Never let relayed text ping @everyone/@here; role/user pings stay
         # allowed for the announcements that use them on purpose.
-        super().__init__(command_prefix="!", intents=discord.Intents.all(),
+        # Only the gateway events the bot uses (Intents.all() also cached every
+        # member's presence, voice state, emoji and sticker, and streamed their
+        # updates): guilds, members (get_member, on_member_update for rank roles)
+        # and guild messages + content (chat relay). No message cache: nothing
+        # reads cached messages (edits/deletes aren't handled; history is fetched).
+        intents = discord.Intents.none()
+        intents.guilds = True
+        intents.members = True
+        intents.guild_messages = True
+        intents.message_content = True
+        super().__init__(command_prefix="!", intents=intents, max_messages=None,
                          allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
         self.config = config
         self.state = ServerState()

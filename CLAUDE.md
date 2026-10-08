@@ -31,6 +31,8 @@ which checks you ran and which you could not.
 ## Architecture
 
 - `main.py` is the script entry point (`python main.py`, so the module is `__main__`). It holds `Config` (all env keys), `ServerState`, `RCONHelper`, `PZBot`, the up/down monitor and the core admin commands. It loads every other module as a cog in `setup_hook`. **A new cog must be added to that extension tuple.**
+- Gateway intents are the minimum (`guilds`, `members`, `guild_messages`, `message_content`) and there is no message cache (`max_messages=None`). A feature that needs other events (reactions, voice, presences, DMs, cached messages for edits/deletes) must turn its intent on in `PZBot.__init__`.
+- Memory: `run.sh` sets `MALLOC_ARENA_MAX=2` (images render in worker threads). `bt_progression` keeps only the export fields it reads (`slim`); add a field there before reading it. Font caches are bounded (`rep_board._font` is an LRU).
 - **Never `import main` from a cog.** That runs main.py a second time and builds a second Config and bot. Reach shared things through `bot` (`bot.config`, `bot.state`, `bot.rcon`, `bot.features`, `bot.get_*_channel()`). Shared helpers go in their own module (for example `checks.require_role`).
 - `sftp_client.py` is the only path to server files. It is a module singleton (`sftp_client.get()`). It reconnects lazily, every operation has a 30 s timeout, and a timeout drops the connection so the next call reconnects. It raises `SftpError`, and callers catch that.
 - `lua_bridge.py` owns the mod files in `Lua/`:

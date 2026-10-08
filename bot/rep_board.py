@@ -23,6 +23,7 @@ takes a moment; call it off the event loop.
 from __future__ import annotations
 
 import io
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -74,30 +75,30 @@ _HEADER_MAX_W = 420
 _NAME_MAX_W = 236
 _VALUE_MAX_W = 200
 
-_font_cache: Dict[Tuple[str, int, str], ImageFont.FreeTypeFont] = {}
-
-
+# Each FreeType face holds its own copy of the font file, and text that is
+# shrunk to fit asks for many sizes over time, so keep only the recent ones.
+@lru_cache(maxsize=32)
 def _font(path: Path, size: int, variation: str = "") -> ImageFont.FreeTypeFont:
-    key = (str(path), size, variation)
-    if key not in _font_cache:
-        font = ImageFont.truetype(str(path), size)
-        if variation:
-            try:
-                font.set_variation_by_name(variation)
-            except (OSError, ValueError):
-                pass
-        _font_cache[key] = font
-    return _font_cache[key]
+    font = ImageFont.truetype(str(path), size)
+    if variation:
+        try:
+            font.set_variation_by_name(variation)
+        except (OSError, ValueError):
+            pass
+    return font
 
 
 def _fit(draw: ImageDraw.ImageDraw, text: str, path: Path, size: int, max_w: int,
          min_size: int, variation: str = "") -> ImageFont.FreeTypeFont:
     """The largest font from `size` down to `min_size` whose `text` fits `max_w`."""
-    for s in range(size, min_size - 1, -1):
-        font = _font(path, s, variation)
-        if draw.textlength(text, font=font) <= max_w:
-            return font
-    return _font(path, min_size, variation)
+    width = draw.textlength(text, font=_font(path, size, variation))
+    if width <= max_w:
+        return _font(path, size, variation)
+    # Width grows about linearly with size: start at the estimate, step down.
+    s = max(min_size, min(size - 1, int(size * max_w / width)))
+    while s > min_size and draw.textlength(text, font=_font(path, s, variation)) > max_w:
+        s -= 1
+    return _font(path, s, variation)
 
 
 def _ellipsize(draw, text: str, font, max_w: int) -> str:
