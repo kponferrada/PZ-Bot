@@ -553,7 +553,10 @@ class PZBot(commands.Bot):
                 # Server came back online — but ignore brief RCON blips so we don't
                 # announce "restart complete" before the real restart.
                 offline_duration = (now - self._offline_since) if self._offline_since else None
-                if (offline_duration is not None and offline_duration < UP_DEBOUNCE_SECONDS
+                if offline_duration is None and not self.state.restart_shutdown_started:
+                    # Never seen going offline (no offline start time): nothing to announce.
+                    print("[Announce] Online again without a recorded outage; no banner")
+                elif (offline_duration is not None and offline_duration < UP_DEBOUNCE_SECONDS
                         and not self.state.restart_shutdown_started):
                     print(f"[Announce] Ignoring brief offline blip ({offline_duration:.0f}s)")
                     self._offline_since = None
@@ -634,16 +637,26 @@ async def on_ready() -> None:
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     # The bot monitors regardless of server state; SFTP connects lazily on first use.
     bot.state.server_ready = True
-    if not bot.monitor_server_state.is_running():
-        bot.monitor_server_state.start()
+    if bot.monitor_server_state.is_running():
+        # on_ready fires again after a gateway reconnect; the monitor already
+        # has its baseline, and re-probing here would race it.
+        return
     # Set the online baseline silently — no startup message or up/down banner here.
     # Real up/down transitions are announced by monitor_server_state after startup.
+    # The baseline is set BEFORE the monitor starts: running both probes at
+    # once raced (two RCON connections), and a failed baseline probe followed
+    # by a good monitor probe looked like "server back online".
     bot._was_online = await asyncio.to_thread(bot.rcon.is_server_online, 10)
     bot.state.record_rcon_probe(bot._was_online)
     if bot._was_online:
         # Server was already up at boot — we can't know its exact start time, so
         # baseline the mod-check from now.
         bot.state.server_started_at = time.time()
+    else:
+        # Count the offline time from boot, so a probe that fails once at boot
+        # and then succeeds is filtered as a blip (UP_DEBOUNCE_SECONDS).
+        bot._offline_since = time.time()
+    bot.monitor_server_state.start()
     print(f"[Startup] Bot started up OK — server {'online' if bot._was_online else 'offline'} (baseline set; no Discord message sent)")
 
 

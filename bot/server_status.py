@@ -26,6 +26,7 @@ import os
 import time
 import asyncio
 import datetime
+import hashlib
 import json
 import discord
 from pathlib import Path
@@ -62,6 +63,11 @@ def _save_asset_cache(cache: dict) -> None:
         print(f"[ServerStatus] Could not save asset cache: {e}")
 
 
+def asset_fingerprint(path: Path) -> str:
+    """Cache key for an uploaded dashboard image: name + content hash."""
+    return f"{path.name}:sha1:{hashlib.sha1(path.read_bytes()).hexdigest()}"
+
+
 async def _resolve_image_url(bot, local_path: str, url_override: str = "") -> str:
     """Return a CDN URL for a dashboard image, uploading the local file on first use."""
     if url_override:
@@ -74,7 +80,9 @@ async def _resolve_image_url(bot, local_path: str, url_override: str = "") -> st
     if not path.is_file():
         print(f"[ServerStatus] Dashboard image not found: {local_path}")
         return ""
-    fingerprint = f"{path.name}:{path.stat().st_size}:{int(path.stat().st_mtime)}"
+    # Keyed by content, not mtime: a fresh checkout or `git pull` rewrites
+    # mtimes, and an mtime key re-uploaded (posted) the images on every deploy.
+    fingerprint = asset_fingerprint(path)
     cache = _load_asset_cache()
     if cache.get(fingerprint):
         return cache[fingerprint]
