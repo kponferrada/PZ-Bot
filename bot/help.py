@@ -40,8 +40,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     "📊 Stats & Leaderboards": [
         ("/stats <username>", "Show a player's Aegis Panel stats (kills, deaths, playtime)."),
         ("/leaderboard <kind>", "Top 10 players by a stat (zombie kills, deaths, playtime…)."),
-        ("/rpleaderboard [limit]", "Barangay Tales weekly RP leaderboard (players) + the title each top-5 place earns."),
-        ("/factionleaderboard [limit]", "Barangay Tales weekly faction leaderboard + the faction title each top-5 place earns."),
+        ("/rpleaderboard [board] [limit]", "Barangay Tales weekly RP leaderboard (players and factions) + the title each top-5 place earns."),
         ("/repboard [board] [period]", "Barangay Tales reputation board poster: top 5 survivors and/or factions: this week, last week's winners or all time."),
     ],
     "📝 Whitelist": [

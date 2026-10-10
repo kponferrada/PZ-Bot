@@ -43,7 +43,7 @@ on boot.
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
 | Whitelist applications, approval, admin | `whitelist.py` | RCON | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
-| `/rpleaderboard`: weekly RP standings, fire ranks and the title each top-5 place earns; `/factionleaderboard`: the same for factions | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
+| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
 | `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
@@ -59,7 +59,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 `/help` (admin) prints the same list in Discord.
 
 **Everyone:** `/myrank`, `/linkme`, `/unlinkme`, `/stats <username>`,
-`/leaderboard <kind>`, `/rpleaderboard [limit]`, `/factionleaderboard [limit]`, `/repboard [board] [period]`, `/features`, `/whitelist`.
+`/leaderboard <kind>`, `/rpleaderboard [board] [limit]`, `/repboard [board] [period]`, `/features`, `/whitelist`.
 
 **Admin:**
 
@@ -89,15 +89,16 @@ from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
 
 ### Weekly RP leaderboard
 
-`/rpleaderboard [limit]` (default 10, max 25) reads the export that the Barangay
-Tales mod writes every 5 to 10 minutes. It shows:
+`/rpleaderboard [board] [limit]` (default 10 places, max 25) reads the export
+that the Barangay Tales mod writes every 5 to 10 minutes. It posts two embeds,
+players then factions; `board` shows only one of them. The players embed shows:
 
 - this week's Reputation Points (RP) standings. RP comes from wealth, zombie kills, quests and event wins.
 - the title each top-5 place earns when the week ends (Monday 00:00 GMT+8): Legendary, Elite, Master, Veteran, Rising Survivor. Winners hold the title for the following week.
 - last week's winners and the titles they were actually granted.
 - each player's fire rank (the same stars BT's in-game leaderboard shows, see below).
 
-`/factionleaderboard [limit]` (default 10, max 25) is the same for factions:
+The factions embed shows the same for factions:
 this week's Faction Reputation standings with member counts, the faction title
 each top-5 place earns (Legendary, Elite, Master, Veteran, Rising Faction; every
 member may wear it next week), and last week's faction title holders.

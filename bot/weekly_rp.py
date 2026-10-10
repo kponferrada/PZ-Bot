@@ -1,13 +1,14 @@
 """weekly_rp.py — the Barangay Tales weekly leaderboards.
 
-/rpleaderboard shows this week's personal Reputation Points standings with the
-weekly title each top-5 place earns when the week ends, plus last week's
-winners and the titles they were granted. Each player carries their fire rank
-(BT's leaderboard stars, the in-game chat colour).
+/rpleaderboard posts two embeds, players then factions (`board` picks one):
 
-/factionleaderboard is the same for factions: this week's Faction Reputation
-standings with the faction title each top-5 place earns (its members wear it
-next week), plus last week's faction title holders.
+- players: this week's personal Reputation Points standings with the weekly
+  title each top-5 place earns when the week ends, plus last week's winners and
+  the titles they were granted. Each player carries their fire rank (BT's
+  leaderboard stars, the in-game chat colour).
+- factions: this week's Faction Reputation standings with the faction title
+  each top-5 place earns (its members wear it next week), plus last week's
+  faction title holders.
 
 Data comes from the Barangay Tales export (see bt_progression).
 
@@ -32,6 +33,9 @@ import bt_progression
 import ranks
 import rep_board
 from stats import _badge
+
+# Discord's limit on the combined length of all embeds in one message.
+_MESSAGE_EMBED_CHARS = 6000
 
 # Barangay Tales weeks end Monday 00:00 GMT+8 (BT Config.WeeklyRanking.timezoneOffsetHours).
 _WEEK_TZ = datetime.timezone(datetime.timedelta(hours=8))
@@ -149,6 +153,18 @@ def build_faction_embed(board: dict) -> discord.Embed:
     return embed
 
 
+def build_embeds(board: dict, which: str = "both") -> list:
+    """Embeds for `bt_progression.weekly_leaderboard(...)`: players, factions or both."""
+    embeds = []
+    if which in ("both", "players"):
+        embeds.append(build_embed(board))
+    if which in ("both", "factions"):
+        factions = dict(board.get("factions") or {"rows": []})
+        factions.update(weekId=board.get("weekId"), generatedAt=board.get("generatedAt"))
+        embeds.append(build_faction_embed(factions))
+    return embeds
+
+
 class WeeklyRPCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -176,38 +192,36 @@ class WeeklyRPCog(commands.Cog):
         return {n: p for n, p in zip(names, pics) if p}
 
     @app_commands.command(name="rpleaderboard",
-                          description="Barangay Tales weekly RP leaderboard (players) and the titles each place earns.")
-    @app_commands.describe(limit="How many places to show (default 10, max 25)")
-    async def cmd_rpleaderboard(self, interaction: discord.Interaction, limit: int = 10) -> None:
+                          description="Barangay Tales weekly RP leaderboard (players and factions) and the titles each place earns.")
+    @app_commands.describe(board="Which leaderboard to show (default both)",
+                           limit="How many places to show (default 10, max 25)")
+    @app_commands.choices(
+        board=[app_commands.Choice(name="Players and factions", value="both"),
+               app_commands.Choice(name="Players", value="players"),
+               app_commands.Choice(name="Factions", value="factions")],
+    )
+    async def cmd_rpleaderboard(self, interaction: discord.Interaction,
+                                board: Optional[app_commands.Choice[str]] = None,
+                                limit: int = 10) -> None:
         await interaction.response.defer()
         limit = max(1, min(int(limit), 25))
         # The export changes every 5-10 min; the 60 s cache is fresh enough and
         # keeps a burst of public /rpleaderboard calls from each hitting SFTP.
-        board = await bt_progression.get_weekly_leaderboard(self.bot, limit)
-        if board is None:
+        data = await bt_progression.get_weekly_leaderboard(self.bot, limit)
+        if data is None:
             await interaction.followup.send(embed=discord.Embed(
                 title="\U0001f50d Weekly leaderboard unavailable",
                 description="Couldn't read the Barangay Tales progression export from the server.",
                 colour=discord.Colour.orange(),
             ))
             return
-        await interaction.followup.send(embed=build_embed(board))
-
-    @app_commands.command(name="factionleaderboard",
-                          description="Barangay Tales weekly faction leaderboard and the titles each place earns.")
-    @app_commands.describe(limit="How many places to show (default 10, max 25)")
-    async def cmd_factionleaderboard(self, interaction: discord.Interaction, limit: int = 10) -> None:
-        await interaction.response.defer()
-        limit = max(1, min(int(limit), 25))
-        board = await bt_progression.get_faction_leaderboard(self.bot, limit)
-        if board is None:
-            await interaction.followup.send(embed=discord.Embed(
-                title="\U0001f50d Faction leaderboard unavailable",
-                description="Couldn't read the Barangay Tales progression export from the server.",
-                colour=discord.Colour.orange(),
-            ))
-            return
-        await interaction.followup.send(embed=build_faction_embed(board))
+        embeds = build_embeds(data, board.value if board else "both")
+        # One message holds at most 6000 embed characters; two long boards go separately.
+        if sum(len(e) for e in embeds) <= _MESSAGE_EMBED_CHARS:
+            await interaction.followup.send(embeds=embeds)
+        else:
+            for embed in embeds:
+                await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="repboard",
                           description="Barangay Tales reputation board: top 5 survivors and factions as a poster.")

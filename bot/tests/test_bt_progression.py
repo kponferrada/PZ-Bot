@@ -226,6 +226,24 @@ def test_factionleaderboard_embed_empty():
     assert "No Faction Reputation" in embed.description
 
 
+def test_rpleaderboard_shows_players_and_factions():
+    import weekly_rp
+    board = btp.weekly_leaderboard(_sample(), limit=10)
+    both = weekly_rp.build_embeds(board)
+    assert [e.title.split(" — ")[0] for e in both] == [
+        "\U0001f3c6 Weekly RP Leaderboard", "\U0001f6e1️ Weekly Faction Leaderboard"]
+    assert all(board["weekId"] in e.title for e in both)      # factions get the week too
+    assert "**Sari-Sari**" in both[1].description
+    assert [e.title for e in weekly_rp.build_embeds(board, "players")] == [both[0].title]
+    assert [e.title for e in weekly_rp.build_embeds(board, "factions")] == [both[1].title]
+
+
+def test_rpleaderboard_factions_without_faction_data():
+    import weekly_rp
+    embeds = weekly_rp.build_embeds({"rows": [], "titles": []}, "factions")
+    assert "No Faction Reputation" in embeds[0].description
+
+
 def test_reputation_board_personal_week_uses_usernames_and_worn_titles():
     data = _sample()
     data["players"]["p1"]["equippedTitle"] = "survivor"
