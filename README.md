@@ -66,7 +66,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Area | Commands |
 |---|---|
 | Status | `/hello`, `/online`, `/players`, `/playerlist`, `/modlist`, `/help` |
-| Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/stop` |
+| Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
 | Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart [minutes]` (default 15, max 720, auto-resumes), `/forcemodupdate` |
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |

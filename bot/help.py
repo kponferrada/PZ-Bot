@@ -20,6 +20,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/restart", "Force a server restart (announcement + countdown: save T-1:30, kick T-1min). [admin]"),
         ("/restartnow", "Immediate restart: announce + save now, kick players in 30s, then quit. [admin]"),
         ("/deferrestart", "Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes). [admin]"),
+        ("/kickall [reason] [cancel]", "Warn everyone in game, then kick all online players 1 minute later. [admin]"),
         ("/msg <message>", "Broadcast a red-alert message to all players in-game. [admin]"),
         ("/announce <kind>", "Post a server banner (up / restarting / down / modupdate). [admin]"),
         ("/playsound <sound> [message]", "Trigger a Jeeves Alerts sound on all players. [admin]"),

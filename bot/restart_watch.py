@@ -32,6 +32,7 @@ DEFAULT_KICK_NOTIFY_AT = 120             # seconds-remaining at which to announc
 DEFAULT_SAVE_AT = 90                     # seconds-remaining at which to RCON `save` (1:30)
 DEFAULT_KICK_AT = 60                     # seconds-remaining at which to kick players (1 min)
 DEFAULT_SCHEDULE_HOURS = [4, 10, 16, 22] # UTC restart hours (fallback if RESTART_SCHEDULE_UTC unset)
+KICK_ALL_DELAY = 60                      # /kickall: seconds between the notice and the kick
 DEFAULT_SCHEDULED_WARN = 300             # advance warning (seconds) before a scheduled restart (5 min)
 
 
@@ -56,6 +57,7 @@ class RestartWatch(commands.Cog):
         self._restart_task = None  # active countdown task (guards against duplicate restarts)
         self._defer_until = 0.0    # epoch time until which auto-restarts are deferred (0 = none)
         self._defer_task = None    # auto-resume task for a deferred restart
+        self._kick_all_task = None # pending /kickall (notice sent, kick after KICK_ALL_DELAY)
         self._mod_check.start()
         self._scheduled_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
@@ -68,6 +70,8 @@ class RestartWatch(commands.Cog):
             self._restart_task.cancel()
         if self._defer_task is not None and not self._defer_task.done():
             self._defer_task.cancel()
+        if self._kick_all_task is not None and not self._kick_all_task.done():
+            self._kick_all_task.cancel()
         self._mod_check.cancel()
         self._scheduled_check.cancel()
 
@@ -108,19 +112,28 @@ class RestartWatch(commands.Cog):
             print(f"[RestartWatch] banner image not found: {image_path} - falling back to text")
             await self._announce(caption, discord.Colour.orange())
 
-    async def _kick_all_players(self) -> int:
-        """Force-kick every connected player via RCON `kickuser`."""
-        names = set(self.bot.state.player_names)
-        if not names:
+    async def _kick_all_players(self, reason: str = "Server restarting", fresh: bool = False) -> int:
+        """Force-kick every connected player via RCON `kickuser`.
+
+        `fresh` asks RCON `players` first (so someone who joined a moment ago
+        is kicked too) and falls back to the tracked list."""
+        names = set()
+        if fresh:
             resp = await self.bot.rcon.send_command("players")
             if resp:
                 names, _ = self.bot.rcon.parse_players(resp)
+        names = set(names) or set(self.bot.state.player_names)
+        if not names and not fresh:
+            resp = await self.bot.rcon.send_command("players")
+            if resp:
+                names, _ = self.bot.rcon.parse_players(resp)
+        why = (reason or "Server restarting").replace('"', "'")
         kicked = 0
         for name in sorted(names):
             if not name:
                 continue
             clean = name.replace('"', "")
-            await self.bot.rcon.send_command(f'kickuser "{clean}" -r "Server restarting"')
+            await self.bot.rcon.send_command(f'kickuser "{clean}" -r "{why}"')
             kicked += 1
             print(f"[RestartWatch] Kicked player: {clean}")
         return kicked
@@ -577,6 +590,59 @@ class RestartWatch(commands.Cog):
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
             )
+
+    async def _kick_all_after_notice(self, reason: str, interaction: discord.Interaction) -> None:
+        """Wait KICK_ALL_DELAY, then kick everyone online and report back."""
+        try:
+            await asyncio.sleep(KICK_ALL_DELAY)
+            kicked = await self._kick_all_players(reason, fresh=True)
+            print(f"[RestartWatch] /kickall: kicked {kicked} player(s) ({reason})")
+            await interaction.followup.send(
+                f"👢 Kicked {kicked} player{'s' if kicked != 1 else ''}.", ephemeral=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[RestartWatch] /kickall failed: {e}")
+            try:
+                await interaction.followup.send(f"⚠️ Kick failed: {e}", ephemeral=True)
+            except discord.HTTPException:
+                pass
+
+    @app_commands.command(name="kickall", description="Warn everyone in game, then kick all online players 1 minute later.")
+    @app_commands.describe(reason="Shown in the notice and the kick message (optional)",
+                           cancel="Cancel a pending /kickall instead")
+    @admin_only()
+    async def cmd_kick_all(self, interaction: discord.Interaction,
+                           reason: str = "", cancel: bool = False) -> None:
+        pending = self._kick_all_task is not None and not self._kick_all_task.done()
+        if cancel:
+            if not pending:
+                await interaction.response.send_message("ℹ️ No /kickall is pending.", ephemeral=True)
+                return
+            self._kick_all_task.cancel()
+            await interaction.response.send_message("✅ Pending kick cancelled.", ephemeral=True)
+            await self._servermsg("The kick has been cancelled.")
+            return
+        if pending:
+            await interaction.response.send_message(
+                "⚠️ A /kickall is already pending (use `cancel: True` to stop it).", ephemeral=True)
+            return
+        if self.bot.state.restart_expected():
+            await interaction.response.send_message(
+                "⚠️ A restart is in progress; it kicks everyone itself.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not await self._server_responsive():
+            await interaction.followup.send("⚠️ The server isn't answering RCON.", ephemeral=True)
+            return
+        reason = " ".join((reason or "").split())[:100] or "Kicked by an admin"
+        await self._servermsg(f"All players will be kicked in 1 minute: {reason}")
+        count = await self._get_player_count()
+        self._kick_all_task = asyncio.create_task(self._kick_all_after_notice(reason, interaction))
+        await interaction.followup.send(
+            f"📢 Notice sent. Kicking all online players ({count} now) in 1 minute.\n"
+            "Run `/kickall cancel: True` to stop it.", ephemeral=True)
+        print(f"[RestartWatch] /kickall by {interaction.user}: {reason} ({count} online)")
 
     @app_commands.command(name="deferrestart", description="Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes).")
     @app_commands.describe(minutes="Minutes to defer (default 15)")
