@@ -67,7 +67,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 |---|---|
 | Status | `/hello`, `/online`, `/players`, `/playerlist`, `/modlist`, `/help` |
 | Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
-| Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart [minutes]` (default 15, max 720, auto-resumes), `/forcemodupdate` |
+| Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart [minutes]` (default 15, max 720, auto-resumes), `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
@@ -82,6 +82,17 @@ that expires) use one sequence:
 - **No players online:** save, post the banner, quit.
 - **Players online:** a countdown of `MOD_CHECK_RESTART_DELAY_SECONDS` (default 300 s).
   Kick warning at T-120 s, `save` at T-90 s, `kickuser` everyone at T-60 s, then save and `quit` at T-0.
+
+`/maintenance [reason] [minutes]` runs the same countdown (kick warning, save,
+kick) but doesn't quit: at T-0 it kicks anyone left, saves, and leaves the
+server up for an admin to restart from the console. With no players online it
+kicks and saves at once. For `minutes` (default 60, max 720) it holds
+scheduled and mod-update restarts and `/kickall`, and the up/down monitor
+treats the outage as planned: no "restarting" or "went offline" banners, then
+"Maintenance complete" when the server is back. `/maintenance end: True`
+cancels the countdown, or ends maintenance when the server wasn't restarted.
+`/deferrestart` is refused while maintenance runs. Kicked players can rejoin
+until the server goes down.
 
 `/restartnow` saves at once, kicks after 30 s, then quits. A restart is refused
 when one is already running or when RCON does not answer. Scheduled hours come

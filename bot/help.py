@@ -19,6 +19,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/stop", "Graceful shutdown (RCON save + quit). [admin]"),
         ("/restart", "Force a server restart (announcement + countdown: save T-1:30, kick T-1min). [admin]"),
         ("/restartnow", "Immediate restart: announce + save now, kick players in 30s, then quit. [admin]"),
+        ("/maintenance [reason] [minutes] [end]", "Restart countdown and kick, but no restart: the server stays up for a console restart. [admin]"),
         ("/deferrestart", "Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes). [admin]"),
         ("/kickall [reason] [cancel]", "Warn everyone in game, then kick all online players 1 minute later. [admin]"),
         ("/msg <message>", "Broadcast a red-alert message to all players in-game. [admin]"),

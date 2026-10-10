@@ -178,7 +178,8 @@ class RestartWatch(commands.Cog):
         await self.bot.rcon.send_command("save")
 
     async def _kick_players(self) -> None:
-        await self._kick_all_players()
+        reason = "Server maintenance" if getattr(self.bot.state, "maintenance", False) else "Server restarting"
+        await self._kick_all_players(reason)
 
     async def _announce_kick_notification(self) -> None:
         """Announce (Discord + in-game) that players will be kicked."""
@@ -203,11 +204,12 @@ class RestartWatch(commands.Cog):
         """Immediate restart (no players online): save, announce, quit."""
         await self._quit_server()
 
-    async def _run_countdown(self, duration=None) -> None:
+    async def _run_countdown(self, duration=None, finish=None) -> None:
         """Countdown: kick-notification T-2min, save T-1:30, kick T-1min, save+quit T-0.
 
         `duration` (seconds) overrides the default restart delay (unused by the
-        normal flows, which rely on the default countdown)."""
+        normal flows, which rely on the default countdown). `finish` replaces
+        the save+quit at T-0 (/maintenance saves and leaves the server up)."""
         total = self._restart_delay if duration is None else duration
         # Measure against a deadline: the RCON/bridge calls inside the loop
         # take seconds each, so counting 1-second ticks would run late.
@@ -231,7 +233,7 @@ class RestartWatch(commands.Cog):
                 kicked = True
                 self.bot.state.restart_shutdown_started = True
                 await self._kick_players()
-        await self._quit_server()
+        await (finish or self._quit_server)()
 
     async def _countdown_guarded(self, duration=None) -> None:
         """Run the countdown, but never let a failure leave the restart lock stuck.
@@ -591,6 +593,106 @@ class RestartWatch(commands.Cog):
                 ephemeral=True,
             )
 
+    # ---- Maintenance ---------------------------------------------------------
+
+    def _maintenance_active(self) -> bool:
+        return bool(getattr(self.bot.state, "maintenance", False)) and self.bot.state.restart_expected()
+
+    def _clear_maintenance(self) -> None:
+        self.bot.state.maintenance = False
+        self.bot.state.expecting_restart = False
+        self.bot.state.restart_shutdown_started = False
+
+    async def _finish_maintenance(self) -> None:
+        """T-0 of /maintenance: kick anyone left, save, and leave the server up
+        for the admins to restart from the console."""
+        self.bot.state.restart_shutdown_started = True
+        await self._kick_all_players("Server maintenance", fresh=True)
+        await self._save_world()
+        if self.bot.features.is_enabled("restarts"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                "🛠️ Players kicked, world saved. Maintenance in progress — "
+                "the server will be restarted by the admins.",
+            )
+        print("[RestartWatch] Maintenance: players kicked, world saved; waiting for a console restart.")
+
+    async def _maintenance_guarded(self) -> None:
+        try:
+            await self._run_countdown(finish=self._finish_maintenance)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[RestartWatch] maintenance countdown failed: {e}")
+            self._clear_maintenance()
+
+    async def _start_maintenance(self, reason: str, minutes: int) -> str:
+        """Start the maintenance countdown. Returns "" or why it didn't start."""
+        if self.bot.state.restart_expected():
+            return "a restart or maintenance is already in progress"
+        # Claim the lock before the first await (as _start_restart). It also
+        # keeps scheduled / mod-update restarts and /kickall off, and makes the
+        # up/down monitor treat the console restart as planned, for `minutes`.
+        self.bot.state.expect_restart(minutes * 60)
+        self.bot.state.maintenance = True
+        if not await self._server_responsive():
+            self._clear_maintenance()
+            return "the server isn't answering RCON"
+        players = await self._get_player_count()
+        countdown = self._restart_delay if players > 0 else 0
+        when = f"in {countdown // 60} minute{'s' if countdown // 60 != 1 else ''}" if countdown else "now"
+        if self.bot.features.is_enabled("restarts"):
+            await self._announce_banner(
+                self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                f"🛠️ Server maintenance: {reason}. Players will be kicked {when}.",
+            )
+        await self._servermsg(f"Server maintenance: {reason}. Players will be kicked {when}.")
+        if countdown:
+            self._restart_task = asyncio.create_task(self._maintenance_guarded())
+        else:
+            await self._finish_maintenance()
+        return ""
+
+    @app_commands.command(name="maintenance",
+                          description="Maintenance: warn players, kick everyone after the restart countdown, no restart.")
+    @app_commands.describe(reason="Shown to players and in Discord (optional)",
+                           minutes="How long the server may be down for it (default 60, max 720)",
+                           end="End or cancel maintenance instead")
+    @admin_only()
+    async def cmd_maintenance(self, interaction: discord.Interaction, reason: str = "",
+                              minutes: int = 60, end: bool = False) -> None:
+        if end:
+            if not self._maintenance_active():
+                await interaction.response.send_message("ℹ️ No maintenance is running.", ephemeral=True)
+                return
+            counting_down = self._restart_task is not None and not self._restart_task.done()
+            if counting_down:
+                self._restart_task.cancel()
+            self._clear_maintenance()
+            await interaction.response.send_message("✅ Maintenance ended.", ephemeral=True)
+            if counting_down:
+                await self._servermsg("Maintenance cancelled. Carry on!")
+            if self.bot.features.is_enabled("restarts"):
+                await self._announce(
+                    "✅ Maintenance cancelled." if counting_down else "✅ Maintenance finished. The server is open.",
+                    discord.Colour.green())
+            print(f"[RestartWatch] Maintenance ended by {interaction.user}")
+            return
+        minutes = max(5, min(int(minutes), 720))
+        reason = " ".join((reason or "").split())[:100] or "scheduled maintenance"
+        await interaction.response.defer(ephemeral=True)
+        self._cancel_deferral()
+        err = await self._start_maintenance(reason, minutes)
+        if err:
+            await interaction.followup.send(f"⚠️ Maintenance not started: {err}.", ephemeral=True)
+            return
+        await interaction.followup.send(
+            "🛠️ Maintenance started. Players get the restart countdown warnings, then are kicked; "
+            "the server stays up for you to restart from the console.\n"
+            f"Restart alerts are held for {minutes} min. `/maintenance end: True` ends or cancels it.",
+            ephemeral=True)
+        print(f"[RestartWatch] Maintenance by {interaction.user}: {reason} ({minutes} min)")
+
     async def _kick_all_after_notice(self, reason: str, interaction: discord.Interaction) -> None:
         """Wait KICK_ALL_DELAY, then kick everyone online and report back."""
         try:
@@ -648,6 +750,13 @@ class RestartWatch(commands.Cog):
     @app_commands.describe(minutes="Minutes to defer (default 15)")
     @admin_only()
     async def cmd_defer_restart(self, interaction: discord.Interaction, minutes: int = 15) -> None:
+        if self._maintenance_active():
+            # Deferring would cancel the maintenance countdown and later fire a
+            # real restart (quit), which maintenance is meant to avoid.
+            await interaction.response.send_message(
+                "⚠️ Maintenance is running. Use `/maintenance end: True` to end or cancel it.",
+                ephemeral=True)
+            return
         minutes = max(1, min(int(minutes), 720))
         await interaction.response.send_message(
             f"⏸️ Deferring restart for {minutes} minute{'s' if minutes != 1 else ''}...",

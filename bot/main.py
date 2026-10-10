@@ -218,6 +218,7 @@ class ServerState:
         self.expecting_restart = False
         self.restart_expected_until = 0.0
         self.restart_shutdown_started = False  # set True once players are kicked (real shutdown)
+        self.maintenance = False  # /maintenance: players kicked, admins restart from the console
         self.death_log_active = False  # True once the Death Log mod's file is seen
         self.server_started_at = 0.0  # epoch time the server last came up (mod-check baseline)
         # Latest RCON probe by monitor_server_state, shared so other loops
@@ -256,6 +257,7 @@ class ServerState:
         if self.expecting_restart and time.time() > self.restart_expected_until:
             self.expecting_restart = False
             self.restart_shutdown_started = False
+            self.maintenance = False
         return self.expecting_restart
 
 
@@ -562,7 +564,10 @@ class PZBot(commands.Bot):
                     self._offline_since = None
                 else:
                     if self.features.is_enabled("server_up_down"):
-                        if self._down_announced:
+                        if self.state.maintenance:
+                            await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
+                                                   f"{Emojis.HAPPY} Maintenance complete — server is back online!")
+                        elif self._down_announced:
                             await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
                                                    f"{Emojis.HAPPY} Server is back online!")
                         elif self.state.restart_expected():
@@ -576,6 +581,7 @@ class PZBot(commands.Bot):
                     self._offline_since = None
                     self.state.expecting_restart = False
                     self.state.restart_shutdown_started = False
+                    self.state.maintenance = False
                     self.state.server_started_at = now  # mod-check baseline
             elif not online and prev:
                 # Just went offline — debounce first (filters brief RCON blips),
