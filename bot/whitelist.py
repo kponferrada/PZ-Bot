@@ -10,7 +10,9 @@ Flow:
      buttons.
   4. Approve → adds the user over RCON (`adduser` + `addSteamID` so the account
      is bound to a single SteamID), records the RCON command in `Code`, the admin
-     in `Whitelisted By`, flags `isWhitelisted`, and DMs a welcome message.
+     in `Whitelisted By`, flags `isWhitelisted`, links the requester's Discord
+     account to the username (as `/linkme` would, through RankSync) and DMs a
+     welcome message. The link is skipped if either side is already linked.
      Deny → asks the admin for a reason, records it in `Notes`, and DMs the
      requester the denial reason.
   5. Delete → (after approval) removes the account over RCON (`removeuser` +
@@ -780,13 +782,37 @@ class WhitelistCog(commands.Cog):
         request = self._lookup_request(request_id)
         await self._finalize_approval(interaction.message, request, interaction.user, "approved")
 
+        link_note = await self._link_requester(request.get("discord_id", ""), username)
+
         submitter = await self._fetch_submitter(request.get("discord_id", ""))
         if submitter is not None:
             await self._send_approval_dm(submitter, username, request.get("SteamID", ""))
 
         await interaction.followup.send(
-            f"\u2705 Approved **{username}** and added to the whitelist.", ephemeral=True)
+            f"\u2705 Approved **{username}** and added to the whitelist.\n{link_note}", ephemeral=True)
         print(f"[Whitelist] Approved {username} (SteamID {request.get('SteamID', '')})")
+
+    async def _link_requester(self, discord_id: str, username: str) -> str:
+        """Link the requester to their approved username; returns a line for the admin."""
+        rank_cog = self.bot.get_cog("RankSync")
+        if rank_cog is None or not str(discord_id).isdigit():
+            return "\u26a0\ufe0f Not linked: no requester Discord ID or rank sync not loaded."
+        try:
+            result, current = await rank_cog.link_account(int(discord_id), username)
+        except Exception as e:
+            print(f"[Whitelist] Auto-link failed for {username}: {e}")
+            return "\u26a0\ufe0f Not linked (error). Use `/linkname` to link them."
+        if result == "ok":
+            return f"\U0001f517 Linked <@{discord_id}> to **{username}**."
+        if result == "same":
+            return f"\U0001f517 <@{discord_id}> was already linked to **{username}**."
+        if result == "has_link":
+            return (f"\u26a0\ufe0f Not linked: <@{discord_id}> is already linked to **{current}**. "
+                    "Use `/linkname` to change it.")
+        if result == "taken":
+            return (f"\u26a0\ufe0f Not linked: **{username}** is already linked to another "
+                    "Discord account (see `/listlinks`).")
+        return "\u26a0\ufe0f Not linked: no username."
 
     async def deny_request(self, interaction: discord.Interaction, request_id: str) -> None:
         if not self._is_admin(interaction):

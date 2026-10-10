@@ -58,6 +58,23 @@ LINK_FILE = __import__("pathlib").Path(__file__).parent / "rank_links.json"
 RANKS_FILENAME = "jeeves_ranks.lua"
 
 
+def link_check(links: Dict[str, str], discord_id, pz_username: str) -> str:
+    """Can `discord_id` be linked to `pz_username`? (whitelist approval)
+
+    "ok"       — neither side is linked yet.
+    "same"     — already linked to exactly this username.
+    "has_link" — the Discord user is linked to another username (one each).
+    "taken"    — another Discord user holds this username (case-insensitive).
+    """
+    key = str(discord_id)
+    current = links.get(key)
+    if current is not None:
+        return "same" if current.lower() == pz_username.lower() else "has_link"
+    if any(name.lower() == pz_username.lower() for did, name in links.items() if did != key):
+        return "taken"
+    return "ok"
+
+
 def get_rank_from_roles(member: discord.Member) -> int:
     """Determine the highest rank from a member's Discord roles."""
     highest = 0
@@ -394,6 +411,32 @@ class RankSync(commands.Cog):
             if pzname.lower() == pz_username.lower():
                 return int(did)
         return None
+
+    async def link_account(self, discord_id: int, pz_username: str) -> tuple[str, Optional[str]]:
+        """Link a Discord user to a PZ username unless either side is already
+        linked (see `link_check`). Returns (result, the user's current link).
+        Used by whitelist approval; /linkme and /linkname keep their own rules."""
+        pz_username = (pz_username or "").strip()
+        if not pz_username:
+            return "invalid", None
+        key = str(discord_id)
+        result = link_check(self._links, key, pz_username)
+        if result != "ok":
+            return result, self._links.get(key)
+        self._links[key] = pz_username
+        self._save_links()
+        guild = self.bot.get_guild(self.bot.config.GUILD_ID)
+        member = guild.get_member(int(discord_id)) if guild else None
+        rank = self._rank_for(member, pz_username)
+        try:
+            if not self._ladder_mode:  # ladder ranks don't depend on links
+                await self._update_rank_and_push(pz_username, rank)
+            if member is not None:
+                await self._sync_member_roles(member, rank)
+        except Exception as e:  # the link is saved; ranks catch up on the next sync
+            print(f"[RankSync] Linked {discord_id} -> {pz_username}, rank sync failed: {e}")
+        print(f"[RankSync] Linked {discord_id} -> {pz_username} (whitelist approval)")
+        return "ok", pz_username
 
     def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
         if self._ladder_mode:

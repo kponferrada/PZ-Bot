@@ -41,7 +41,7 @@ on boot.
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
 | Scheduled restarts (UTC hours) | `restart_watch.py` | RCON | `scheduled_restarts` |
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
-| Whitelist applications, approval, admin | `whitelist.py` | RCON | `whitelist` |
+| Whitelist applications, approval (also links the requester's Discord account to the approved username, like `/linkme`), admin | `whitelist.py`, `rank_sync.py` | RCON | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
 | `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
