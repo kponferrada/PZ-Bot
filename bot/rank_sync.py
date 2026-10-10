@@ -405,6 +405,10 @@ class RankSync(commands.Cog):
             return None
         return self._rank_for(None, pz_username)
 
+    def pz_username_for_discord_id(self, discord_id) -> Optional[str]:
+        """The PZ username a Discord user is linked to, if any."""
+        return self._links.get(str(discord_id))
+
     def discord_id_for_pz_username(self, pz_username: str) -> Optional[int]:
         """The Discord user ID linked to a PZ username, if any."""
         for did, pzname in self._links.items():
@@ -437,6 +441,24 @@ class RankSync(commands.Cog):
             print(f"[RankSync] Linked {discord_id} -> {pz_username}, rank sync failed: {e}")
         print(f"[RankSync] Linked {discord_id} -> {pz_username} (whitelist approval)")
         return "ok", pz_username
+
+    async def rename_link(self, old_username: str, new_username: str) -> bool:
+        """Point whoever is linked to `old_username` at `new_username` (a
+        whitelist rename). Returns True if a link moved."""
+        moved = False
+        for did, name in list(self._links.items()):
+            if name.lower() == (old_username or "").lower():
+                self._links[did] = new_username
+                moved = True
+        if not moved:
+            return False
+        self._save_links()
+        if not self._ladder_mode and old_username in self._ranks:
+            self._ranks[new_username] = self._ranks.pop(old_username)
+            await self._write_ranks_file()
+            await self._push_ranks_to_server()
+        print(f"[RankSync] Link moved {old_username} -> {new_username} (whitelist rename)")
+        return True
 
     def get_rank_for_pz_username(self, pz_username: str) -> Optional[int]:
         if self._ladder_mode:

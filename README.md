@@ -41,7 +41,7 @@ on boot.
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
 | Scheduled restarts (UTC hours) | `restart_watch.py` | RCON | `scheduled_restarts` |
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
-| Whitelist applications, approval (also links the requester's Discord account to the approved username, like `/linkme`), admin | `whitelist.py`, `rank_sync.py` | RCON | `whitelist` |
+| Whitelist applications, approval (also links the requester's Discord account to the approved username, like `/linkme`), admin. An approved card has Change Username, Change Password, Check Status and Delete Account buttons | `whitelist.py`, `rank_sync.py` | RCON, SFTP (`db/pzserver.db` for the status) | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
 | `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
@@ -86,6 +86,17 @@ that expires) use one sequence:
 `/restartnow` saves at once, kicks after 30 s, then quits. A restart is refused
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
+
+### Whitelist card buttons
+
+Once a request is approved, its card in the approval channel has four admin buttons:
+
+- **Change Username:** Project Zomboid has no RCON command to rename an account, so the bot adds the new account and then removes the old one. **PZ saves characters per username, so the player starts a new character.** The Discord link moves to the new name.
+- **Change Password:** removes and re-adds the account with the new password. If re-adding fails, the old password is put back.
+- **Check Status:** the account on the server whitelist (SteamID, access level, last connection, banned), whether the player is in game, and their Discord link.
+- **Delete Account:** removes the account and its SteamID, with a reason.
+
+Name and password changes are refused while the player is in game. Both update the CSV and the card, and DM the requester their new login. Cards approved before this version only show Delete Account.
 
 ### Weekly RP leaderboard
 

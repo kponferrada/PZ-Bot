@@ -15,8 +15,19 @@ Flow:
      welcome message. The link is skipped if either side is already linked.
      Deny → asks the admin for a reason, records it in `Notes`, and DMs the
      requester the denial reason.
-  5. Delete → (after approval) removes the account over RCON (`removeuser` +
-     `removeSteamID`), records the reason in `Notes`, and updates the form.
+  5. After approval the card keeps four buttons:
+     - Change Username → PZ has no rename command, so the bot creates the new
+       account (`adduser`) and then removes the old one. PZ keeps characters
+       per username, so the player starts without their old character. The
+       Discord link (rank_links.json) moves to the new name.
+     - Change Password → `removeuser` + `adduser` with the new password (the
+       stored password is a hash; if re-adding fails the old one is restored).
+     - Check Status → the account on the server whitelist (SteamID, access
+       level, last connection), whether the player is online, and the link.
+     - Delete Account → removes the account over RCON (`removeuser` +
+       `removeSteamID`), records the reason in `Notes`, and updates the form.
+     Name and password changes are refused while the player is online, update
+     the CSV and the card, and DM the requester their new login.
 
 The Approve/Deny buttons are *persistent* — their `custom_id` encodes the
 request id, so they keep working across bot restarts (views are re-registered
@@ -36,6 +47,7 @@ Config (see config.env.example):
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime
 import sqlite3
@@ -81,6 +93,77 @@ def _validate_steam_id(value: str) -> str | None:
     if len(sid) != 17:
         return f"SteamID must be exactly 17 digits — `{sid}` has {len(sid)}."
     return None
+
+
+def _fmt_last_connection(value) -> str:
+    """PZ stores lastConnection as text ("dd-MM-yy HH:mm:ss") or epoch ms; show it as-is or as <t:>."""
+    if value in (None, ""):
+        return "never"
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return str(value)
+    if n > 10**11:          # epoch milliseconds
+        n //= 1000
+    return f"<t:{n}:R>" if n > 0 else "never"
+
+
+def account_status_fields(request: dict, account: dict | None, server_online: bool | None,
+                          online_names, linked_name: str | None,
+                          username_holder: int | None) -> list:
+    """(name, value) rows for the Check Status reply. Pure: no Discord or SFTP.
+
+    `account` is the server whitelist row (None if not found), `online_names`
+    the players the bot last saw online, `linked_name` the PZ name the
+    requester is linked to, `username_holder` the Discord id linked to this
+    username (None if nobody).
+    """
+    username = request.get("Username", "")
+    approved = (request.get("isWhitelisted", "") or "").strip().lower() == "true"
+    notes = (request.get("Notes", "") or "").strip()
+    if approved:
+        card = f"\u2705 Approved by {request.get('Whitelisted By') or '?'}"
+    elif notes:
+        card = f"\u274c Denied / deleted — {notes}"
+    else:
+        card = "\u23f3 Pending"
+    rows = [("Request", card)]
+
+    if account is None:
+        rows.append(("Server whitelist", "\u274c No account with this username on the server"))
+    else:
+        lines = [f"\u2705 `{account.get('username')}`"]
+        sid = account.get("steamid") or ""
+        want = (request.get("SteamID") or "").strip()
+        if sid:
+            lines.append(f"SteamID `{sid}`" + ("" if not want or sid == want else f" (request has `{want}`)"))
+        else:
+            lines.append("SteamID: not bound")
+        role = account.get("role")
+        if str(role).isdigit():
+            lines.append("Access: " + ("Admin" if int(role) >= 7 else f"Player (level {role})"))
+        if account.get("banned") not in (None, "", 0, "0", False, "false"):
+            lines.append("\u26d4 **Banned**")
+        if "lastConnection" in account:
+            lines.append(f"Last connection: {_fmt_last_connection(account.get('lastConnection'))}")
+        rows.append(("Server whitelist", "\n".join(lines)))
+
+    names = {n.lower() for n in (online_names or ())}
+    if server_online is False:
+        rows.append(("Online", "Server is offline"))
+    else:
+        rows.append(("Online", "\U0001f7e2 In game now" if username.lower() in names else "\u26aa Not in game"))
+
+    if linked_name and linked_name.lower() == username.lower():
+        link = f"\U0001f517 Linked to **{linked_name}**"
+    elif linked_name:
+        link = f"\u26a0\ufe0f Requester is linked to **{linked_name}**, not this username"
+    else:
+        link = "Requester is not linked"
+    if username_holder is not None and not (linked_name and linked_name.lower() == username.lower()):
+        link += f"\n\u26a0\ufe0f **{username}** is linked to <@{username_holder}>"
+    rows.append(("Discord link", link))
+    return rows
 
 
 class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
@@ -205,25 +288,88 @@ class WhitelistApprovalView(discord.ui.View):
         await self.cog.deny_request(interaction, self.request_id)
 
 
-class WhitelistDeleteView(discord.ui.View):
-    """Persistent "Delete Account" button shown after a request is approved."""
+class WhitelistManageView(discord.ui.View):
+    """Persistent buttons on an approved request's card.
+
+    The Delete button keeps its old custom_id, so cards posted before the other
+    buttons existed still work (they only show Delete until they're updated).
+    """
 
     def __init__(self, cog: "WhitelistCog", request_id: str):
         super().__init__(timeout=None)
         self.cog = cog
         self.request_id = request_id
+        for label, style, emoji, action, callback in (
+            ("Change Username", discord.ButtonStyle.blurple, "\u270f\ufe0f", "rename", self.rename),
+            ("Change Password", discord.ButtonStyle.blurple, "\U0001f511", "password", self.password),
+            ("Check Status", discord.ButtonStyle.grey, "\U0001f50e", "status", self.status),
+            ("Delete Account", discord.ButtonStyle.red, "\U0001f5d1\ufe0f", "delete", self.delete),
+        ):
+            button = discord.ui.Button(label=label, style=style, emoji=emoji,
+                                       custom_id=f"whitelist:{action}:{request_id}")
+            button.callback = callback
+            self.add_item(button)
 
-        delete = discord.ui.Button(
-            label="Delete Account",
-            style=discord.ButtonStyle.red,
-            emoji="\U0001f5d1\ufe0f",  # 🗑️
-            custom_id=f"whitelist:delete:{request_id}",
-        )
-        delete.callback = self.delete
-        self.add_item(delete)
+    async def rename(self, interaction: discord.Interaction) -> None:
+        await self.cog.open_rename(interaction, self.request_id)
+
+    async def password(self, interaction: discord.Interaction) -> None:
+        await self.cog.open_password(interaction, self.request_id)
+
+    async def status(self, interaction: discord.Interaction) -> None:
+        await self.cog.show_status(interaction, self.request_id)
 
     async def delete(self, interaction: discord.Interaction) -> None:
         await self.cog.delete_request(interaction, self.request_id)
+
+
+class RenameModal(discord.ui.Modal, title="Change Username"):
+    """New username for an approved account (re-created under the new name)."""
+
+    new_username = discord.ui.TextInput(
+        label="New username (old character is NOT kept)",
+        placeholder="PZ saves characters per username",
+        required=True,
+        max_length=64,
+    )
+    password = discord.ui.TextInput(
+        label="Password for the new account",
+        required=True,
+        max_length=128,
+    )
+
+    def __init__(self, cog: "WhitelistCog", request_id: str, message: discord.Message,
+                 username: str, password: str):
+        super().__init__()
+        self.cog = cog
+        self.request_id = request_id
+        self.message = message
+        self.new_username.default = username
+        self.password.default = password or None
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.complete_rename(interaction, self.request_id, self.message,
+                                       self.new_username.value.strip(), self.password.value.strip())
+
+
+class PasswordModal(discord.ui.Modal, title="Change Password"):
+    """New password for an approved account."""
+
+    new_password = discord.ui.TextInput(
+        label="New password",
+        required=True,
+        max_length=128,
+    )
+
+    def __init__(self, cog: "WhitelistCog", request_id: str, message: discord.Message):
+        super().__init__()
+        self.cog = cog
+        self.request_id = request_id
+        self.message = message
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.complete_password(interaction, self.request_id, self.message,
+                                         self.new_password.value.strip())
 
 
 class DeleteReasonModal(discord.ui.Modal, title="Delete Whitelist Account"):
@@ -385,7 +531,7 @@ class WhitelistCog(commands.Cog):
         return None
 
     def _register_views(self) -> None:
-        """Re-register persistent views (Approve/Deny for pending, Delete for approved)."""
+        """Re-register persistent views (Approve/Deny for pending, management for approved)."""
         pending = 0
         approved = 0
         for row in self._read_csv():
@@ -395,7 +541,7 @@ class WhitelistCog(commands.Cog):
             whitelisted = (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
             notes = (row.get("Notes", "") or "").strip()
             if whitelisted:
-                self.bot.add_view(WhitelistDeleteView(self, rid))
+                self.bot.add_view(WhitelistManageView(self, rid))
                 approved += 1
             elif not notes:
                 self.bot.add_view(WhitelistApprovalView(self, rid))
@@ -454,9 +600,8 @@ class WhitelistCog(commands.Cog):
         if status == "approved":
             embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
             embed.colour = discord.Colour.green()
-            # Keep a persistent "Delete Account" button so the account can be
-            # removed later.
-            view = WhitelistDeleteView(self, request.get("request_id", ""))
+            # Keep the management buttons (rename, password, status, delete).
+            view = WhitelistManageView(self, request.get("request_id", ""))
         elif status == "denied":
             value = f"\u274c Denied by {admin.mention}"
             if reason:
@@ -535,7 +680,7 @@ class WhitelistCog(commands.Cog):
         p = password.replace('"', "").strip()
         s = steam_id.replace('"', "").strip()
 
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -584,7 +729,7 @@ class WhitelistCog(commands.Cog):
         u = username.replace('"', "").strip()
         s = steam_id.replace('"', "").strip()
 
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -637,6 +782,29 @@ class WhitelistCog(commands.Cog):
             print(f"[Whitelist] Failed to parse whitelist table: {e}")
         return rows
 
+    async def _server_account(self, username: str) -> tuple[dict | None, str]:
+        """The server whitelist row for `username` (case-insensitive) with every
+        column the table has (lastConnection, banned, ... vary by build).
+        Returns (row or None, error)."""
+        sftp = sftp_client.get()
+        db = getattr(self.bot.config, "SFTP_SERVER_DB", "") or "/server-data/db/pzserver.db"
+        try:
+            data = await sftp.read_bytes(db)
+        except sftp_client.SftpError as e:
+            return None, f"can't read the server database: {e}"
+        try:
+            conn = sqlite3.connect(":memory:")
+            conn.deserialize(data)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM whitelist WHERE lower(username) = lower(?)",
+                               ((username or "").strip(),)).fetchone()
+            result = {k: row[k] for k in row.keys() if k.lower() not in ("password", "encryptedpwd")} \
+                if row else None
+            conn.close()
+            return result, ""
+        except Exception as e:
+            return None, f"can't parse the server database: {e}"
+
     async def _lookup_user(self, username: str) -> dict | None:
         for row in await self._read_server_whitelist():
             if row["username"].lower() == (username or "").strip().lower():
@@ -645,17 +813,22 @@ class WhitelistCog(commands.Cog):
 
     async def _modify_whitelist_user_rcon(self, username: str, steam_id: str,
                                           new_username: str = "", new_password: str = "",
-                                          new_steam_id: str = "") -> tuple[str, str]:
+                                          new_steam_id: str = "",
+                                          old_password: str = "") -> tuple[str, str]:
         """Modify a whitelist account over RCON.
 
         `username` + `steam_id` identify the account; pass the field(s) to change
         as `new_username` / `new_password` / `new_steam_id` (empty = unchanged).
         A rename or password change is a remove-then-re-add (``adduser`` won't
-        overwrite, and the stored password is a one-way hash). Returns
+        overwrite, and the stored password is a one-way hash). A rename to a
+        different name adds the new account before removing the old one, so a
+        failed `adduser` leaves the old account as it was. A password change on
+        the same name must remove first; if `adduser` then fails and
+        `old_password` is known, the old account is put back. Returns
         `(error, rcon_commands)`.
         """
         rcon = self.bot.rcon
-        if not rcon.is_server_online():
+        if not await asyncio.to_thread(rcon.is_server_online):
             detail = getattr(rcon, "last_error", "") or "connection failed"
             return f"server is offline / RCON unreachable — {detail}", ""
 
@@ -673,17 +846,36 @@ class WhitelistCog(commands.Cog):
             if rename and not new_p:
                 return ("changing the username requires a new password — the stored "
                         "password is hashed and can't be reused", "")
-            if old_u:
+            # Same name (password or letter-case change): remove first.
+            remove_first = bool(old_u) and new_u.lower() == old_u.lower()
+            if remove_first:
                 cmds.append(f'removeuser "{old_u}"')
                 await rcon.send_command(cmds[-1])
             cmds.append(f'adduser "{new_u}" "{new_p}"')
             resp = await rcon.send_command(cmds[-1])
+            failure = ""
             if resp is not None:
                 low = resp.lower()
                 if not ("created" in low or "added" in low):
-                    return f"`adduser` failed: {resp.strip()}", "; ".join(cmds)
+                    failure = resp.strip()
             elif rcon.last_error:
-                return f"`adduser` failed: {rcon.last_error}", "; ".join(cmds)
+                failure = rcon.last_error
+            if failure:
+                if remove_first:
+                    old_p = (old_password or "").replace('"', "").strip()
+                    if old_p:
+                        cmds.append(f'adduser "{old_u}" "<old password>"')
+                        await rcon.send_command(f'adduser "{old_u}" "{old_p}"')
+                        if old_s:
+                            cmds.append(f'addSteamID "{old_s}"')
+                            await rcon.send_command(cmds[-1])
+                        failure += " (the old account was restored)"
+                    else:
+                        failure += f" (the old account `{old_u}` was removed; re-add it with /whitelistadd)"
+                return f"`adduser` failed: {failure}", "; ".join(cmds)
+            if old_u and not remove_first:
+                cmds.append(f'removeuser "{old_u}"')
+                await rcon.send_command(cmds[-1])
 
         # SteamID: after a rename/repass the re-created account is unbound, so
         # (re)bind it; for a pure SteamID change swap old -> new.
@@ -880,6 +1072,189 @@ class WhitelistCog(commands.Cog):
             f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV.",
             ephemeral=True)
         print(f"[Whitelist] Deleted account {username} (request {request_id}): {reason}")
+
+    # ---- approved card: rename / password / status --------------------------
+
+    def _approved_request(self, request_id: str) -> tuple[dict | None, str]:
+        request = self._lookup_request(request_id)
+        if request is None:
+            return None, "\u274c Request not found (it may have been removed)."
+        if (request.get("isWhitelisted", "") or "").strip().lower() != "true":
+            return None, "\u274c This account isn't whitelisted any more."
+        return request, ""
+
+    def _is_in_game(self, username: str) -> bool:
+        names = getattr(self.bot.state, "player_names", set()) or set()
+        return username.lower() in {n.lower() for n in names}
+
+    async def open_rename(self, interaction: discord.Interaction, request_id: str) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        request, err = self._approved_request(request_id)
+        if err:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+        await interaction.response.send_modal(RenameModal(
+            self, request_id, interaction.message,
+            request.get("Username", ""), request.get("Password", "")))
+
+    async def open_password(self, interaction: discord.Interaction, request_id: str) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        _request, err = self._approved_request(request_id)
+        if err:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+        await interaction.response.send_modal(PasswordModal(self, request_id, interaction.message))
+
+    async def complete_rename(self, interaction: discord.Interaction, request_id: str,
+                              message, new_username: str, password: str) -> None:
+        request, err = self._approved_request(request_id)
+        if err:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+        old = request.get("Username", "")
+        new_username = new_username.replace('"', "").strip()
+        if not new_username or not password:
+            await interaction.response.send_message("\u274c Username and password are required.", ephemeral=True)
+            return
+        if new_username == old:
+            await interaction.response.send_message("\u2139\ufe0f That's already the username.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if self._is_in_game(old):
+            await interaction.followup.send(
+                f"\u274c **{old}** is in game. Ask them to log out first.", ephemeral=True)
+            return
+        if new_username.lower() != old.lower():
+            taken, db_err = await self._server_account(new_username)
+            if taken is not None:
+                await interaction.followup.send(
+                    f"\u274c An account named **{taken.get('username')}** already exists on the server.",
+                    ephemeral=True)
+                return
+            if db_err:
+                print(f"[Whitelist] Rename {old} -> {new_username}: {db_err}; relying on adduser")
+        err, _code = await self._modify_whitelist_user_rcon(
+            old, request.get("SteamID", ""), new_username=new_username,
+            new_password=password, old_password=request.get("Password", ""))
+        if err:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Rename Failed",
+                description=f"Could not rename **{old}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        self._update_csv_row(request_id, {"Username": new_username, "Password": password})
+        request = self._lookup_request(request_id)
+        await self._refresh_card(message, request)
+        link_note = ""
+        rank_cog = self.bot.get_cog("RankSync")
+        if rank_cog is not None and hasattr(rank_cog, "rename_link"):
+            if await rank_cog.rename_link(old, new_username):
+                link_note = "\n\U0001f517 Discord link moved to the new username."
+        await self._dm_credentials(request, "username", new_username, password)
+        await interaction.followup.send(
+            f"\u270f\ufe0f Renamed **{old}** \u2192 **{new_username}**. "
+            f"The old character stays with the old name.{link_note}", ephemeral=True)
+        print(f"[Whitelist] Renamed {old} -> {new_username} by {interaction.user}")
+
+    async def complete_password(self, interaction: discord.Interaction, request_id: str,
+                                message, new_password: str) -> None:
+        request, err = self._approved_request(request_id)
+        if err:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+        if not new_password:
+            await interaction.response.send_message("\u274c Password is required.", ephemeral=True)
+            return
+        username = request.get("Username", "")
+        await interaction.response.defer(ephemeral=True)
+        if self._is_in_game(username):
+            await interaction.followup.send(
+                f"\u274c **{username}** is in game. Ask them to log out first.", ephemeral=True)
+            return
+        err, _code = await self._modify_whitelist_user_rcon(
+            username, request.get("SteamID", ""), new_password=new_password,
+            old_password=request.get("Password", ""))
+        if err:
+            await interaction.followup.send(embed=discord.Embed(
+                title="\u274c Password Change Failed",
+                description=f"Could not change the password of **{username}**:\n\n{err}",
+                colour=discord.Colour.red(),
+            ), ephemeral=True)
+            return
+        self._update_csv_row(request_id, {"Password": new_password})
+        request = self._lookup_request(request_id)
+        await self._refresh_card(message, request)
+        await self._dm_credentials(request, "password", username, new_password)
+        await interaction.followup.send(f"\U0001f511 Changed the password of **{username}**.", ephemeral=True)
+        print(f"[Whitelist] Password changed for {username} by {interaction.user}")
+
+    async def show_status(self, interaction: discord.Interaction, request_id: str) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        request = self._lookup_request(request_id)
+        if request is None:
+            await interaction.response.send_message(
+                "\u274c Request not found (it may have been removed).", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        username = request.get("Username", "")
+        account, db_err = await self._server_account(username)
+        server_online = self.bot.state.recent_rcon_probe(60) \
+            if hasattr(self.bot.state, "recent_rcon_probe") else None
+        linked_name = holder = None
+        rank_cog = self.bot.get_cog("RankSync")
+        if rank_cog is not None:
+            did = request.get("discord_id", "")
+            linked_name = rank_cog.pz_username_for_discord_id(did) if did else None
+            holder = rank_cog.discord_id_for_pz_username(username)
+        embed = discord.Embed(title=f"\U0001f50e Account status — {username}",
+                              colour=discord.Colour.blurple(),
+                              timestamp=datetime.datetime.now(datetime.timezone.utc))
+        for name, value in account_status_fields(request, account, server_online,
+                                                 getattr(self.bot.state, "player_names", ()),
+                                                 linked_name, holder):
+            embed.add_field(name=name, value=value[:1024], inline=False)
+        if db_err:
+            embed.set_footer(text=f"Server whitelist unknown: {db_err}"[:2048])
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    async def _refresh_card(self, message, request: dict) -> None:
+        """Rewrite the Username / Password / SteamID fields on an approved card."""
+        if message is None or not message.embeds:
+            return
+        embed = message.embeds[0].copy()
+        values = {"Username": request.get("Username", ""), "Password": request.get("Password", ""),
+                  "SteamID": request.get("SteamID", "")}
+        for i, field in enumerate(embed.fields):
+            if field.name in values:
+                embed.set_field_at(i, name=field.name, value=f"`{values[field.name]}`",
+                                   inline=field.inline)
+        try:
+            await message.edit(embed=embed, view=WhitelistManageView(self, request.get("request_id", "")))
+        except discord.HTTPException as e:
+            print(f"[Whitelist] Failed to update the card: {e}")
+
+    async def _dm_credentials(self, request: dict, changed: str, username: str, password: str) -> None:
+        submitter = await self._fetch_submitter(request.get("discord_id", ""))
+        if submitter is None:
+            return
+        note = ("Your **username** was changed. Your old character stays with the old name, "
+                "so you'll start a new one." if changed == "username"
+                else "Your **password** was changed.")
+        await self._dm_submitter(submitter, discord.Embed(
+            title="\U0001f511 PZ Tambayan login updated",
+            description=f"{note}\n\n- **Username:** `{username}`\n- **Password:** `{password}`",
+            colour=discord.Colour.blurple(),
+        ))
 
     # ---- commands ------------------------------------------------------------
 
