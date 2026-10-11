@@ -45,6 +45,13 @@ def test_steamid_mismatch_admin_and_banned():
     assert "Admin" in f["Server whitelist"] and "Banned" in f["Server whitelist"]
 
 
+def test_unbound_steamid_before_and_after_first_login():
+    never = _fields(account={"username": "Chippy", "steamid": "", "role": 2, "lastConnection": None})
+    assert "not bound yet (PZ binds it at the first login)" in never["Server whitelist"]
+    played = _fields(account={"username": "Chippy", "steamid": "", "role": 2, "lastConnection": 1790000000})
+    assert "\u26a0\ufe0f not bound" in played["Server whitelist"]
+
+
 def test_pending_and_denied_requests():
     assert _fields(request={**REQ, "isWhitelisted": "false"})["Request"] == "⏳ Pending"
     assert "spam" in _fields(request={**REQ, "isWhitelisted": "false", "Notes": "spam"})["Request"]

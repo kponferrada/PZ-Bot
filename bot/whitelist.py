@@ -138,7 +138,10 @@ def account_status_fields(request: dict, account: dict | None, server_online: bo
         if sid:
             lines.append(f"SteamID `{sid}`" + ("" if not want or sid == want else f" (request has `{want}`)"))
         else:
-            lines.append("SteamID: not bound")
+            never = "lastConnection" in account and _fmt_last_connection(account.get("lastConnection")) == "never"
+            # PZ fills the whitelist row's SteamID at the account's first login.
+            lines.append("SteamID: not bound yet (PZ binds it at the first login)" if never
+                         else "SteamID: \u26a0\ufe0f not bound")
         role = account.get("role")
         if str(role).isdigit():
             lines.append("Access: " + ("Admin" if int(role) >= 7 else f"Player (level {role})"))
@@ -707,6 +710,9 @@ class WhitelistCog(commands.Cog):
             cmd2 = f'addSteamID "{s}"'
             cmds.append(cmd2)
             resp2 = await rcon.send_command(cmd2)
+            # Logged raw: the server's whitelist row only gets its SteamID at the
+            # account's first login, so this reply is the only trace of the call.
+            print(f"[Whitelist] addSteamID {s} -> {resp2!r} (error: {rcon.last_error or '-'})")
             if resp2 is not None:
                 low2 = resp2.lower()
                 if "already" in low2 or "exist" in low2:
