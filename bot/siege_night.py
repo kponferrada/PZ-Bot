@@ -25,6 +25,7 @@ command file. Discord interactions expire after 3s, so we must acknowledge
 immediately and use followup.send for the actual reply.
 """
 
+import time
 
 import discord
 from discord import app_commands
@@ -33,6 +34,42 @@ from discord.ext import commands, tasks
 import lua_bridge
 from game_calendar import siege_date_string
 from checks import admin_only
+
+# The bridge can write the first "active" status before Siege Night has set
+# the siege's targetZombies (it read 0 on the first poll). Hold the "begun"
+# notice this long for a real target, then post it without the number.
+_START_WAIT_SECONDS = 60
+
+
+def _int(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def siege_target(siege: dict, waves: dict, wave_count: int) -> int:
+    """The siege's zombie target: `targetZombies`, else the sum of the wave
+    records' `expected` counts when every wave has one, else 0 (unknown)."""
+    target = _int((siege or {}).get("targetZombies"))
+    if target > 0:
+        return target
+    expected = [_int(((waves or {}).get(f"wave{i}") or {}).get("expected"))
+                for i in range(1, _int(wave_count) + 1)]
+    return sum(expected) if expected and all(expected) else 0
+
+
+def start_description(target: int, players: int, direction: str, wave_count: int) -> str:
+    """Body of the "Siege Night Has Begun!" embed (target 0 = not known yet)."""
+    who = f"**{players}** survivor(s)"
+    desc = (f"**{target}** zombies are descending on {who}." if target > 0
+            else f"The horde is descending on {who}.")
+    if direction:
+        desc += f"\nHorde direction: **{direction}**."
+    if wave_count:
+        desc += f"\n**{wave_count}** surge waves incoming."
+    return desc + "\n\nHold the line."
+
 
 # Siege Night's `lastDirection` index -> compass name (matches SN.DIR_NAMES).
 _DIR_NAMES = ("North", "Northeast", "East", "Southeast",
@@ -59,6 +96,7 @@ class SiegeNightCog(commands.Cog):
         self._announced_ended_sieges: set[int] = set()   # totalSiegesCompleted
         self._announced_session: str | None = None       # sessionId of the announced siege
         self._announced_waves: set[int] = set()          # wave numbers already announced
+        self._active_seen_at: float | None = None        # monotonic time this siege was first seen active
         self._last_poller_key = None
 
     @staticmethod
@@ -127,7 +165,6 @@ class SiegeNightCog(commands.Cog):
                     print(f"[SiegeNight] Siege tonight announced: day {event_day}")
 
             elif phase == "active":
-                target = siege.get("targetZombies", 0)
                 players = sched.get("playerCount", 0)
                 direction = _direction_name(siege.get("lastDirection"))
                 cur_phase = siege.get("currentPhase", "")
@@ -142,21 +179,24 @@ class SiegeNightCog(commands.Cog):
                 if session_id and session_id != self._announced_session:
                     self._announced_session = session_id
                     self._active_announced = False
+                    self._active_seen_at = None
                     self._announced_waves.clear()
                     # Seed waves already started so we don't retro-announce them.
                     cur = waves.get("currentWave", 0) or siege.get("currentWaveIndex", 0)
                     for i in range(1, int(cur) + 1):
                         self._announced_waves.add(i)
 
-                # Start notification — fires once per siege.
-                if not self._active_announced:
+                target = siege_target(siege, waves, wave_count)
+                if self._active_seen_at is None:
+                    self._active_seen_at = time.monotonic()
+                waiting_for_target = (not target and
+                                      time.monotonic() - self._active_seen_at < _START_WAIT_SECONDS)
+
+                # Start notification — fires once per siege, once the target is known
+                # (or after _START_WAIT_SECONDS without one).
+                if not self._active_announced and not waiting_for_target:
                     self._active_announced = True
-                    desc = f"**{target}** zombies are descending on **{players}** survivor(s)."
-                    if direction:
-                        desc += f"\nHorde direction: **{direction}**."
-                    if wave_count:
-                        desc += f"\n**{wave_count}** surge waves incoming."
-                    desc += "\n\nHold the line."
+                    desc = start_description(target, players, direction, wave_count)
                     embed = discord.Embed(
                         title="\U0001f9df Siege Night Has Begun!",
                         description=desc,
@@ -183,7 +223,7 @@ class SiegeNightCog(commands.Cog):
 
                 # Per-wave notifications — driven by the wave records (wave 2+; wave 1
                 # is covered by the "begun" embed above).
-                for i in range(1, wave_count + 1):
+                for i in range(1, wave_count + 1 if self._active_announced else 1):
                     wrec = waves.get(f"wave{i}")
                     if not wrec or i in self._announced_waves:
                         continue
@@ -223,6 +263,7 @@ class SiegeNightCog(commands.Cog):
                 # Reset per-siege tracking once the siege is no longer active, so the
                 # next siege's start and waves are announced again.
                 self._active_announced = False
+                self._active_seen_at = None
                 # "Ended" fires once when the completed count increments past
                 # what we've already announced.
                 if completed and completed not in self._announced_ended_sieges:
@@ -330,11 +371,12 @@ class SiegeNightCog(commands.Cog):
 
         if phase == "active":
             state = "\U0001f534 **ACTIVE** — Siege in progress"
-            target = siege.get("targetZombies", 0)
             kills = siege.get("killsThisSiege", 0)
             spawned = siege.get("spawnedThisSiege", 0)
-            state += f"\n\U0001f9df Spawned: **{spawned}** | Kills: **{kills}** | Target: **{target}**"
             wave_count = waves.get("waveCount", 0) or siege.get("totalWaves", 0)
+            target = siege_target(siege, waves, wave_count)
+            state += (f"\n\U0001f9df Spawned: **{spawned}** | Kills: **{kills}** | "
+                      f"Target: **{target if target else 'not set yet'}**")
             cur = waves.get("currentWave", 0) or siege.get("currentWaveIndex", 0)
             if wave_count:
                 state += f"\n\U0001f30a Wave: **{cur}/{wave_count}**"
