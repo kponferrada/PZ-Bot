@@ -8,7 +8,7 @@ workspace vault (`vault/projects/pz-bot/`, `../../vault/` from this repo), not i
 ## Repo rules
 
 - Branches: work on **`develop`**. `main` takes merges for releases; tags are `vX.Y.Z` (README → Releases).
-- Commit locally as `Keym <keym@localhost>` with conventional messages (`feat(scope): …`, `fix(scope): …`, `docs: …`). **Never push or tag unless the user asks.** The live VPS deploys from GitHub.
+- Commit as `Keym <keymart.ponferrada@gmail.com>` (the GitHub account's email, so commits count as the user's; older commits used `keym@localhost`) with conventional messages (`feat(scope): …`, `fix(scope): …`, `docs: …`). **Never push or tag unless the user asks.** The live VPS deploys from GitHub.
 - Secrets: `bot/config.env`, `bot/config live.env`, `bot/config test.env` exist locally and are gitignored. Do not read, print or commit them. Change config keys in `bot/config.env.example`.
 - Runtime state files in `bot/` (`players.db`, `feature_state.json`, `deaths.json`, `whitelist_requests.csv`, `mod_update_state.json`, `dashboard_assets.json`, `status_card.png`, `jeeves.lock`) are gitignored. `rank_links.json` is the exception: it is tracked even though it is runtime data.
 - Keep one user doc (README.md) and this file. Don't add planning or review docs to the repo; put them in the vault.
