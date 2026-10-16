@@ -35,7 +35,7 @@ on boot.
 | Server up / restarting / down banners | `main.py` (`monitor_server_state`) | RCON | `server_up_down` |
 | In-game ↔ Discord chat relay | `chat_relay.py` | Jeeve's Integration | `chat_relay` |
 | In-game name colours from the Barangay Tales reputation ladder (or Discord roles) | `rank_sync.py`, `bt_progression.py` | Jeeve's Integration, Barangay Tales | — |
-| Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + `siege-night-bridge` | `siege_night` |
+| Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
 | Airdrop / supply-event notices and triggers | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
@@ -189,6 +189,7 @@ the ladder rank too. `RANK_SOURCE=roles` restores the old role-based ranks.
 - **RCON:** `RCONPort` and `RCONPassword` in the server `.ini`. On Indifferent Broccoli the RCON port is the game port + 1.
 - **SFTP:** read and **write** on `Lua/` (bridge features), read on `Logs/`, `Server/`, `db/` and the Workshop folder. Without write access only the read-only features work (dashboard, tracking, roster).
 - **Mods:** install the ones for the features you want (see the Features table).
+- **Siege Night:** BLib Admin's Siege Night bot bridge replaces the `siege-night-bridge` mod; turn that mod off (while it is on, BLib's bridge stays off). `/siegestart`, `/siegestop` and `/siegeschedule` then show the server's answer: done, or why not (a siege already running, nobody online, a past day, ...). Each command is checked on the server and kept in BLib's staff log under the Discord name.
 
 Indifferent Broccoli layout:
 

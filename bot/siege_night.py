@@ -2,8 +2,9 @@
 siege_night.py — Discord bot cog for "Siege Night" (Workshop 3669589584).
 
 Provides /siegestatus, /siegestart, /siegestop, and /siegeschedule slash
-commands that write commands via the unified lua_bridge module, which the
-`siege-night-bridge` companion mod reads.
+commands that write commands via the unified lua_bridge module, which BLib
+Admin's Siege Night bridge reads and answers (the older `siege-night-bridge`
+mod reads the same files but never answers).
 
 Also runs a background task that polls siege_night_status.txt written by the
 companion mod, and sends Discord notifications at three key siege phases:
@@ -48,6 +49,58 @@ def _direction_name(direction):
     if d < 0 or d >= len(_DIR_NAMES):
         return None
     return _DIR_NAMES[d]
+
+
+# What each refusal code from BLib's bridge means for the person who asked.
+_REFUSALS = {
+    "already_active": "A siege is already running.",
+    "not_active": "No siege is running.",
+    "not_idle": "A siege is coming tonight or running; schedule once it is over.",
+    "no_players": "Nobody is online; Siege Night builds a siege around players.",
+    "disabled": "Siege Night is turned off in the server's sandbox options.",
+    "unavailable": "Siege Night has no world data yet; try again in a minute.",
+    "past_day": "That day has already passed.",
+    "too_far": "That day is too far ahead (at most a year).",
+    "rate_limited": "Too many siege commands; wait a minute.",
+    "stale": "The command reached the server too late and was dropped.",
+}
+
+_ACTIONS = {
+    "start": ("\U0001f6e1\ufe0f Siege Night Started!", "start the siege"),
+    "stop": ("\U0001f6d1 Siege Stopped", "stop the siege"),
+    "schedule": ("\U0001f4c5 Siege Day Changed", "change the siege day"),
+}
+
+
+def bridge_line(bridge: dict | None) -> str:
+    """Which mod answers siege commands, for /siegestatus."""
+    if not bridge:
+        return "Bridge: old Siege Night Bridge mod (commands get no answer)"
+    owner = bridge.get("owner") or "?"
+    blib = bridge.get("blib") or "?"
+    return f"Bridge: BLib {blib} ({owner}), protocol {bridge.get('protocol', '?')}"
+
+
+def describe_siege_outcome(action: str, outcome: dict, user: str) -> tuple[str, str, bool | None]:
+    """(title, description, ok) for a command's outcome; ok None = no answer."""
+    title, verb = _ACTIONS.get(action, ("Siege Night", "send the command"))
+    outcome = outcome or {}
+    if not outcome.get("sent"):
+        return (f"Could not {verb}",
+                "Could not write the command file. Check SFTP and lua_bridge initialization.", False)
+    result = outcome.get("result")
+    if result is None:
+        return ("\u23f3 Command Sent",
+                f"Sent by **{user}**, but the server didn't answer. If BLib Admin's Siege Night "
+                "bridge is on it may be busy or down; the old Siege Night Bridge mod never answers.",
+                None)
+    message = str(result.get("message") or "")
+    if result.get("ok"):
+        return (title, f"By **{user}**\n\n{message}".rstrip(), True)
+    code = str(result.get("code") or "error")
+    reason = _REFUSALS.get(code, message or code)
+    detail = f"\n\n`{code}`: {message}" if message and reason != message else ""
+    return (f"Could not {verb}", reason + detail, False)
 
 
 class SiegeNightCog(commands.Cog):
@@ -358,6 +411,7 @@ class SiegeNightCog(commands.Cog):
             f"\U0001f4c5 Current Day: **{event_day}**",
             next_line,
             f"\U0001f4ca Sieges Completed: **{completed}**",
+            bridge_line(lua_bridge.siege_bridge_info(status)),
         ]
 
         await interaction.followup.send(embed=discord.Embed(
@@ -366,53 +420,30 @@ class SiegeNightCog(commands.Cog):
             colour=discord.Colour.red() if phase == "active" else discord.Colour.blue(),
         ))
 
-    # ── /siegestart ─────────────────────────────────────────────────────
+    # ── /siegestart, /siegestop, /siegeschedule ─────────────────────────
+    # BLib's bridge (blib-admin) checks every command against Siege Night's
+    # state, logs it in BLib's staff log under the Discord name, and answers;
+    # the reply shows that answer. The old bridge mod never answers.
+
+    async def _send_outcome(self, interaction: discord.Interaction, action: str, outcome: dict) -> None:
+        title, desc, ok = describe_siege_outcome(action, outcome, interaction.user.display_name)
+        colour = discord.Colour.green() if ok else (discord.Colour.red() if ok is False else discord.Colour.orange())
+        await interaction.followup.send(embed=discord.Embed(title=title, description=desc, colour=colour),
+                                        ephemeral=ok is False)
 
     @app_commands.command(name="siegestart", description="Force a siege night to start immediately.")
     @admin_only()
     async def cmd_siegestart(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-
-        success = await lua_bridge.siege_start()
-        if success:
-            await interaction.followup.send(embed=discord.Embed(
-                title="\U0001f6e1\ufe0f Siege Night Started!",
-                description=(
-                    f"Triggered by **{interaction.user.display_name}**\n\n"
-                    "A siege night has been forced. Zombies will begin "
-                    "spawning against the players **now**."
-                ),
-                colour=discord.Colour.red(),
-            ))
-        else:
-            await interaction.followup.send(embed=discord.Embed(
-                title="Failed to schedule siege",
-                description="Could not write the command file. Check lua_bridge initialization.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-
-    # ── /siegestop ──────────────────────────────────────────────────────
+        outcome = await lua_bridge.siege_start(by=interaction.user.display_name, by_id=str(interaction.user.id))
+        await self._send_outcome(interaction, "start", outcome)
 
     @app_commands.command(name="siegestop", description="Stop the currently active siege night.")
     @admin_only()
     async def cmd_siegestop(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-
-        success = await lua_bridge.siege_stop()
-        if success:
-            await interaction.followup.send(embed=discord.Embed(
-                title="\U0001f6d1 Siege Stopped",
-                description=f"Stop requested by **{interaction.user.display_name}**",
-                colour=discord.Colour.green(),
-            ))
-        else:
-            await interaction.followup.send(embed=discord.Embed(
-                title="Failed to stop siege",
-                description="Could not write the command file.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
-
-    # ── /siegeschedule ──────────────────────────────────────────────────
+        outcome = await lua_bridge.siege_stop(by=interaction.user.display_name, by_id=str(interaction.user.id))
+        await self._send_outcome(interaction, "stop", outcome)
 
     @app_commands.command(name="siegeschedule", description="Change the next siege night to a specific world day.")
     @app_commands.describe(day="The world day number to schedule the next siege on")
@@ -427,23 +458,9 @@ class SiegeNightCog(commands.Cog):
             return
 
         await interaction.response.defer()
-
-        success = await lua_bridge.siege_schedule(day)
-        if success:
-            await interaction.followup.send(embed=discord.Embed(
-                title="\U0001f4c5 Siege Day Changed",
-                description=(
-                    f"Changed by **{interaction.user.display_name}**\n\n"
-                    f"Next siege night rescheduled to **day {day}**."
-                ),
-                colour=discord.Colour.blue(),
-            ))
-        else:
-            await interaction.followup.send(embed=discord.Embed(
-                title="Failed to change siege day",
-                description="Could not write the command file. Check lua_bridge initialization.",
-                colour=discord.Colour.red(),
-            ), ephemeral=True)
+        outcome = await lua_bridge.siege_schedule(day, by=interaction.user.display_name,
+                                                  by_id=str(interaction.user.id))
+        await self._send_outcome(interaction, "schedule", outcome)
 
 
 async def setup(bot: commands.Bot) -> None:
