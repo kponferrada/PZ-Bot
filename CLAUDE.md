@@ -2,13 +2,13 @@
 
 Read this before changing the bot. User-facing setup, commands, config and the
 release process are in [`README.md`](README.md). Do not repeat them here: update
-the README instead. Open issues and decisions are tracked in the Hermes vault
-(`D:\Dev\main\hermes-agent\secondary-brain\projects\pz-bot\`), not in this repo.
+the README instead. Open issues and decisions are tracked in the pz-modding
+workspace vault (`vault/projects/pz-bot/`, `../../vault/` from this repo), not in this repo.
 
 ## Repo rules
 
 - Branches: work on **`develop`**. `main` takes merges for releases; tags are `vX.Y.Z` (README → Releases).
-- Commit locally as `Keym <keym@localhost>` with conventional messages (`feat(scope): …`, `fix(scope): …`, `docs: …`). **Never push or tag unless the user asks.** The live VPS deploys from GitHub.
+- Commit as `Keym <keymart.ponferrada@gmail.com>` (the GitHub account's email, so commits count as the user's; older commits used `keym@localhost`) with conventional messages (`feat(scope): …`, `fix(scope): …`, `docs: …`). **Never push or tag unless the user asks.** The live VPS deploys from GitHub.
 - Secrets: `bot/config.env`, `bot/config live.env`, `bot/config test.env` exist locally and are gitignored. Do not read, print or commit them. Change config keys in `bot/config.env.example`.
 - Runtime state files in `bot/` (`players.db`, `feature_state.json`, `deaths.json`, `whitelist_requests.csv`, `mod_update_state.json`, `dashboard_assets.json`, `status_card.png`, `jeeves.lock`) are gitignored. `rank_links.json` is the exception: it is tracked even though it is runtime data.
 - Keep one user doc (README.md) and this file. Don't add planning or review docs to the repo; put them in the vault.
@@ -39,6 +39,7 @@ which checks you ran and which you could not.
   - bot → mod commands: `jeeves_commands.txt`, `jeeves_chat.txt`, `siege_night_commands.txt`. These are Lua tables (`return { command=…, id=…, … }`) built by `_build_lua_table`. Non-ASCII text is written as `\ddd` byte escapes because the game misreads multibyte text.
   - Handshake: before writing, the bridge waits up to 5 s for the mod to **empty** the previous file (the mod "deletes" a file by truncating it). Each file has its own lock and an id counter that resets when the bot restarts.
   - mod → bot status files: `jeeves_world_status.txt`, `jeeves_drops_status.txt`, `jeeves_supply_event_status.txt`, `siege_night_status.txt` (nested tables, parsed by `_parse_lua_nested`).
+  - Siege Night (protocol 2, BLib Admin): `siege_command` adds `protocol`, `by` (Discord name) and `byId` to the command and waits up to 12 s for BLib's answer in the status file's `bridge.results`, matched on id **and** the command's own timestamp (ids restart with the bot). No answer = the old `siege-night-bridge` mod (it never answers) or the server is down. `tests/fixtures/siege_night_status_blib.txt` is a real BLib status file (`mods/blib/tools/dump_siege_status.lua`); regenerate it when the format changes.
   - Files are `.txt` because Build 42.20 limits the extensions `getFileWriter` accepts. `rank_sync` writes `jeeves_ranks.lua` directly.
 - Tailed files (2 s loops): `Logs/*_user.txt` (player_tracker, newest file), `Logs/*_chat.txt` (chat_relay), `Lua/player-death-logging.log` (death_log), `Lua/JamiesFortune_JackpotLog.txt` (jamies_fortune). On startup the tailers skip existing content, so events that happen while the bot is down are lost. When the logs rotate (new server session) the new file is read from its start. Tailers keep a trailing partial line in a buffer, and `sftp.tail` never splits a UTF-8 character. player_tracker and chat_relay re-list `Logs/` every 10 s (`_RESCAN_SECONDS`) and only `stat` the known file in between; `newest_matching` is a single `readdir`.
 - Data sources: Aegis Panel's `Lua/Aegis/Player/stats.txt` is the source of truth for kills, deaths and playtime (`aegis_stats`, cached briefly). The local `players.db` (SQLite) only records sessions and who is "known". It is seeded from Aegis, falling back to the server's `db/pzserver.db`. `deaths.json` keeps per-death timestamps for the today/this-week counts, using Philippine time (UTC+8).
@@ -60,8 +61,8 @@ The bot is one side of file protocols owned by other repos in
 
 | Contract | Other side |
 |---|---|
-| `siege_night_status.txt` / `siege_night_commands.txt` | `siege-night-bridge` (vault: *siege-night-bridge File Protocol*) |
-| `player-death-logging.log` block format | `player-death-logging-b42` (vault: *player-death-logging-b42 Log Format*) |
+| `siege_night_status.txt` / `siege_night_commands.txt` | BLib Admin's Siege Night bridge on `BLib.BotBridge` (`mods/blib`, BLib 0.8+); before: `siege-night-bridge`, superseded (vault: *BLib Bot Bridge protocol*) |
+| `player-death-logging.log` block format | BLib Admin's death log (`Deaths.lua`, sandbox `WriteLegacyDeathLog`); before: `player-death-logging-b42` (vault: *player-death-logging-b42 Log Format*) |
 | `jeeves_*` files | Jeeve's Integration / Jeeve's Drops (Workshop, not local) |
 | `Aegis/Player/stats.txt` | Aegis Panel (Workshop, not local) |
 | `JamiesFortune_JackpotLog.txt` | Jamie's Fortune (Workshop, not local) |

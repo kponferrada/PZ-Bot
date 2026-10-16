@@ -89,12 +89,12 @@ def _escape_lua_string(s: str) -> str:
     return "".join(out)
 
 
-def _build_lua_table(command: str, cmd_id: int, **kwargs) -> str:
+def _build_lua_table(command: str, cmd_id: int, timestamp: int | None = None, **kwargs) -> str:
     lines = [
         "return {",
         f'    command = "{_escape_lua_string(command)}",',
         f"    id = {cmd_id},",
-        f"    timestamp = {int(time.time())},",
+        f"    timestamp = {int(time.time()) if timestamp is None else int(timestamp)},",
     ]
     for key, value in kwargs.items():
         if value is None:
@@ -177,27 +177,84 @@ async def rank_push() -> bool:
     return await write_command("rankpush")
 
 
-async def write_siege_command(command: str, **kwargs) -> bool:
+# Siege Night commands go to BLib's bridge (blib-admin, BLib 0.8+), which
+# answers each one in the status file's `bridge.results` (protocol 2). The old
+# standalone siege-night-bridge mod reads the same file but never answers.
+SIEGE_PROTOCOL = 2
+SIEGE_RESULT_WAIT = 12.0      # seconds: one 2 s poll + the status write, with slack
+
+
+def siege_bridge_info(status: dict | None) -> dict | None:
+    """The status file's `bridge` section (BLib's bridge), or None (old mod / no file)."""
+    bridge = (status or {}).get("bridge")
+    return bridge if isinstance(bridge, dict) else None
+
+
+def find_siege_result(status: dict | None, cmd_id: int, sent: int) -> dict | None:
+    """The bridge's answer to our command, matched on id AND our timestamp.
+
+    Ids restart at 1 when the bot restarts, so the id alone could match an
+    answer to an older command; `sent` is the command's own timestamp echoed back.
+    """
+    bridge = siege_bridge_info(status)
+    results = bridge.get("results") if bridge else None
+    if not isinstance(results, dict):
+        return None
+    for key in sorted(results, key=lambda k: int(k[1:]) if k[1:].isdigit() else 0):
+        r = results[key]
+        if isinstance(r, dict) and r.get("id") == cmd_id and r.get("sent") == sent:
+            return r
+    return None
+
+
+async def write_siege_command(command: str, by: str | None = None, by_id: str | None = None,
+                              **kwargs) -> tuple[int, int] | None:
+    """Write a Siege Night command; returns (id, timestamp) once written, else None."""
     if _lua_dir is None:
         print("[LuaBridge] ERROR: Not initialized! Call lua_bridge.init(bot) first.")
-        return False
+        return None
     global _siege_command_id
     _siege_command_id += 1
-    content = _build_lua_table(command, _siege_command_id, **kwargs)
-    return await _write_file(_path(SIEGE_COMMAND_FILE), _siege_write_lock, content,
-                             f"siege command '{command}' (id={_siege_command_id})")
+    cmd_id, sent = _siege_command_id, int(time.time())
+    content = _build_lua_table(command, cmd_id, timestamp=sent, protocol=SIEGE_PROTOCOL,
+                               by=(by or None) and by[:64], byId=by_id, **kwargs)
+    ok = await _write_file(_path(SIEGE_COMMAND_FILE), _siege_write_lock, content,
+                           f"siege command '{command}' (id={cmd_id})")
+    return (cmd_id, sent) if ok else None
 
 
-async def siege_start() -> bool:
-    return await write_siege_command("siegestart")
+async def siege_command(command: str, by: str | None = None, by_id: str | None = None,
+                        wait: float = SIEGE_RESULT_WAIT, **kwargs) -> dict:
+    """Send a Siege Night command and wait for BLib's answer.
+
+    Returns {"sent": bool, "result": dict | None, "bridge": dict | None}.
+    `result` is None when nothing answered in time: the old bridge mod (it
+    never answers), or the server is down / busy.
+    """
+    written = await write_siege_command(command, by=by, by_id=by_id, **kwargs)
+    if not written:
+        return {"sent": False, "result": None, "bridge": None}
+    cmd_id, sent = written
+    status = None
+    deadline = time.monotonic() + wait
+    while True:
+        status = await read_siege_status()
+        result = find_siege_result(status, cmd_id, sent)
+        if result is not None or time.monotonic() >= deadline:
+            return {"sent": True, "result": result, "bridge": siege_bridge_info(status)}
+        await asyncio.sleep(1.5)
 
 
-async def siege_stop() -> bool:
-    return await write_siege_command("siegestop")
+async def siege_start(by: str | None = None, by_id: str | None = None) -> dict:
+    return await siege_command("siegestart", by=by, by_id=by_id)
 
 
-async def siege_schedule(day: int) -> bool:
-    return await write_siege_command("siegeschedule", targetDay=day)
+async def siege_stop(by: str | None = None, by_id: str | None = None) -> dict:
+    return await siege_command("siegestop", by=by, by_id=by_id)
+
+
+async def siege_schedule(day: int, by: str | None = None, by_id: str | None = None) -> dict:
+    return await siege_command("siegeschedule", by=by, by_id=by_id, targetDay=day)
 
 
 async def airdrop(target_player: str | None = None, crate_type: str | None = None) -> bool:
