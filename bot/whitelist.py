@@ -4,7 +4,10 @@ Flow:
   1. An admin runs `/whitelistsetup`, which posts a persistent "Apply for
      Whitelist" button into the whitelist channel (WHITELIST_CHANNEL_ID).
   2. A user clicks the button → a modal opens asking for username, password,
-     SteamID and whether they want character lore.
+     SteamID and whether they want character lore. One pending request per
+     requester: while theirs waits for staff (not approved, no deny / delete
+     note), the button says so instead of opening the form, and a form sent
+     anyway (opened before) is refused with the same note, not saved.
   3. On submit the request is appended to a CSV on the bot host and forwarded to
      the approval channel (WHITELIST_APPROVAL_CHANNEL_ID) with Approve/Deny
      buttons.
@@ -166,6 +169,42 @@ def account_status_fields(request: dict, account: dict | None, server_online: bo
     return rows
 
 
+def is_pending(row: dict) -> bool:
+    """A request still waiting for staff: not whitelisted and no decision note
+    (deny / delete write their reason into Notes)."""
+    whitelisted = (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
+    return not whitelisted and not (row.get("Notes", "") or "").strip()
+
+
+def find_pending_request(rows: list, discord_id: str, discord_name: str = "") -> dict | None:
+    """The requester's request that is still pending, newest first, or None.
+    Matched on the Discord id; rows from before `discord_id` was stored fall
+    back to the Discord username."""
+    discord_id = str(discord_id or "")
+    for row in reversed(rows):
+        if not is_pending(row):
+            continue
+        rid = (row.get("discord_id", "") or "").strip()
+        if rid:
+            if rid == discord_id:
+                return row
+        elif discord_name and (row.get("Discord Username", "") or "").strip() == discord_name:
+            return row
+    return None
+
+
+def pending_message(row: dict) -> str:
+    """What a requester is told when they already have a request waiting."""
+    when = (row.get("Timestamp", "") or "").strip()
+    name = (row.get("Username", "") or "").strip()
+    detail = ", ".join(p for p in (f"sent {when}" if when else "",
+                                   f"username `{name}`" if name else "") if p)
+    return ("⏳ Your whitelist request is still pending approval"
+            + (f" ({detail})" if detail else "")
+            + ". Please wait for staff to review it; you'll get a DM once it's decided. "
+              "You can't send another request until then.")
+
+
 class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
     """The form a user fills in to request whitelist access."""
 
@@ -226,6 +265,11 @@ class WhitelistView(discord.ui.View):
         custom_id=_APPLY_CUSTOM_ID,
     )
     async def apply_button(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        # One pending request per requester: say it's still waiting instead of the form.
+        pending = self.cog.pending_request_for(interaction.user)
+        if pending is not None:
+            await interaction.response.send_message(pending_message(pending), ephemeral=True)
+            return
         await interaction.response.send_modal(WhitelistModal(self.cog))
 
 
@@ -406,6 +450,8 @@ class WhitelistCog(commands.Cog):
             self._csv_path = Path(__file__).parent / self._csv_path
 
         self._migrate_csv()
+        # Serialises "is one pending? -> save" so two forms sent at once save one request.
+        self._submit_lock = asyncio.Lock()
 
         # Persistent "Apply" view — re-registered on every startup so the button
         # keeps working across restarts (the message itself persists in Discord).
@@ -539,11 +585,10 @@ class WhitelistCog(commands.Cog):
             if not rid:
                 continue
             whitelisted = (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
-            notes = (row.get("Notes", "") or "").strip()
             if whitelisted:
                 self.bot.add_view(WhitelistManageView(self, rid))
                 approved += 1
-            elif not notes:
+            elif is_pending(row):
                 self.bot.add_view(WhitelistApprovalView(self, rid))
                 pending += 1
         if pending or approved:
@@ -897,7 +942,24 @@ class WhitelistCog(commands.Cog):
     async def handle_request(self, interaction: discord.Interaction,
                              username: str, password: str, steam_id: str,
                              character_lore: str = "false") -> None:
-        """Persist the request to CSV and forward it to the approval channel."""
+        """Persist the request to CSV and forward it to the approval channel.
+        Refused while the requester has a request pending (the form may have
+        been opened before the first one was sent)."""
+        user = interaction.user
+        async with self._submit_lock:
+            pending = self.pending_request_for(user)
+            if pending is not None:
+                await interaction.response.send_message(pending_message(pending), ephemeral=True)
+                print(f"[Whitelist] Request from {user} refused: one is still pending.")
+                return
+            await self._save_request(interaction, username, password, steam_id, character_lore)
+
+    def pending_request_for(self, user) -> dict | None:
+        """The user's whitelist request still waiting for staff, or None."""
+        return find_pending_request(self._read_csv(), str(getattr(user, "id", "")), str(user))
+
+    async def _save_request(self, interaction: discord.Interaction, username: str, password: str,
+                            steam_id: str, character_lore: str) -> None:
         now = datetime.datetime.now(datetime.timezone.utc)
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         user = interaction.user

@@ -87,6 +87,10 @@ that expires) use one sequence:
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
 
+### One pending request at a time
+
+While a requester's whitelist request is waiting for staff (not approved, denied or deleted yet), **Apply for Whitelist** doesn't open the form: it tells them privately that their request (when it was sent, and the username) is still pending approval, and that they'll get a DM once it's decided. A form opened before the first one was sent is refused with the same note and isn't saved. Once staff approve, deny or delete the request, they can apply again. Admin commands (`/whitelistadd` and the rest) aren't limited.
+
 ### Whitelist card buttons
 
 Once a request is approved, its card in the approval channel has four admin buttons:
