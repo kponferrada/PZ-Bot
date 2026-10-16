@@ -2,8 +2,8 @@
 
 Read this before changing the bot. User-facing setup, commands, config and the
 release process are in [`README.md`](README.md). Do not repeat them here: update
-the README instead. Open issues and decisions are tracked in the Hermes vault
-(`D:\Dev\main\hermes-agent\secondary-brain\projects\pz-bot\`), not in this repo.
+the README instead. Open issues and decisions are tracked in the pz-modding
+workspace vault (`vault/projects/pz-bot/`, `../../vault/` from this repo), not in this repo.
 
 ## Repo rules
 
