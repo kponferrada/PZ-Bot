@@ -98,9 +98,11 @@ until the server goes down.
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
 
-### One pending request at a time
+### One account per Discord user
 
-While a requester's whitelist request is waiting for staff (not approved, denied or deleted yet), **Apply for Whitelist** doesn't open the form: it tells them privately that their request (when it was sent, and the username) is still pending approval, and that they'll get a DM once it's decided. A form opened before the first one was sent is refused with the same note and isn't saved. Once staff approve, deny or delete the request, they can apply again. Admin commands (`/whitelistadd` and the rest) aren't limited.
+Approving a request links the requester's Discord account to the approved username (as `/linkme` would). While a Discord account is linked, **Apply for Whitelist** doesn't open the form: it tells them privately which in-game account they're linked to and to ask an admin. A form opened before they were linked is refused the same way and isn't saved. If their account was deleted, reset or renamed, an admin runs `/unlinkname` and they can apply again. Old request rows (pending, denied or deleted) never block anyone. Admin commands (`/whitelistadd` and the rest) aren't limited.
+
+Note: players can still remove their own link with `/unlinkme`, which also lets them apply again.
 
 ### Whitelist card buttons
 
