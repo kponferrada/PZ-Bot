@@ -1,8 +1,9 @@
-"""whitelist: no new request while the requester's Discord account is linked.
-Approval links the requester (RankSync, as /linkme would). While linked, the
-Apply button says so instead of opening the form and a form sent anyway is
-refused (not saved); an admin's /unlinkname lets them apply again. Old CSV rows
-(a request deleted outside the card, a pending one) never block anyone.
+"""whitelist: no new request while the requester's Discord account is linked, or
+while a request of theirs is still pending (never acted on by staff).
+Approval links the requester (RankSync, as /linkme would). The Apply button and
+/whitelist say why instead of opening the form, and a form sent anyway is
+refused (not saved). An admin's /unlinkname or /whitelistcancel lets them apply
+again. Rows staff acted on (approved, denied, deleted) never block.
 Run from bot/:  python -m pytest tests
 """
 
@@ -14,7 +15,7 @@ import types
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import whitelist  # noqa: E402
-from whitelist import is_pending, linked_message  # noqa: E402
+from whitelist import is_pending, linked_message, pending_message  # noqa: E402
 
 
 class _RankSync:
@@ -98,14 +99,78 @@ def test_unlinked_requester_gets_the_form_and_can_submit(tmp_path):
     assert len(cog._read_csv()) == 1
 
 
-def test_a_stale_pending_row_no_longer_blocks(tmp_path):
-    """The reported case: a request deleted outside the card stays 'pending' in the CSV."""
+def test_a_pending_request_blocks_a_second_one(tmp_path):
+    cog = _cog(tmp_path, _RankSync())
+    juan = _User(42, "juan")
+    assert "submitted for review" in _submit(cog, juan).sent[0][0]
+    again = _submit(cog, juan)
+    assert "still pending approval" in again.sent[0][0] and again.sent[0][1] is True
+    assert len(cog._read_csv()) == 1, "the second request must not be saved"
+    r = _click(cog, juan)
+    assert not r.modals and "still pending approval" in r.sent[0][0]
+    # someone else can still apply
+    assert "submitted for review" in _submit(cog, _User(7, "pedro")).sent[0][0]
+
+
+def test_rows_staff_acted_on_never_block(tmp_path):
+    """The reported case: a deleted request must not read as pending - even a
+    deleted account whose reason came out blank keeps its approval record."""
     cog = _cog(tmp_path, _RankSync())
     juan = _User(42, "juan")
     _submit(cog, juan)
-    assert is_pending(cog._read_csv()[0])                     # still looks pending
+    rid = cog._read_csv()[0]["request_id"]
+    cog._update_csv_row(rid, {"isWhitelisted": "false", "Notes": "", "Code": "adduser ...",
+                              "Whitelisted By": "admin#1"})     # approved once, then deleted
+    assert not is_pending(cog._read_csv()[0])
     assert "submitted for review" in _submit(cog, juan).sent[0][0]
-    assert len(_click(cog, juan).modals) == 1
+    rid2 = cog._read_csv()[1]["request_id"]
+    cog._update_csv_row(rid2, {"Notes": "Denied: wrong SteamID"})
+    assert "submitted for review" in _submit(cog, juan).sent[0][0]
+
+
+def test_admin_cancel_clears_a_stuck_pending_request(tmp_path):
+    cog = _cog(tmp_path, _RankSync())
+    juan = _User(42, "juan")
+    _submit(cog, juan)
+    assert cog.cancel_pending(juan, "admin#1", "card was deleted") == 1
+    assert cog._read_csv()[0]["Notes"] == "Cancelled by admin#1: card was deleted"
+    assert cog.cancel_pending(juan, "admin#1") == 0
+    assert "submitted for review" in _submit(cog, juan).sent[0][0]
+
+
+def test_linked_wins_over_pending(tmp_path):
+    rank = _RankSync()
+    cog = _cog(tmp_path, rank)
+    juan = _User(42, "juan")
+    _submit(cog, juan)
+    rank.links["42"] = "JuanPZ"
+    assert "already linked" in cog.refusal_for(juan)
+
+
+def test_two_forms_sent_at_once_save_one(tmp_path):
+    cog = _cog(tmp_path, _RankSync())
+    juan = _User(42, "juan")
+
+    async def both():
+        a = types.SimpleNamespace(user=juan, response=_Response())
+        b = types.SimpleNamespace(user=juan, response=_Response())
+        await asyncio.gather(
+            cog.handle_request(a, username="Juan", password="pw", steam_id="76561198000000001"),
+            cog.handle_request(b, username="Juan", password="pw", steam_id="76561198000000001"))
+        return a.response.sent + b.response.sent
+
+    replies = [t for t, _e in asyncio.run(both())]
+    assert len(cog._read_csv()) == 1
+    assert sum("submitted for review" in t for t in replies) == 1
+    assert sum("still pending approval" in t for t in replies) == 1
+
+
+def test_whitelist_command_checks_too(tmp_path):
+    cog = _cog(tmp_path, _RankSync({"42": "JuanPZ"}))
+    inter = types.SimpleNamespace(user=_User(42, "juan"), response=_Response())
+    fn = getattr(whitelist.WhitelistCog.cmd_whitelist, "callback", whitelist.WhitelistCog.cmd_whitelist)
+    asyncio.run(fn(cog, inter))
+    assert not inter.response.modals and "already linked" in inter.response.sent[0][0]
 
 
 def test_admin_unlink_lets_them_apply_again(tmp_path):
@@ -131,9 +196,13 @@ def test_lookup_errors_dont_block(tmp_path):
     assert cog.linked_username_for(_User(42, "juan")) is None
 
 
-def test_pending_rule_still_used_for_the_cards():
-    row = {"isWhitelisted": "false", "Notes": ""}
+def test_pending_rule():
+    row = {"isWhitelisted": "false", "Notes": "", "Code": "", "Whitelisted By": ""}
     assert is_pending(row)
     assert not is_pending(dict(row, isWhitelisted="true"))
     assert not is_pending(dict(row, Notes="Denied: wrong SteamID"))
+    assert not is_pending(dict(row, Notes="   ", Code="adduser x"))    # blank reason, approved once
+    assert not is_pending(dict(row, **{"Whitelisted By": "admin#1"}))
     assert "**X**" in linked_message("X")
+    msg = pending_message({"Timestamp": "2026-10-17 01:00:00 UTC", "Username": "Juan"})
+    assert "still pending approval" in msg and "`Juan`" in msg

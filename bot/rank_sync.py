@@ -554,8 +554,11 @@ class RankSync(commands.Cog):
             colour=discord.Colour.blue(),
         ), ephemeral=True)
 
-    @app_commands.command(name="unlinkme", description="Remove your own Discord-to-PZ username link.")
+    # Admin-only (user, 2026-10-18): a link is what stops a second whitelist request,
+    # so only admins may remove one (account deleted, reset or renamed). Players ask an admin.
+    @app_commands.command(name="unlinkme", description="Remove your own Discord-to-PZ username link (admins only).")
     @app_commands.checks.cooldown(1, 60.0)
+    @admin_only()
     async def cmd_unlinkme(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         key = str(interaction.user.id)

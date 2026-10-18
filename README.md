@@ -58,7 +58,7 @@ Toggle keys are switched at runtime with `/enable` and `/disable` and listed by
 Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`).
 `/help` (admin) prints the same list in Discord.
 
-**Everyone:** `/myrank`, `/linkme`, `/unlinkme`, `/stats <username>`,
+**Everyone:** `/myrank`, `/linkme`, `/stats <username>`,
 `/leaderboard <kind>`, `/rpleaderboard [board] [limit]`, `/repboard [board] [period]`, `/features`, `/whitelist`.
 
 **Admin:**
@@ -71,7 +71,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
-| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove` |
+| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel` |
 | Features | `/enable <feature>`, `/disable <feature>` |
 
 ### Restart flow
@@ -98,11 +98,14 @@ until the server goes down.
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
 
-### One account per Discord user
+### One account per Discord user, one request at a time
 
-Approving a request links the requester's Discord account to the approved username (as `/linkme` would). While a Discord account is linked, **Apply for Whitelist** doesn't open the form: it tells them privately which in-game account they're linked to and to ask an admin. A form opened before they were linked is refused the same way and isn't saved. If their account was deleted, reset or renamed, an admin runs `/unlinkname` and they can apply again. Old request rows (pending, denied or deleted) never block anyone. Admin commands (`/whitelistadd` and the rest) aren't limited.
+**Apply for Whitelist** and `/whitelist` refuse, privately and with the reason, when:
 
-Note: players can still remove their own link with `/unlinkme`, which also lets them apply again.
+- **the Discord account is linked** to an in-game account (approving a request links the requester, as `/linkme` would). If that account was deleted, reset or renamed, an admin runs `/unlinkname`. Only admins can unlink: `/unlinkme` is admin-only;
+- **a request of theirs is still pending**: never acted on by staff (not approved, denied, deleted or cancelled). Rows staff acted on never block, including a deleted account whose reason was left blank. If a pending request should no longer count (for example its approval card was deleted), an admin runs `/whitelistcancel <member>`.
+
+A form opened before either became true is refused the same way and isn't saved. Admin commands (`/whitelistadd` and the rest) aren't limited.
 
 ### Whitelist card buttons
 
