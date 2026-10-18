@@ -206,3 +206,22 @@ def test_pending_rule():
     assert "**X**" in linked_message("X")
     msg = pending_message({"Timestamp": "2026-10-17 01:00:00 UTC", "Username": "Juan"})
     assert "still pending approval" in msg and "`Juan`" in msg
+
+
+def test_cancel_clears_an_old_row_without_ids(tmp_path):
+    """In Discord: an old request (2026-09-14, no request_id / discord_id) blocked the
+    requester, yet /whitelistcancel said there was none - it only updated rows with an id."""
+    import csv
+    cog = _cog(tmp_path, _RankSync())
+    with cog._csv_path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=whitelist._CSV_HEADERS)
+        w.writeheader()
+        w.writerow({"Timestamp": "2026-09-14T07:47:07.478404+00:00", "Username": "silver",
+                    "Discord Username": "silvast", "isWhitelisted": "false"})
+    silvast = _User(99, "silvast")
+    assert "still pending approval" in cog.refusal_for(silvast)
+    assert cog.cancel_pending(silvast, "admin#1") == 1
+    assert cog._read_csv()[0]["Notes"] == "Cancelled by admin#1"
+    assert cog._read_csv()[0]["Username"] == "silver"           # the rest of the row kept
+    assert cog.refusal_for(silvast) is None
+    assert "submitted for review" in _submit(cog, silvast).sent[0][0]

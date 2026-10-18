@@ -191,17 +191,19 @@ def find_pending_request(rows: list, discord_id: str, discord_name: str = "") ->
     """The requester's request still waiting for staff, newest first, or None.
     Matched on the Discord id; rows from before `discord_id` was stored fall
     back to the Discord username."""
-    discord_id = str(discord_id or "")
     for row in reversed(rows):
-        if not is_pending(row):
-            continue
-        rid = (row.get("discord_id", "") or "").strip()
-        if rid:
-            if rid == discord_id:
-                return row
-        elif discord_name and (row.get("Discord Username", "") or "").strip() == discord_name:
+        if is_pending(row) and request_belongs_to(row, discord_id, discord_name):
             return row
     return None
+
+
+def request_belongs_to(row: dict, discord_id, discord_name: str = "") -> bool:
+    """Is this request row this Discord user's? By `discord_id`; rows from before
+    it was stored (no id) by the Discord username."""
+    rid = (row.get("discord_id", "") or "").strip()
+    if rid:
+        return rid == str(discord_id or "")
+    return bool(discord_name) and (row.get("Discord Username", "") or "").strip() == discord_name
 
 
 def pending_message(row: dict) -> str:
@@ -557,7 +559,8 @@ class WhitelistCog(commands.Cog):
         self._csv_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with self._csv_path.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=_CSV_HEADERS)
+                # extrasaction="ignore": an old or hand-edited row's stray columns don't stop the write
+                writer = csv.DictWriter(fh, fieldnames=_CSV_HEADERS, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(rows)
         except OSError as e:
@@ -1435,17 +1438,17 @@ class WhitelistCog(commands.Cog):
 
     def cancel_pending(self, member, by: str, reason: str | None = None) -> int:
         """Mark every pending request of this member as cancelled (a Notes entry). -> how many."""
+        # Rows are changed in place and written back once: old rows (from before
+        # request ids were stored) have no `request_id` to update them by.
         note = f"Cancelled by {by}" + (f": {reason.strip()}" if reason and reason.strip() else "")
+        rows = self._read_csv()
         count = 0
-        while True:
-            row = find_pending_request(self._read_csv(), str(getattr(member, "id", "")), str(member))
-            if row is None or not row.get("request_id"):
-                break
-            self._update_csv_row(row["request_id"], {"Notes": note})
-            count += 1
-            if count > 50:
-                break
+        for row in rows:
+            if is_pending(row) and request_belongs_to(row, getattr(member, "id", ""), str(member)):
+                row["Notes"] = note
+                count += 1
         if count:
+            self._write_csv(rows)
             print(f"[Whitelist] {by} cancelled {count} pending request(s) from {member}.")
         return count
 
