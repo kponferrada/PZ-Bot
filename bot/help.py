@@ -36,7 +36,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/unlinkname <member>", "Remove a user's Discord-to-PZ link. [admin]"),
         ("/listlinks", "List all Discord-to-PZ username links. [admin]"),
         ("/linkme <username>", "Link your Discord account to your PZ username."),
-        ("/unlinkme", "Remove your own Discord-to-PZ link."),
+        ("/unlinkme", "Remove your own Discord-to-PZ link. [admin]"),
         ("/myrank", "Show your in-game rank and chat colour."),
     ],
     "📊 Stats & Leaderboards": [
@@ -52,6 +52,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/whitelistmodify <username> <steamid> [new…]", "Modify a whitelisted user's password/username/SteamID. [admin]"),
         ("/whitelistlist", "List all whitelisted users. [admin]"),
         ("/whitelistremove <username> [reason]", "Remove a user from the whitelist. [admin]"),
+        ("/whitelistcancel <member> [reason]", "Cancel a member's pending whitelist request so they can apply again. [admin]"),
     ],
     "🌙 Siege Night (Siege Night mod)": [
         ("/siegestatus", "Show current Siege Night status. [admin]"),

@@ -4,10 +4,14 @@ Flow:
   1. An admin runs `/whitelistsetup`, which posts a persistent "Apply for
      Whitelist" button into the whitelist channel (WHITELIST_CHANNEL_ID).
   2. A user clicks the button → a modal opens asking for username, password,
-     SteamID and whether they want character lore. One pending request per
-     requester: while theirs waits for staff (not approved, no deny / delete
-     note), the button says so instead of opening the form, and a form sent
-     anyway (opened before) is refused with the same note, not saved.
+     SteamID and whether they want character lore. A requester whose Discord
+     account is already linked to an in-game account (RankSync; approval links
+     them) can't apply again, and neither can one with a request still pending
+     (never acted on by staff): the button and /whitelist say so instead of
+     opening the form, and a form sent anyway (opened before) is refused, not
+     saved. An admin's /unlinkname (account deleted, reset or renamed) or
+     /whitelistcancel (a pending request that should no longer count) lets
+     them apply again.
   3. On submit the request is appended to a CSV on the bot host and forwarded to
      the approval channel (WHITELIST_APPROVAL_CHANNEL_ID) with Approve/Deny
      buttons.
@@ -173,14 +177,18 @@ def account_status_fields(request: dict, account: dict | None, server_online: bo
 
 
 def is_pending(row: dict) -> bool:
-    """A request still waiting for staff: not whitelisted and no decision note
-    (deny / delete write their reason into Notes)."""
-    whitelisted = (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
-    return not whitelisted and not (row.get("Notes", "") or "").strip()
+    """A request still waiting for staff: never acted on. Not whitelisted, no
+    decision note (deny / delete / cancel write one into Notes), and never
+    approved (approval records `Code` and `Whitelisted By`; a deleted account
+    keeps them, so it never reads as pending even with a blank reason)."""
+    def get(key):
+        return (row.get(key, "") or "").strip()
+    whitelisted = get("isWhitelisted").lower() == "true"
+    return not whitelisted and not get("Notes") and not get("Code") and not get("Whitelisted By")
 
 
 def find_pending_request(rows: list, discord_id: str, discord_name: str = "") -> dict | None:
-    """The requester's request that is still pending, newest first, or None.
+    """The requester's request still waiting for staff, newest first, or None.
     Matched on the Discord id; rows from before `discord_id` was stored fall
     back to the Discord username."""
     discord_id = str(discord_id or "")
@@ -205,7 +213,15 @@ def pending_message(row: dict) -> str:
     return ("⏳ Your whitelist request is still pending approval"
             + (f" ({detail})" if detail else "")
             + ". Please wait for staff to review it; you'll get a DM once it's decided. "
-              "You can't send another request until then.")
+              "You can't send another request until then. If it should no longer count, ask an admin.")
+
+
+def linked_message(pz_username: str) -> str:
+    """What a requester is told when their Discord account is already linked to an
+    in-game account (approval links them, as /linkme would)."""
+    return (f"\U0001f517 Your Discord account is already linked to the in-game account **{pz_username}**, "
+            "so you can't send another whitelist request. If that account was deleted, reset or "
+            "renamed, ask an admin to unlink you (`/unlinkname`), then apply again.")
 
 
 class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
@@ -268,10 +284,10 @@ class WhitelistView(discord.ui.View):
         custom_id=_APPLY_CUSTOM_ID,
     )
     async def apply_button(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
-        # One pending request per requester: say it's still waiting instead of the form.
-        pending = self.cog.pending_request_for(interaction.user)
-        if pending is not None:
-            await interaction.response.send_message(pending_message(pending), ephemeral=True)
+        # Linked to an in-game account, or a request still pending: say so instead of the form.
+        refusal = self.cog.refusal_for(interaction.user)
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
             return
         await interaction.response.send_modal(WhitelistModal(self.cog))
 
@@ -949,20 +965,46 @@ class WhitelistCog(commands.Cog):
                              username: str, password: str, steam_id: str,
                              character_lore: str = "false") -> None:
         """Persist the request to CSV and forward it to the approval channel.
-        Refused while the requester has a request pending (the form may have
-        been opened before the first one was sent)."""
+        Refused while the requester's Discord account is linked to an in-game
+        account, or a request of theirs is still pending (the form may have been
+        opened before). The check and the save share one lock."""
         user = interaction.user
         async with self._submit_lock:
-            pending = self.pending_request_for(user)
-            if pending is not None:
-                await interaction.response.send_message(pending_message(pending), ephemeral=True)
-                print(f"[Whitelist] Request from {user} refused: one is still pending.")
+            refusal = self.refusal_for(user)
+            if refusal:
+                await interaction.response.send_message(refusal, ephemeral=True)
+                print(f"[Whitelist] Request from {user} refused: linked or one still pending.")
                 return
             await self._save_request(interaction, username, password, steam_id, character_lore)
+
+    def refusal_for(self, user) -> str | None:
+        """Why this user can't send a whitelist request now, or None: their Discord
+        account is linked to an in-game account, or a request of theirs is pending."""
+        linked = self.linked_username_for(user)
+        if linked:
+            return linked_message(linked)
+        pending = self.pending_request_for(user)
+        if pending is not None:
+            return pending_message(pending)
+        return None
 
     def pending_request_for(self, user) -> dict | None:
         """The user's whitelist request still waiting for staff, or None."""
         return find_pending_request(self._read_csv(), str(getattr(user, "id", "")), str(user))
+
+    def linked_username_for(self, user) -> str | None:
+        """The in-game username this Discord user is linked to (RankSync), or None.
+        Links come from approval (as /linkme would) and go with an admin's /unlinkname.
+        Without RankSync loaded nobody counts as linked."""
+        rank_cog = self.bot.get_cog("RankSync") if hasattr(self.bot, "get_cog") else None
+        if rank_cog is None or not hasattr(rank_cog, "pz_username_for_discord_id"):
+            return None
+        try:
+            name = rank_cog.pz_username_for_discord_id(getattr(user, "id", ""))
+        except Exception as e:
+            print(f"[Whitelist] Link lookup failed for {user}: {e}")
+            return None
+        return (str(name).strip() or None) if name else None
 
     async def _save_request(self, interaction: discord.Interaction, username: str, password: str,
                             steam_id: str, character_lore: str) -> None:
@@ -1365,7 +1407,47 @@ class WhitelistCog(commands.Cog):
         description="Open the whitelist request form.",
     )
     async def cmd_whitelist(self, interaction: discord.Interaction) -> None:
+        refusal = self.refusal_for(interaction.user)
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
         await interaction.response.send_modal(WhitelistModal(self))
+
+    @app_commands.command(
+        name="whitelistcancel",
+        description="Cancel a member's pending whitelist request(s) so they can apply again.",
+    )
+    @app_commands.describe(member="The Discord member", reason="Why (optional)")
+    async def cmd_whitelist_cancel(self, interaction: discord.Interaction,
+                                   member: discord.Member, reason: str = None) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "❌ You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        count = self.cancel_pending(member, str(interaction.user), reason)
+        if count:
+            await interaction.response.send_message(
+                f"\U0001f5d1️ Cancelled {count} pending request(s) from {member.mention}. "
+                "They can apply again.", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"{member.mention} has no pending whitelist request.", ephemeral=True)
+
+    def cancel_pending(self, member, by: str, reason: str | None = None) -> int:
+        """Mark every pending request of this member as cancelled (a Notes entry). -> how many."""
+        note = f"Cancelled by {by}" + (f": {reason.strip()}" if reason and reason.strip() else "")
+        count = 0
+        while True:
+            row = find_pending_request(self._read_csv(), str(getattr(member, "id", "")), str(member))
+            if row is None or not row.get("request_id"):
+                break
+            self._update_csv_row(row["request_id"], {"Notes": note})
+            count += 1
+            if count > 50:
+                break
+        if count:
+            print(f"[Whitelist] {by} cancelled {count} pending request(s) from {member}.")
+        return count
 
     # ---- manual whitelist management ----------------------------------------
 
