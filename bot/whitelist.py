@@ -65,6 +65,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import cards
 import sftp_client
 
 _DEFAULT_CSV = "whitelist_requests.csv"
@@ -272,17 +273,21 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
         )
 
 
-class WhitelistView(discord.ui.View):
-    """Persistent view holding the single "Apply for Whitelist" button."""
+_APPLY_TEXT = ("Click the button below to request for server whitelisting.\n"
+               "You will be asked for a `username`, `password`, and `Steam ID`.")
+
+
+class _ApplyRow(discord.ui.ActionRow):
+    """The "Apply for Whitelist" button (its row lives inside the panel card)."""
 
     def __init__(self, cog: "WhitelistCog"):
-        super().__init__(timeout=None)
+        super().__init__()
         self.cog = cog
 
     @discord.ui.button(
         label="Apply for Whitelist",
         style=discord.ButtonStyle.green,
-        emoji="\U0001f4dd",  # 📝
+        emoji="\U0001f4dd",  # \U0001f4dd
         custom_id=_APPLY_CUSTOM_ID,
     )
     async def apply_button(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
@@ -292,6 +297,17 @@ class WhitelistView(discord.ui.View):
             await interaction.response.send_message(refusal, ephemeral=True)
             return
         await interaction.response.send_modal(WhitelistModal(self.cog))
+
+
+class WhitelistView(discord.ui.LayoutView):
+    """Persistent whitelist panel: the text and the "Apply" button in one card."""
+
+    def __init__(self, cog: "WhitelistCog"):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.add_item(cards.card(title="\U0001f4dd Whitelist Application", description=_APPLY_TEXT,
+                                 footer="PZ Tambayan \u2022 Whitelist Request",
+                                 colour=discord.Colour.green(), rows=[_ApplyRow(cog)]))
 
 
 class DenyReasonModal(discord.ui.Modal, title="Deny Whitelist Request"):
@@ -316,14 +332,15 @@ class DenyReasonModal(discord.ui.Modal, title="Deny Whitelist Request"):
             interaction, self.request_id, self.message, self.reason.value.strip())
 
 
-class WhitelistApprovalView(discord.ui.View):
-    """Persistent Approve/Deny buttons for one request.
+class WhitelistApprovalView(discord.ui.LayoutView):
+    """Persistent Approve/Deny buttons for one request, inside the request card.
 
     The `custom_id`s encode the request id so the same buttons keep working
-    after a bot restart (the view is re-registered from the CSV on startup).
+    after a bot restart (the view is re-registered from the CSV on startup,
+    without the card text: only the buttons matter for that).
     """
 
-    def __init__(self, cog: "WhitelistCog", request_id: str):
+    def __init__(self, cog: "WhitelistCog", request_id: str, embed: discord.Embed | None = None):
         super().__init__(timeout=None)
         self.cog = cog
         self.request_id = request_id
@@ -335,7 +352,6 @@ class WhitelistApprovalView(discord.ui.View):
             custom_id=f"whitelist:approve:{request_id}",
         )
         approve.callback = self.approve
-        self.add_item(approve)
 
         deny = discord.ui.Button(
             label="Deny",
@@ -344,7 +360,7 @@ class WhitelistApprovalView(discord.ui.View):
             custom_id=f"whitelist:deny:{request_id}",
         )
         deny.callback = self.deny
-        self.add_item(deny)
+        _add_card(self, embed, [approve, deny])
 
     async def approve(self, interaction: discord.Interaction) -> None:
         await self.cog.approve_request(interaction, self.request_id)
@@ -353,17 +369,18 @@ class WhitelistApprovalView(discord.ui.View):
         await self.cog.deny_request(interaction, self.request_id)
 
 
-class WhitelistManageView(discord.ui.View):
-    """Persistent buttons on an approved request's card.
+class WhitelistManageView(discord.ui.LayoutView):
+    """Persistent buttons inside an approved request's card.
 
     The Delete button keeps its old custom_id, so cards posted before the other
     buttons existed still work (they only show Delete until they're updated).
     """
 
-    def __init__(self, cog: "WhitelistCog", request_id: str):
+    def __init__(self, cog: "WhitelistCog", request_id: str, embed: discord.Embed | None = None):
         super().__init__(timeout=None)
         self.cog = cog
         self.request_id = request_id
+        row = []
         for label, style, emoji, action, callback in (
             ("Change Username", discord.ButtonStyle.blurple, "\u270f\ufe0f", "rename", self.rename),
             ("Change Password", discord.ButtonStyle.blurple, "\U0001f511", "password", self.password),
@@ -373,7 +390,8 @@ class WhitelistManageView(discord.ui.View):
             button = discord.ui.Button(label=label, style=style, emoji=emoji,
                                        custom_id=f"whitelist:{action}:{request_id}")
             button.callback = callback
-            self.add_item(button)
+            row.append(button)
+        _add_card(self, embed, row)
 
     async def rename(self, interaction: discord.Interaction) -> None:
         await self.cog.open_rename(interaction, self.request_id)
@@ -386,6 +404,14 @@ class WhitelistManageView(discord.ui.View):
 
     async def delete(self, interaction: discord.Interaction) -> None:
         await self.cog.delete_request(interaction, self.request_id)
+
+
+def _add_card(view: discord.ui.LayoutView, embed: discord.Embed | None, row: list) -> None:
+    """The request card with `row` inside it, or (re-registering on startup) the buttons alone."""
+    if embed is None:
+        view.add_item(discord.ui.ActionRow(*row))
+    else:
+        view.add_item(cards.from_embed(embed, rows=[row]))
 
 
 class RenameModal(discord.ui.Modal, title="Change Username"):
@@ -663,12 +689,12 @@ class WhitelistCog(commands.Cog):
             return
         submitter = await self._fetch_submitter(request.get("discord_id", ""))
         embed = self._request_embed(request, submitter)
-        view = None
+        row = None
         if status == "approved":
             embed.add_field(name="Status", value=f"\u2705 Approved by {admin.mention}", inline=False)
             embed.colour = discord.Colour.green()
             # Keep the management buttons (rename, password, status, delete).
-            view = WhitelistManageView(self, request.get("request_id", ""))
+            row = "manage"
         elif status == "denied":
             value = f"\u274c Denied by {admin.mention}"
             if reason:
@@ -681,10 +707,11 @@ class WhitelistCog(commands.Cog):
                 value += f" — {reason}"
             embed.add_field(name="Status", value=value, inline=False)
             embed.colour = discord.Colour.dark_grey()
-        try:
-            await message.edit(embed=embed, view=view)
-        except discord.HTTPException as e:
-            print(f"[Whitelist] Failed to update approval message: {e}")
+        if row == "manage":
+            view = WhitelistManageView(self, request.get("request_id", ""), embed)
+        else:
+            view = cards.CardView(cards.from_embed(embed))
+        await cards.edit_card(message, view, "Whitelist")
 
     # ---- requester DMs ------------------------------------------------------
 
@@ -1038,9 +1065,9 @@ class WhitelistCog(commands.Cog):
         elif not self.bot.features.is_enabled("whitelist"):
             print("[Whitelist] Whitelist notifications disabled; request saved to CSV only.")
         else:
-            view = WhitelistApprovalView(self, request_id)
+            view = WhitelistApprovalView(self, request_id, self._request_embed(row, user))
             try:
-                await channel.send(embed=self._request_embed(row, user), view=view)
+                await channel.send(view=view)
             except discord.HTTPException as e:
                 print(f"[Whitelist] Failed to send approval message: {e}")
 
@@ -1341,20 +1368,15 @@ class WhitelistCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _refresh_card(self, message, request: dict) -> None:
-        """Rewrite the Username / Password / SteamID fields on an approved card."""
-        if message is None or not message.embeds:
+        """Redraw an approved card from the CSV row (new Username / Password / SteamID)."""
+        if message is None:
             return
-        embed = message.embeds[0].copy()
-        values = {"Username": request.get("Username", ""), "Password": request.get("Password", ""),
-                  "SteamID": request.get("SteamID", "")}
-        for i, field in enumerate(embed.fields):
-            if field.name in values:
-                embed.set_field_at(i, name=field.name, value=f"`{values[field.name]}`",
-                                   inline=field.inline)
-        try:
-            await message.edit(embed=embed, view=WhitelistManageView(self, request.get("request_id", "")))
-        except discord.HTTPException as e:
-            print(f"[Whitelist] Failed to update the card: {e}")
+        submitter = await self._fetch_submitter(request.get("discord_id", ""))
+        embed = self._request_embed(request, submitter)
+        embed.add_field(name="Status", value=f"\u2705 Approved by {request.get('Whitelisted By') or '?'}",
+                        inline=False)
+        await cards.edit_card(message, WhitelistManageView(self, request.get("request_id", ""), embed),
+                              "Whitelist")
 
     async def _dm_credentials(self, request: dict, changed: str, username: str, password: str) -> None:
         submitter = await self._fetch_submitter(request.get("discord_id", ""))
@@ -1393,13 +1415,7 @@ class WhitelistCog(commands.Cog):
             )
             return
 
-        await channel.send(
-            "\U0001f4dd **Whitelist Application**\n\n"
-            "Click the button below to request for server whitelisting.\n"
-            "You will be asked for a `username`, `password`, and `Steam ID`\n\n"
-            "PZ Tambayan \u2022 Whitelist Request",
-            view=self.view,
-        )
+        await channel.send(view=self.view)
         await interaction.response.send_message(
             "Whitelist button posted.",
             ephemeral=True,

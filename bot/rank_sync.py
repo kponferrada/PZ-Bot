@@ -37,6 +37,7 @@ from discord.ext import commands, tasks
 from typing import Optional, Dict
 
 import bt_progression
+import cards
 from checks import admin_only
 import ranks
 import lua_bridge
@@ -89,8 +90,9 @@ _LINKS_PAGE_SIZE = 20  # links per page in /listlinks
 _LADDER_ROLE_REASON = "Barangay Tales reputation ladder"
 
 
-class LinksPaginator(discord.ui.View):
-    """Previous/Next pagination for the /listlinks embed (author-only)."""
+class LinksPaginator(discord.ui.LayoutView):
+    """Previous/Next pagination for the /listlinks card (author-only); the
+    buttons sit inside the card."""
 
     def __init__(self, pages: list, author_id: int):
         super().__init__(timeout=180)
@@ -100,14 +102,11 @@ class LinksPaginator(discord.ui.View):
 
         self.prev_button = discord.ui.Button(label="\u25c0", style=discord.ButtonStyle.secondary)
         self.prev_button.callback = self._on_prev
-        self.add_item(self.prev_button)
 
         self.counter_button = discord.ui.Button(label="1 / 1", style=discord.ButtonStyle.secondary, disabled=True)
-        self.add_item(self.counter_button)
 
         self.next_button = discord.ui.Button(label="\u25b6", style=discord.ButtonStyle.secondary)
         self.next_button.callback = self._on_next
-        self.add_item(self.next_button)
 
         self._refresh()
 
@@ -115,6 +114,9 @@ class LinksPaginator(discord.ui.View):
         self.prev_button.disabled = self.current == 0
         self.next_button.disabled = self.current >= len(self.pages) - 1
         self.counter_button.label = f"{self.current + 1} / {len(self.pages)}"
+        self.clear_items()
+        self.add_item(cards.from_embed(self.pages[self.current], rows=[
+            [self.prev_button, self.counter_button, self.next_button]]))
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -128,14 +130,14 @@ class LinksPaginator(discord.ui.View):
             return
         self.current = max(0, self.current - 1)
         self._refresh()
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        await interaction.response.edit_message(view=self)
 
     async def _on_next(self, interaction: discord.Interaction) -> None:
         if not await self._guard(interaction):
             return
         self.current = min(len(self.pages) - 1, self.current + 1)
         self._refresh()
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        await interaction.response.edit_message(view=self)
 
 
 class RankSync(commands.Cog):
@@ -718,7 +720,7 @@ class RankSync(commands.Cog):
             await interaction.followup.send(embed=pages[0], ephemeral=True)
         else:
             view = LinksPaginator(pages, interaction.user.id)
-            await interaction.followup.send(embed=pages[0], view=view, ephemeral=True)
+            await interaction.followup.send(view=view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
