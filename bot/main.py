@@ -116,6 +116,9 @@ class Config:
         self.WHITELIST_APPROVAL_CHANNEL_ID = _env_int("WHITELIST_APPROVAL_CHANNEL_ID", 0)
         self.WHITELIST_CSV_PATH = _env("WHITELIST_CSV_PATH", "whitelist_requests.csv")
 
+        # Admin control panel (/adminpanel posts it here; 0 = the channel it is run in)
+        self.ADMIN_PANEL_CHANNEL_ID = _env_int("ADMIN_PANEL_CHANNEL_ID", 0)
+
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
         self.DASHBOARD_ICON_URL = _env("DASHBOARD_ICON_URL", "")
@@ -389,7 +392,7 @@ class PZBot(commands.Bot):
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jamies_fortune", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "stats", "weekly_rp", "cleanup",
-                    "help"):
+                    "help", "admin_panel"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
