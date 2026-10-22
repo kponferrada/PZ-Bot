@@ -67,12 +67,13 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 |---|---|
 | Status | `/hello`, `/online`, `/players`, `/playerlist`, `/modlist`, `/help` |
 | Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
-| Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart [minutes]` (default 15, max 720, auto-resumes), `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
+| Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart <minutes>` (max 720, auto-resumes), `/cancelrestart [restore]`, `/restartstatus`, `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel` |
 | Features | `/enable <feature>`, `/disable <feature>` |
+| Admin panel | `/adminpanel` (see below) |
 
 ### Restart flow
 
@@ -97,6 +98,48 @@ until the server goes down.
 `/restartnow` saves at once, kicks after 30 s, then quits. A restart is refused
 when one is already running or when RCON does not answer. Scheduled hours come
 from `RESTART_SCHEDULE_UTC` (default `4,10,16,22`, UTC).
+
+Stopping or moving a restart:
+
+- `/deferrestart <minutes>` (duration required, max 720) stops the countdown of
+  any restart, or the scheduled one about to start, and runs it when the time is
+  up. With nothing pending it only pauses scheduled and mod-update restarts.
+- `/cancelrestart` stops a scheduled or admin restart (`/restart`,
+  `/restartnow`, `/forcemodupdate`), counting down or deferred. **A restart
+  started by the mod-update check can't be cancelled, only deferred.** With no
+  restart running it skips the next scheduled restart; `restore: True` brings
+  it back. Once players are being kicked (T-60 s) nothing can stop it.
+- A scheduled restart that falls within `SCHEDULED_SKIP_AFTER_UPDATE_MINUTES`
+  (default 60, 0 = off) after a mod-update restart is skipped, with a notice;
+  the next scheduled hour runs as normal.
+- `/restartstatus` shows what is running, any deferral, the next two scheduled
+  restarts (and whether they are skipped) and the last mod-update restart.
+
+The last mod-update restart and a skipped scheduled slot are kept in
+`restart_state.json` so a bot restart doesn't forget them.
+
+### Admin panel
+
+`/adminpanel` posts the control panel into `ADMIN_PANEL_CHANNEL_ID` (or the
+channel it is run in): one card per group (Restarts, Server, Players & Ranks,
+Whitelist, Events, Bot), with the buttons inside the card. Running it again
+replaces the bot's earlier panel cards in that channel.
+
+Each button runs the admin slash command of the same name. A command with
+parameters opens a form built from them (text boxes, dropdowns for choices and
+yes/no, a member picker); submitting the form runs it. Stop server, Restart,
+Restart now, Force mod update, Start/Stop siege and Supply event ask for
+confirmation first. Only members with the admin role (`DEFAULT_ROLE`) can use
+the buttons, and replies are private where the command's are. Put the panel in a
+staff-only channel.
+
+### Cards
+
+The bot's messages with buttons (whitelist panel, request and approval cards,
+`/listlinks` pages, the admin panel) are Components V2 cards: the text and
+the buttons sit in one box. Cards posted before this keep working; the bot turns
+an old request card into the new layout the next time it updates it. Re-run
+`/whitelistsetup` to replace the old whitelist panel. Needs discord.py 2.7+.
 
 ### One account per Discord user, one request at a time
 
@@ -281,6 +324,7 @@ feature is off.
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
+| `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |
 
 `WORKSHOP_UPDATE_CHANNEL_ID` and `WORKSHOP_UPDATE_ROLE_ID` are read but unused.
 
