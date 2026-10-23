@@ -173,8 +173,8 @@ one card:
    bot's own emojis (application emojis: no server emoji slots used). If that
    upload fails the embed falls back to plain emoji;
 3. inside the same card, under the fields: a graph of players online over the
-   last 24 hours (Philippine time, 5-minute steps, each step the highest count
-   seen in it; gaps where the bot was down). Discord always puts an embed's
+   last 24 hours (Philippine time; one point per 5 minutes, the highest count
+   seen in it, joined by straight lines; gaps where the bot was down). Discord always puts an embed's
    image below its fields;
 4. a row of five buttons under it: **My rank**, **Online players**, **Player
    stats**, **Leaderboard**, **RP leaderboard** (private answers, as above).
