@@ -11,11 +11,23 @@ over RCON (no event deferral):
 
 Scheduled restarts (RESTART_SCHEDULE_UTC) run the exact same countdown + kick +
 quit flow as a workshop update (notify T-2min, save T-1:30, kick T-1min).
+
+Stopping a restart:
+  - `/deferrestart <minutes>` pauses any restart (mod update, scheduled, admin)
+    and runs it when the time is up. A mod-update restart can only be deferred.
+  - `/cancelrestart` stops a scheduled or admin restart (countdown or deferral).
+    With nothing running it skips the next scheduled restart (`restore: True`
+    brings it back).
+  - A scheduled restart that comes within SCHEDULED_SKIP_AFTER_UPDATE_MINUTES
+    of a mod-update restart is skipped; the schedule moves on to the next slot.
+The last mod-update restart and an admin-skipped slot are kept in
+restart_state.json so a bot restart doesn't forget them.
 """
 
 import os
 import asyncio
 import datetime
+import json
 import time
 from pathlib import Path
 
@@ -34,6 +46,47 @@ DEFAULT_KICK_AT = 60                     # seconds-remaining at which to kick pl
 DEFAULT_SCHEDULE_HOURS = [4, 10, 16, 22] # UTC restart hours (fallback if RESTART_SCHEDULE_UTC unset)
 KICK_ALL_DELAY = 60                      # /kickall: seconds between the notice and the kick
 DEFAULT_SCHEDULED_WARN = 300             # advance warning (seconds) before a scheduled restart (5 min)
+DEFAULT_SKIP_AFTER_UPDATE = 60           # minutes: a scheduled restart this soon after a mod-update restart is skipped
+MAX_DEFER_MINUTES = 720
+_STATE_FILE = Path(__file__).parent / "restart_state.json"
+
+# What started a restart. Only an automatic mod-update restart can't be cancelled.
+KIND_LABELS = {
+    "mod_update": "Mod-update restart",
+    "forced_update": "Forced mod-update restart",
+    "scheduled": "Scheduled restart",
+    "manual": "Admin restart",
+}
+UPDATE_KINDS = ("mod_update", "forced_update")
+
+
+def next_slot(now: datetime.datetime, hours) -> datetime.datetime:
+    """The first schedule slot (UTC, top of the hour) strictly after `now`."""
+    candidates = []
+    for h in hours:
+        t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if t <= now:
+            t += datetime.timedelta(days=1)
+        candidates.append(t)
+    return min(candidates)
+
+
+def skip_for_recent_update(slot_ts: float, last_update_ts: float, window_s: float) -> bool:
+    """Skip the scheduled slot at `slot_ts`: a mod-update restart happened at most
+    `window_s` seconds before it (0 window = never skip)."""
+    if window_s <= 0 or not last_update_ts:
+        return False
+    return 0 <= slot_ts - last_update_ts <= window_s
+
+
+def cancel_refusal(kind: str | None, shutdown_started: bool) -> str:
+    """Why a running restart can't be cancelled, or "" when it can."""
+    if shutdown_started:
+        return "players are already being kicked; the restart can't be stopped now"
+    if kind == "mod_update":
+        return ("a mod-update restart can't be cancelled, only deferred: "
+                "use Defer restart with a duration and it resumes by itself")
+    return ""
 
 
 class RestartWatch(commands.Cog):
@@ -51,18 +104,29 @@ class RestartWatch(commands.Cog):
         self._scheduled_warn = int(os.getenv("SCHEDULED_RESTART_WARN_SECONDS", str(DEFAULT_SCHEDULED_WARN)) or DEFAULT_SCHEDULED_WARN)
         self._scheduled_announced_key = None
         self._scheduled_trigger_key = None
+        self._skip_after_update = 60 * int(os.getenv("SCHEDULED_SKIP_AFTER_UPDATE_MINUTES", str(DEFAULT_SKIP_AFTER_UPDATE)) or 0)
+        self._update_skip_key = None  # slot already announced as skipped (recent mod update)
 
         self._checker = ModChecker(bot)
         self._seeded = False
         self._restart_task = None  # active countdown task (guards against duplicate restarts)
+        self._restart_kind = None  # KIND_LABELS key of the running / last restart
+        self._restart_at = 0.0     # epoch time the running countdown reaches T-0
         self._defer_until = 0.0    # epoch time until which auto-restarts are deferred (0 = none)
         self._defer_task = None    # auto-resume task for a deferred restart
+        self._deferred_kind = None # kind that resumes when the deferral ends (None = only a pause)
+        self._deferred_slot = None # schedule slot a deferred scheduled restart belongs to
         self._kick_all_task = None # pending /kickall (notice sent, kick after KICK_ALL_DELAY)
+        # Persisted (restart_state.json): last mod-update restart, admin-skipped slot.
+        self._last_update_restart = 0.0
+        self._skip_slot = None
+        self._load_state()
         self._mod_check.start()
         self._scheduled_check.start()
         print(f"[RestartWatch] Mod check every {self._mod_check_interval}s; "
               f"countdown {self._restart_delay}s (notify T-{self._kick_notify_at}s, save T-{self._save_at}s, kick T-{self._kick_at}s); "
-              f"scheduled restarts @ {self._schedule_hours} UTC (warn {self._scheduled_warn}s); "
+              f"scheduled restarts @ {self._schedule_hours} UTC (warn {self._scheduled_warn}s, "
+              f"skipped within {self._skip_after_update // 60} min after a mod update); "
               f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
@@ -74,6 +138,23 @@ class RestartWatch(commands.Cog):
             self._kick_all_task.cancel()
         self._mod_check.cancel()
         self._scheduled_check.cancel()
+
+    def _load_state(self) -> None:
+        try:
+            data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        self._last_update_restart = float(data.get("last_update_restart") or 0)
+        skip = data.get("skip_slot")
+        # A skipped slot that has passed means nothing any more.
+        self._skip_slot = int(skip) if skip and int(skip) > time.time() else None
+
+    def _save_state(self) -> None:
+        try:
+            _STATE_FILE.write_text(json.dumps({"last_update_restart": self._last_update_restart,
+                                               "skip_slot": self._skip_slot}), encoding="utf-8")
+        except OSError as e:
+            print(f"[RestartWatch] could not save {_STATE_FILE.name}: {e}")
 
     def _channel(self):
         if self._channel_id:
@@ -192,6 +273,10 @@ class RestartWatch(commands.Cog):
 
     async def _quit_server(self) -> None:
         """Save, announce the restart, then quit over RCON."""
+        if self._restart_kind in UPDATE_KINDS:
+            # A scheduled restart soon after this one is skipped (skip_for_recent_update).
+            self._last_update_restart = time.time()
+            self._save_state()
         await self._save_world()
         if self.bot.features.is_enabled("restarts"):
             await self._announce_banner(
@@ -214,6 +299,7 @@ class RestartWatch(commands.Cog):
         # Measure against a deadline: the RCON/bridge calls inside the loop
         # take seconds each, so counting 1-second ticks would run late.
         deadline = time.monotonic() + total
+        self._restart_at = time.time() + total
         remaining = total
         notified = False
         saved = False
@@ -251,7 +337,8 @@ class RestartWatch(commands.Cog):
             self.bot.state.expecting_restart = False
             self.bot.state.restart_shutdown_started = False
 
-    async def _start_restart(self, reason: str, image: str = None, duration=None) -> bool:
+    async def _start_restart(self, reason: str, image: str = None, duration=None,
+                             kind: str = "mod_update") -> bool:
         """Start the restart sequence. Immediate if no players online, otherwise a
         countdown (kick-notification T-2min, save T-1:30, kick T-1min).
 
@@ -262,13 +349,15 @@ class RestartWatch(commands.Cog):
 
         `image` overrides the announcement banner (defaults to the mod-update
         banner; scheduled restarts pass the generic restart banner).
-        `duration` (seconds) overrides the countdown length."""
+        `duration` (seconds) overrides the countdown length. `kind` (KIND_LABELS)
+        decides whether it can be cancelled and whether it counts as a mod update."""
         if self.bot.state.restart_expected():
             print(f"[RestartWatch] Restart already in progress — ignoring trigger ({reason}).")
             return False
         # Claim the restart lock atomically (no await between the check and the
         # set) so two concurrent triggers can't both start a countdown.
         self.bot.state.expect_restart()
+        self._restart_kind = kind
         if not await self._server_responsive():
             print(f"[RestartWatch] Restart skipped — server not responding to RCON ({reason}).")
             # Roll back the lock we just claimed.
@@ -301,6 +390,8 @@ class RestartWatch(commands.Cog):
             print("[RestartWatch] Restart already in progress — ignoring immediate restart.")
             return False
         self.bot.state.expect_restart()
+        self._restart_kind = "manual"
+        self._restart_at = time.time() + 30
         if not await self._server_responsive():
             print("[RestartWatch] Immediate restart skipped — server not responding to RCON.")
             self.bot.state.expecting_restart = False
@@ -338,7 +429,7 @@ class RestartWatch(commands.Cog):
             self.bot.state.expecting_restart = False
             self.bot.state.restart_shutdown_started = False
 
-    # ---- Restart deferral ----------------------------------------------------
+    # ---- Restart deferral / cancel -------------------------------------------
 
     def _is_deferred(self) -> bool:
         """True while restarts are manually deferred (suppress auto-triggers)."""
@@ -350,12 +441,27 @@ class RestartWatch(commands.Cog):
             self._defer_task.cancel()
         self._defer_task = None
         self._defer_until = 0.0
+        self._deferred_kind = None
+        self._deferred_slot = None
+
+    def _countdown_running(self) -> bool:
+        return self._restart_task is not None and not self._restart_task.done()
+
+    def _slot_skipped(self, key: int) -> str:
+        """Why the scheduled slot `key` won't run ("" = it will)."""
+        if key == self._skip_slot:
+            return "cancelled by an admin"
+        if skip_for_recent_update(key, self._last_update_restart, self._skip_after_update):
+            return f"the server restarted for a mod update <t:{int(self._last_update_restart)}:R>"
+        return ""
 
     def _scheduled_restart_imminent(self) -> bool:
         """True when a scheduled restart is due within the countdown window."""
         if not self.bot.features.is_enabled("scheduled_restarts"):
             return False
         nxt = self._next_scheduled_restart()
+        if self._slot_skipped(int(nxt.timestamp())):
+            return False
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
         return delta <= self._restart_delay
 
@@ -365,9 +471,21 @@ class RestartWatch(commands.Cog):
         Cancels any active countdown, suppresses scheduled + mod-update restarts
         during the window, and (when a restart was actually pending) re-triggers
         it automatically once the window ends — unless an admin re-triggers it
-        manually first (which clears the deferral).
+        manually first (which clears the deferral). The resumed restart keeps
+        its kind, so a deferred mod update is still a mod update.
         """
-        pending = self.bot.state.restart_expected() or self._scheduled_restart_imminent()
+        if self.bot.state.restart_expected() and self._restart_kind:
+            kind = self._restart_kind
+        elif self._is_deferred() and self._deferred_kind:
+            kind = self._deferred_kind  # deferring again keeps what was waiting
+        elif self._scheduled_restart_imminent():
+            kind = "scheduled"
+        else:
+            kind = None
+        slot = self._deferred_slot if self._is_deferred() else None
+        if kind == "scheduled" and slot is None:
+            slot = self._scheduled_trigger_key or int(self._next_scheduled_restart().timestamp())
+        pending = kind is not None
         # Cancel any active countdown + release the restart lock.
         if self._restart_task is not None and not self._restart_task.done():
             self._restart_task.cancel()
@@ -380,11 +498,13 @@ class RestartWatch(commands.Cog):
         # Replace any prior deferral.
         self._cancel_deferral()
         self._defer_until = time.time() + minutes * 60
+        self._deferred_kind = kind
+        self._deferred_slot = slot
         if self.bot.features.is_enabled("restarts"):
             if pending:
                 await self._announce(
-                    f"⏸️ Restart deferred for {minutes} minute{'s' if minutes != 1 else ''}. "
-                    "It will resume automatically.",
+                    f"⏸️ {KIND_LABELS[kind]} deferred for {minutes} minute{'s' if minutes != 1 else ''}. "
+                    f"It will resume automatically <t:{int(self._defer_until)}:R>.",
                     discord.Colour.orange(),
                 )
                 await self._servermsg(f"Restart deferred for {minutes} minute{'s' if minutes != 1 else ''}.")
@@ -394,26 +514,127 @@ class RestartWatch(commands.Cog):
                     "(scheduled/update restarts will be skipped).",
                     discord.Colour.orange(),
                 )
-        self._defer_task = asyncio.create_task(self._resume_deferred_restart(minutes, pending))
+        self._defer_task = asyncio.create_task(self._resume_deferred_restart(minutes, kind))
 
-    async def _resume_deferred_restart(self, minutes: int, pending: bool) -> None:
+    async def _resume_deferred_restart(self, minutes: int, kind: str | None) -> None:
         """Auto-resume after the deferral window: re-trigger if a restart was pending."""
         try:
             await asyncio.sleep(minutes * 60)
         except asyncio.CancelledError:
             raise
+        slot = self._deferred_slot
         self._defer_until = 0.0
         self._defer_task = None
-        if pending:
+        self._deferred_kind = None
+        self._deferred_slot = None
+        if kind:
             if self.bot.features.is_enabled("restarts"):
                 await self._announce(
                     "▶️ Restart deferral ended — restarting now.",
                     discord.Colour.orange(),
                 )
-            await self._start_restart(
-                "Deferred restart",
+            started = await self._start_restart(
+                f"Deferred {KIND_LABELS[kind].lower()}",
                 image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                kind=kind,
             )
+            if started and slot:
+                self._scheduled_trigger_key = slot  # the slot it stood in for is used up
+
+    async def _cancel_restart(self, by: str) -> tuple[bool, str]:
+        """Stop a running or deferred restart, or (nothing running) skip the next
+        scheduled one. -> (done, what to tell the admin)."""
+        if self._maintenance_active():
+            return False, "Maintenance is running. Use `/maintenance end: True` to end or cancel it."
+        if self._countdown_running():
+            kind = self._restart_kind
+            refusal = cancel_refusal(kind, self.bot.state.restart_shutdown_started)
+            if refusal:
+                return False, f"⚠️ Not cancelled: {refusal}."
+            self._restart_task.cancel()
+            self._restart_task = None
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+            self._seeded = False
+            label = KIND_LABELS.get(kind, "Restart")
+            if self.bot.features.is_enabled("restarts"):
+                await self._announce(f"❌ {label} cancelled by {by}.", discord.Colour.green())
+                await self._servermsg("The restart has been cancelled. Carry on!")
+            print(f"[RestartWatch] {label} cancelled by {by}")
+            return True, f"✅ {label} cancelled."
+        if self._defer_task is not None and not self._defer_task.done():
+            kind = self._deferred_kind
+            if kind == "mod_update":
+                return False, (f"⚠️ Not cancelled: {cancel_refusal(kind, False)}. "
+                               f"It resumes <t:{int(self._defer_until)}:R>; defer again to push it back.")
+            slot = self._deferred_slot
+            self._cancel_deferral()
+            if kind == "scheduled" and slot:
+                self._skip_slot = slot  # don't let the scheduled check pick the slot up again
+                self._save_state()
+            label = KIND_LABELS[kind] if kind else "Restart pause"
+            if self.bot.features.is_enabled("restarts"):
+                await self._announce(f"❌ Deferred {label.lower()} cancelled by {by}." if kind
+                                     else f"▶️ Restart pause lifted by {by}.", discord.Colour.green())
+            print(f"[RestartWatch] deferral ({label}) cancelled by {by}")
+            return True, (f"✅ Deferred {label.lower()} cancelled." if kind else "✅ Restart pause lifted.")
+        if self.bot.state.restart_expected():
+            return False, "⚠️ The server is already restarting; it's too late to cancel."
+        if not self.bot.features.is_enabled("scheduled_restarts"):
+            return False, "ℹ️ No restart is running, and scheduled restarts are off."
+        slot = self._next_scheduled_restart()
+        key = int(slot.timestamp())
+        why = self._slot_skipped(key)
+        if why:
+            return False, f"ℹ️ No restart is running. The next scheduled one (<t:{key}:t>) is already skipped: {why}."
+        self._skip_slot = key
+        self._save_state()
+        after = int(self._next_scheduled_restart(slot).timestamp())
+        if self.bot.features.is_enabled("restarts"):
+            await self._announce(f"⏭️ The scheduled restart at <t:{key}:t> is cancelled by {by}. "
+                                 f"Next one: <t:{after}:t> (<t:{after}:R>).", discord.Colour.green())
+        print(f"[RestartWatch] scheduled slot {key} skipped by {by}")
+        return True, f"✅ Scheduled restart at <t:{key}:t> skipped. Next one: <t:{after}:t>."
+
+    def _restore_schedule(self) -> str:
+        if self._skip_slot is None:
+            return "ℹ️ No scheduled restart is cancelled."
+        key, self._skip_slot = self._skip_slot, None
+        self._save_state()
+        return f"✅ The scheduled restart at <t:{key}:t> is back on."
+
+    def status_lines(self) -> list:
+        """(name, value) rows describing the restart state, for /restartstatus and the admin panel."""
+        rows = []
+        if self._maintenance_active():
+            rows.append(("Now", "🛠️ Maintenance is running"))
+        elif self._countdown_running():
+            label = KIND_LABELS.get(self._restart_kind, "Restart")
+            stage = " (kicking players)" if self.bot.state.restart_shutdown_started else ""
+            rows.append(("Now", f"🔄 {label} counting down, T-0 <t:{int(self._restart_at)}:R>{stage}"))
+        elif self.bot.state.restart_expected():
+            rows.append(("Now", "🔄 Server is restarting"))
+        elif self._is_deferred():
+            what = KIND_LABELS[self._deferred_kind] if self._deferred_kind else "Nothing pending (restarts paused)"
+            rows.append(("Now", f"⏸️ Deferred until <t:{int(self._defer_until)}:t> (<t:{int(self._defer_until)}:R>): {what}"))
+        else:
+            rows.append(("Now", "✅ No restart running"))
+        if self.bot.features.is_enabled("scheduled_restarts"):
+            slot = self._next_scheduled_restart()
+            lines = []
+            for _ in range(2):
+                key = int(slot.timestamp())
+                why = self._slot_skipped(key)
+                lines.append(f"<t:{key}:t> (<t:{key}:R>)" + (f" — skipped: {why}" if why else ""))
+                slot = self._next_scheduled_restart(slot)
+            rows.append(("Scheduled", "\n".join(lines)))
+        else:
+            rows.append(("Scheduled", "Off"))
+        last = int(self._last_update_restart)
+        window = self._skip_after_update // 60
+        rows.append(("Last mod-update restart", (f"<t:{last}:R>" if last else "None recorded")
+                     + (f"\nA scheduled restart within {window} min after one is skipped." if window else "")))
+        return rows
 
     # ---- Mod update checker --------------------------------------------------
 
@@ -483,16 +704,10 @@ class RestartWatch(commands.Cog):
                 pass
         return list(DEFAULT_SCHEDULE_HOURS)
 
-    def _next_scheduled_restart(self) -> datetime.datetime:
-        """Return the next scheduled restart time (UTC, top of the hour)."""
-        now = datetime.datetime.now(datetime.timezone.utc)
-        candidates = []
-        for h in self._schedule_hours:
-            t = now.replace(hour=h, minute=0, second=0, microsecond=0)
-            if t <= now:
-                t += datetime.timedelta(days=1)
-            candidates.append(t)
-        return min(candidates)
+    def _next_scheduled_restart(self, after: datetime.datetime = None) -> datetime.datetime:
+        """Return the next scheduled restart time (UTC, top of the hour), after
+        `after` (default now)."""
+        return next_slot(after or datetime.datetime.now(datetime.timezone.utc), self._schedule_hours)
 
     async def _run_scheduled_check(self) -> None:
         """At the scheduled time, run the full restart sequence (countdown + kick +
@@ -514,6 +729,22 @@ class RestartWatch(commands.Cog):
         delta = (nxt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
         key = int(nxt.timestamp())
 
+        # Cancelled by an admin, or the server just restarted for a mod update:
+        # this slot doesn't run and the schedule moves on to the next one.
+        why = self._slot_skipped(key)
+        if why:
+            if key != self._skip_slot and self._update_skip_key != key and delta <= self._scheduled_warn:
+                self._update_skip_key = key
+                after = int(self._next_scheduled_restart(nxt).timestamp())
+                if self.bot.features.is_enabled("restarts"):
+                    await self._announce(
+                        f"⏭️ Scheduled restart at <t:{key}:t> skipped: {why}. "
+                        f"Next one: <t:{after}:t> (<t:{after}:R>).",
+                        discord.Colour.green(),
+                    )
+                print(f"[RestartWatch] Scheduled slot {key} skipped ({why})")
+            return
+
         # Within the countdown window -> run the same restart sequence as a
         # workshop update (announce, countdown, save, kick, quit).
         if delta <= self._restart_delay:
@@ -524,6 +755,7 @@ class RestartWatch(commands.Cog):
                 started = await self._start_restart(
                     "Scheduled restart",
                     image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+                    kind="scheduled",
                 )
                 if started:
                     self._scheduled_trigger_key = key
@@ -562,7 +794,7 @@ class RestartWatch(commands.Cog):
     async def cmd_force_mod_update(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message("⏳ Forcing mod update restart...", ephemeral=True)
         self._cancel_deferral()
-        if not await self._start_restart("Mod update forced by admin"):
+        if not await self._start_restart("Mod update forced by admin", kind="forced_update"):
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
@@ -576,6 +808,7 @@ class RestartWatch(commands.Cog):
         if not await self._start_restart(
             "Restart forced by admin",
             image=self.bot.config.ANNOUNCE_RESTART_IMAGE,
+            kind="manual",
         ):
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
@@ -746,10 +979,11 @@ class RestartWatch(commands.Cog):
             "Run `/kickall cancel: True` to stop it.", ephemeral=True)
         print(f"[RestartWatch] /kickall by {interaction.user}: {reason} ({count} online)")
 
-    @app_commands.command(name="deferrestart", description="Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes).")
-    @app_commands.describe(minutes="Minutes to defer (default 15)")
+    @app_commands.command(name="deferrestart",
+                          description="Defer a running or upcoming restart for N minutes; it resumes by itself.")
+    @app_commands.describe(minutes=f"Minutes to defer (1-{MAX_DEFER_MINUTES})")
     @admin_only()
-    async def cmd_defer_restart(self, interaction: discord.Interaction, minutes: int = 15) -> None:
+    async def cmd_defer_restart(self, interaction: discord.Interaction, minutes: int) -> None:
         if self._maintenance_active():
             # Deferring would cancel the maintenance countdown and later fire a
             # real restart (quit), which maintenance is meant to avoid.
@@ -757,12 +991,33 @@ class RestartWatch(commands.Cog):
                 "⚠️ Maintenance is running. Use `/maintenance end: True` to end or cancel it.",
                 ephemeral=True)
             return
-        minutes = max(1, min(int(minutes), 720))
+        minutes = max(1, min(int(minutes), MAX_DEFER_MINUTES))
         await interaction.response.send_message(
             f"⏸️ Deferring restart for {minutes} minute{'s' if minutes != 1 else ''}...",
             ephemeral=True,
         )
         await self._defer_restart(minutes)
+
+    @app_commands.command(name="cancelrestart",
+                          description="Cancel a scheduled/admin restart, or skip the next scheduled one.")
+    @app_commands.describe(restore="Bring back a scheduled restart you cancelled instead")
+    @admin_only()
+    async def cmd_cancel_restart(self, interaction: discord.Interaction, restore: bool = False) -> None:
+        if restore:
+            await interaction.response.send_message(self._restore_schedule(), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        _done, message = await self._cancel_restart(interaction.user.display_name)
+        await interaction.followup.send(message, ephemeral=True)
+
+    @app_commands.command(name="restartstatus",
+                          description="Show the running restart, deferral and the next scheduled restarts.")
+    @admin_only()
+    async def cmd_restart_status(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(title="🔄 Restart status", colour=discord.Colour.blurple())
+        for name, value in self.status_lines():
+            embed.add_field(name=name, value=value, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

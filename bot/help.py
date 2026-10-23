@@ -20,7 +20,9 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/restart", "Force a server restart (announcement + countdown: save T-1:30, kick T-1min). [admin]"),
         ("/restartnow", "Immediate restart: announce + save now, kick players in 30s, then quit. [admin]"),
         ("/maintenance [reason] [minutes] [end]", "Restart countdown and kick, but no restart: the server stays up for a console restart. [admin]"),
-        ("/deferrestart", "Defer/cancel an upcoming or scheduled restart (auto-resumes after N minutes). [admin]"),
+        ("/deferrestart <minutes>", "Defer a running or upcoming restart; it resumes by itself when the time is up. [admin]"),
+        ("/cancelrestart [restore]", "Cancel a scheduled or admin restart, or skip the next scheduled one (mod-update restarts can only be deferred). [admin]"),
+        ("/restartstatus", "Running restart, deferral, next scheduled restarts and skips. [admin]"),
         ("/kickall [reason] [cancel]", "Warn everyone in game, then kick all online players 1 minute later. [admin]"),
         ("/msg <message>", "Broadcast a red-alert message to all players in-game. [admin]"),
         ("/announce <kind>", "Post a server banner (up / restarting / down / modupdate). [admin]"),
@@ -69,6 +71,10 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     "🔔 Notifications": [
         ("/enable <feature>", "Enable a notification feature. [admin]"),
         ("/disable <feature>", "Disable a notification feature. [admin]"),
+    ],
+    "🎛️ Admin Panel": [
+        ("/adminpanel", "Post the admin control panel: every admin command as a button, grouped by function. [admin]"),
+        ("/playerpanel", "Post the player panel (rank, stats, leaderboards, whitelist); the same buttons are on the status card. [admin]"),
     ],
 }
 

@@ -18,6 +18,10 @@ Resilience features:
     brief outages instead of blanking the panel
   - Siege status: shows completed count and current day alongside next siege info
 
+The status is a Components V2 card (the embed as a card in `embed` mode, the
+rendered PNG in `image` mode) with the player panel's buttons inside it
+(player_panel.py; private replies).
+
 Config:
   STATUS_CHANNEL_ID=  (Discord channel ID for the status embed)
 """
@@ -32,9 +36,11 @@ import discord
 from pathlib import Path
 from discord.ext import commands, tasks
 
+import cards
 import lua_bridge
 import status_card
 import server_config
+from command_panel import walk_components as _walk
 from game_calendar import siege_date_string
 
 # ============================================================================
@@ -47,6 +53,7 @@ IMAGE_URL = ""  # dashboard banner image (set from config)
 DASHBOARD_TITLE = "PZ TAMBAYAN"  # overridden from config in the cog's __init__
 
 _ASSET_CACHE = Path(__file__).parent / "dashboard_assets.json"
+_STATUS_FILE = "status.png"  # attachment name of the image-mode card
 
 
 def _load_asset_cache() -> dict:
@@ -470,68 +477,85 @@ class ServerStatusCog(commands.Cog):
         self._channel = ch
         return ch
 
-    async def _send_or_edit_image(self):
+    def _player_rows(self) -> list:
+        """The player panel's buttons for inside the card (none if it isn't loaded)."""
+        panel = self.bot.get_cog("PlayerPanel")
+        return panel.status_rows() if panel is not None else []
+
+    def _is_status_message(self, msg) -> bool:
+        """Our status card: a V2 card titled with the dashboard title or showing
+        status.png, or (posted before cards) any embed / image the bot left here."""
+        if msg.author != self.bot.user:
+            return False
+        if not msg.flags.components_v2:
+            return bool(msg.attachments if self._mode == "image" else msg.embeds)
+        if any(a.filename == _STATUS_FILE for a in msg.attachments):
+            return True
+        head = f"### {DASHBOARD_TITLE}"
+        return any((getattr(c, "content", "") or "").startswith(head) for c in _walk(msg.components))
+
+    async def _publish(self, view, make_file=None) -> None:
+        """Send or edit the status card. `make_file` builds a fresh status.png
+        (image mode) for each attempt."""
         channel = await self._get_channel()
         if not channel:
             return
 
-        def _new_file():
-            return discord.File(self._image_path, filename="status.png")
+        def kwargs():
+            return {"view": view, **({"attachments": [make_file()]} if make_file else {})}
 
-        # Try to edit existing message
         if self._message_id:
             try:
                 # Edit by id: one API call instead of fetch + edit.
-                await channel.get_partial_message(self._message_id).edit(attachments=[_new_file()])
+                await channel.get_partial_message(self._message_id).edit(**kwargs())
                 return
             except (discord.NotFound, discord.HTTPException):
                 self._message_id = None
 
-        # Search for our previous status message to reuse (after a bot restart)
+        # Reuse our previous status message after a bot restart. One posted
+        # before cards is converted in place; if Discord refuses, it is replaced.
+        old = None
         try:
             async for msg in channel.history(limit=20):
-                if msg.author == self.bot.user and msg.attachments:
-                    self._message_id = msg.id
-                    await msg.edit(attachments=[_new_file()])
-                    print(f"[ServerStatus] Found existing status message: {msg.id}")
-                    return
+                if self._is_status_message(msg):
+                    old = msg
+                    break
         except discord.HTTPException:
             pass
+        if old is not None:
+            try:
+                await old.edit(content=None, embeds=[], **kwargs())
+                self._message_id = old.id
+                print(f"[ServerStatus] Found existing status message: {old.id}")
+                return
+            except discord.HTTPException as e:
+                print(f"[ServerStatus] Could not update status message {old.id} ({e}); posting a new one.")
 
-        # Send new
         try:
-            msg = await channel.send(file=_new_file())
+            files = [make_file()] if make_file else []
+            msg = await channel.send(view=view, files=files)
             self._message_id = msg.id
             print(f"[ServerStatus] Created status message: {msg.id}")
         except discord.HTTPException as e:
             print(f"[ServerStatus] Failed to send status: {e}")
+            return
+        if old is not None:
+            try:
+                await old.delete()
+            except discord.HTTPException:
+                pass
+
+    async def _send_or_edit_image(self, online: bool):
+        def _new_file():
+            return discord.File(self._image_path, filename=_STATUS_FILE)
+
+        view = cards.CardView(cards.card(
+            image=f"attachment://{_STATUS_FILE}", rows=self._player_rows(),
+            colour=0x00E676 if online else 0xFF5252))
+        await self._publish(view, _new_file)
 
     async def _send_or_edit_embed(self, embed):
-        channel = await self._get_channel()
-        if not channel:
-            return
-        if self._message_id:
-            try:
-                # Edit by id: one API call instead of fetch + edit.
-                await channel.get_partial_message(self._message_id).edit(embed=embed)
-                return
-            except (discord.NotFound, discord.HTTPException):
-                self._message_id = None
-        try:
-            async for msg in channel.history(limit=20):
-                if msg.author == self.bot.user and msg.embeds:
-                    self._message_id = msg.id
-                    await msg.edit(embed=embed)
-                    print(f"[ServerStatus] Found existing status message: {msg.id}")
-                    return
-        except discord.HTTPException:
-            pass
-        try:
-            msg = await channel.send(embed=embed)
-            self._message_id = msg.id
-            print(f"[ServerStatus] Created status message: {msg.id}")
-        except discord.HTTPException as e:
-            print(f"[ServerStatus] Failed to send status: {e}")
+        await self._publish(cards.CardView(cards.from_embed(embed, rows=self._player_rows())))
 
     @tasks.loop(seconds=30)
     async def status_loop(self):
@@ -592,7 +616,7 @@ class ServerStatusCog(commands.Cog):
                     last_update=f"Last update {now} \u2022 Updates every 30 seconds",
                     background=getattr(self.bot.config, "DASHBOARD_BANNER_IMAGE", "") or "",
                 )
-                await self._send_or_edit_image()
+                await self._send_or_edit_image(server_online)
             else:
                 stale = server_online and not rcon_ok
                 embed = build_embed(server_online, world, siege, False,

@@ -65,11 +65,12 @@ def test_last_connection_formats():
 
 def test_manage_view_and_modals_build():
     import asyncio
+    import cards
     import whitelist
 
     async def build():
         view = whitelist.WhitelistManageView(cog=None, request_id="abc")
-        ids = [item.custom_id for item in view.children]
+        ids = [item.custom_id for item in cards.buttons(view)]
         rename = whitelist.RenameModal(None, "abc", None, "Juan", "pw")
         password = whitelist.PasswordModal(None, "abc", None)
         return ids, rename, password

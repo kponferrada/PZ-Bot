@@ -69,7 +69,7 @@ def _submit(cog, user):
 def _click(cog, user):
     view = types.SimpleNamespace(cog=cog)
     click = types.SimpleNamespace(user=user, response=_Response())
-    apply_fn = getattr(whitelist.WhitelistView.apply_button, "callback", whitelist.WhitelistView.apply_button)
+    apply_fn = getattr(whitelist._ApplyRow.apply_button, "callback", whitelist._ApplyRow.apply_button)
     asyncio.run(apply_fn(view, click, None))
     return click.response
 
