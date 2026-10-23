@@ -45,9 +45,12 @@ def test_every_value_has_a_pill_inside_the_template():
 def test_status_values_match_the_embed():
     values = server_status.status_values(WORLD, {})
     embed = server_status.build_embed(True, WORLD, {}, False, max_players=8)
-    shown = {f.value for f in embed.fields}
-    assert {"Day 3", "Jul 12, 1993", "7:43 AM", "Day"} <= shown
-    assert {values[k] for k in ("SERVER AGE", "DATE", "TIME", "WEATHER", "WIND", "RESTART")} <= shown
+    shown = {f.name: f.value for f in embed.fields}
+    assert shown["Server age"] == values["SERVER AGE"] == "Day 3"
+    assert shown["In-game date"] == values["DATE"] == "Jul 12, 1993"
+    assert shown["In-game time"] == f"{values['TIME']} · {values['CYCLE']}" == "7:43 AM · Day"
+    assert shown["Weather"] == "Clear · 16°C / 61°F"
+    assert shown["Wind"] == "Light · 1 mph"
 
 
 def test_unchanged_card_is_not_rendered_again(monkeypatch):

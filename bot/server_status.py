@@ -256,69 +256,76 @@ def status_values(world, siege) -> dict:
     }
 
 
-def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32):
-    """Build the PZ Tambayan status embed (copyable text + PZ aesthetic)."""
+def _next_restart_ts() -> float:
+    """The next restart in the schedule (fallback when RestartWatch isn't loaded)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    candidates = []
+    for h in RESTART_HOURS_UTC:
+        t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if t <= now:
+            t += datetime.timedelta(days=1)
+        candidates.append(t)
+    return min(candidates).timestamp()
+
+
+def restart_line(restart) -> str:
+    """The restart line of the status embed. `restart` is (epoch, running) or
+    None. Discord timestamps show in each viewer's own timezone, and the
+    relative one counts down by itself between updates."""
+    if restart is None:
+        return "Restarts: none scheduled"
+    ts, running = int(restart[0]), restart[1]
+    if running:
+        return f"⚠️ **Restarting <t:{ts}:R>**"
+    return f"Next restart **<t:{ts}:t>** · <t:{ts}:R>"
+
+
+def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32, restart=...):
+    """Build the PZ Tambayan status embed (copyable text + PZ aesthetic).
+
+    Layout: a status line (state, players, next restart), two rows of three
+    world fields, then the 24-hour graph as the image (set by the cog).
+    `restart` is (epoch, running), None for none coming, or left out to read
+    the schedule."""
     world = world or {}
     siege = siege or {}
 
     if server_online and not stale:
-        colour = 0x00E676
-    elif server_online and stale:
-        colour = 0xFFB300
+        colour, state = 0x00E676, "🟢 **Online**"
+    elif server_online:
+        colour, state = 0xFFB300, "🟡 **Online** · data delayed"
     else:
-        colour = 0xFF5252
+        colour, state = 0xFF5252, "🔴 **Offline**"
 
     embed = discord.Embed(colour=colour)
-
     if ICON_URL:
         embed.set_author(name=DASHBOARD_TITLE, icon_url=ICON_URL)
     else:
         embed.set_author(name=DASHBOARD_TITLE)
 
-    pc = world.get("playerCount", 0)
-
-    # --- status bar (description) ---
-    if server_online:
-        head = "\U0001f7e2 **ONLINE** \u2014 SERVER IS RUNNING"
-    else:
-        head = "\U0001f534 **OFFLINE** \u2014 SERVER IS DOWN"
-    embed.description = (
-        f"{head}\n"
-        f"*Good luck out there, survivor.*"
-    )
+    pc = world.get("playerCount", 0) if server_online else 0
+    if restart is ...:
+        restart = (_next_restart_ts(), False)
+    lines = [f"{state} · **{pc}** / {max_players} survivors online", restart_line(restart),
+             "-# Good luck out there, survivor."]
+    embed.description = "\n".join(lines)
 
     if server_online or world:
         v = status_values(world, siege)
-        is_night = world.get("isNight", False)
-        cyc_icon = "\U0001f319" if is_night else "☀️"
+        siege_day, siege_status, siege_completed = _siege_fields(siege, world)
+        # "Day 665\n(May 4, 1995)" -> "Day 665 · May 4"
+        when = siege_day.split("\n")
+        siege_when = when[0] + (f" · {when[1].strip('()').rsplit(', ', 1)[0]}" if len(when) > 1 else "")
+        embed.add_field(name="Server age", value=v["SERVER AGE"], inline=True)
+        embed.add_field(name="In-game date", value=v["DATE"], inline=True)
+        embed.add_field(name="In-game time", value=f"{v['TIME']} · {v['CYCLE']}", inline=True)
+        embed.add_field(name="Weather", value=v["WEATHER"].replace(" (", " · ").rstrip(")"), inline=True)
+        embed.add_field(name="Wind", value=v["WIND"].replace(" (", " · ").rstrip(")"), inline=True)
+        embed.add_field(name="Siege Night", value=f"{siege_when}\n{siege_status} · {siege_completed} survived",
+                        inline=True)
 
-        # Row 1: Server Age | Date | Time
-        embed.add_field(name="\U0001f382 Server Age", value=v["SERVER AGE"], inline=True)
-        embed.add_field(name="\U0001f4c5 Date", value=v["DATE"], inline=True)
-        embed.add_field(name="⏰ Time", value=v["TIME"], inline=True)
-
-        # Row 2: Weather | Wind | Cycle
-        embed.add_field(name="\U0001f324️ Weather", value=v["WEATHER"], inline=True)
-        embed.add_field(name="\U0001f4a8 Wind", value=v["WIND"], inline=True)
-        embed.add_field(name=f"{cyc_icon} Cycle", value=v["CYCLE"], inline=True)
-
-        # Row 3: Next Siege | Siege Status | Completed Sieges
-        embed.add_field(name="\U0001f6e1️ Next Siege", value=v["NEXT SIEGE"], inline=True)
-        embed.add_field(name="\U0001f4cb Siege Status", value=v["SIEGE STATUS"], inline=True)
-        embed.add_field(name="\U0001f3c6 Completed Sieges", value=v["COMPLETED"], inline=True)
-
-        # Next restart (full width)
-        embed.add_field(name="\U0001f504 Next Restart", value=v["RESTART"], inline=False)
-
-        # Players online as a count; the names are behind the "Online players" button.
-        embed.add_field(name="👥 Players Online", value=f"{pc} / {max_players}", inline=False)
-    else:
-        embed.add_field(name="\u200b", value="\U0001f534 **Server Offline**", inline=False)
-
-    footer = "KNOX COUNTY NEVER FORGETS. \u2022 STAY ALIVE."
-    if stale:
-        footer += " \u2022 Data may be stale"
-    embed.set_footer(text=footer)
+    footer = "Knox County never forgets · Stay alive"
+    embed.set_footer(text=footer, icon_url=ICON_URL or None)
     embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return embed
 
@@ -613,8 +620,10 @@ class ServerStatusCog(commands.Cog):
                 await self._send_or_edit_card(state, world, siege, max_players)
             else:
                 stale = server_online and not rcon_ok
+                watch = self.bot.get_cog("RestartWatch")
+                restart = watch.next_restart() if watch is not None else (_next_restart_ts(), False)
                 embed = build_embed(server_online, world, siege, False,
-                                    stale=stale, max_players=max_players)
+                                    stale=stale, max_players=max_players, restart=restart)
                 await self._send_or_edit_embed(embed, max_players)
 
         except Exception as e:

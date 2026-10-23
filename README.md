@@ -152,14 +152,19 @@ replaces the earlier one.
 In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
 one card:
 
-1. server age, date and time, weather, wind and cycle, and the siege fields in
-   three columns, then the next restart and the number of players online
-   (`6 / 32`; no names);
-2. inside the same card, under the fields: a graph of players online over the
+1. a status line: Online / Offline (amber "data delayed" when RCON is quiet but
+   the bridge files are fresh) and the number of players online (`6 / 32`; no
+   names), then the next restart as Discord timestamps: each viewer sees it in
+   their own timezone, and "in 36 minutes" counts down by itself. It follows
+   the restart controls: a running countdown shows "Restarting in …", a
+   deferral its new time, and a skipped scheduled slot is passed over;
+2. two rows of three: Server age, In-game date, In-game time (with day/night);
+   Weather, Wind, Siege Night (next siege day, status and how many survived);
+3. inside the same card, under the fields: a graph of players online over the
    last 24 hours (Philippine time, 5-minute steps, each step the highest count
    seen in it; gaps where the bot was down). Discord always puts an embed's
    image below its fields;
-3. a row of five buttons under it: **My rank**, **Online players**, **Player
+4. a row of five buttons under it: **My rank**, **Online players**, **Player
    stats**, **Leaderboard**, **RP leaderboard** (private answers, as above).
    **Online players** (`/onlineplayers`) lists who is on, from the same data as
    the card.
