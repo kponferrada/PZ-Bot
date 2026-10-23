@@ -45,7 +45,7 @@ def test_every_value_has_a_pill_inside_the_template():
 def test_status_values_match_the_embed():
     values = server_status.status_values(WORLD, {})
     embed = server_status.build_embed(True, WORLD, {}, False, max_players=8)
-    shown = {f.name: f.value for f in embed.fields}
+    shown = {f.name.split(" ", 1)[1]: f.value for f in embed.fields}   # names after the icon
     assert shown["Server age"] == values["SERVER AGE"] == "Day 3"
     assert shown["In-game date"] == values["DATE"] == "Jul 12, 1993"
     assert shown["In-game time"] == f"{values['TIME']} · {values['CYCLE']}" == "7:43 AM · Day"
