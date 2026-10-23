@@ -58,7 +58,7 @@ Toggle keys are switched at runtime with `/enable` and `/disable` and listed by
 Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`).
 `/help` (admin) prints the same list in Discord.
 
-**Everyone:** `/myrank`, `/linkme`, `/stats <username>`,
+**Everyone:** `/myrank`, `/onlineplayers`, `/linkme`, `/stats <username>`,
 `/leaderboard <kind>`, `/rpleaderboard [board] [limit]`, `/repboard [board] [period]`, `/features`, `/whitelist`.
 
 **Admin:**
@@ -135,34 +135,53 @@ staff-only channel.
 
 ### Player panel and status card buttons
 
-The player buttons are **My rank**, **Link account**, **Player stats**,
+The player buttons are **My rank**, **Online players**, **Link account**, **Player stats**,
 **Leaderboard**, **RP leaderboard**, **Rep board** and **Apply for whitelist**.
-Each one runs the player command of the same name (`/myrank`, `/linkme`,
+Each one runs the player command of the same name (`/myrank`, `/onlineplayers`, `/linkme`,
 `/stats`, `/leaderboard`, `/rpleaderboard`, `/repboard`, `/whitelist`). Commands
 that take options open a form first. Anyone in the server can use them, and
 every answer is private to the person who clicked, so nothing is posted into the
 channel.
 
-`/playerpanel` (admin) posts all seven as their own card into
+`/playerpanel` (admin) posts all eight as their own card into
 `PLAYER_PANEL_CHANNEL_ID` (or the channel it is run in); running it again
 replaces the earlier one.
 
 ### Status card
 
-In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is:
+In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
+one card:
 
-1. a graph of players online over the last 24 hours (Philippine time, 5-minute
-   steps, each step the highest count seen in it; gaps where the bot was down);
-2. the status embed: server age, date and time, weather, wind and cycle, siege
-   fields in three columns, then the next restart and the players online;
-3. a row of four buttons under it: **My rank**, **Player stats**,
-   **Leaderboard**, **RP leaderboard** (private answers, as above).
+1. server age, date and time, weather, wind and cycle, and the siege fields in
+   three columns, then the next restart and the number of players online
+   (`6 / 32`; no names);
+2. inside the same card, under the fields: a graph of players online over the
+   last 24 hours (Philippine time, 5-minute steps, each step the highest count
+   seen in it; gaps where the bot was down). Discord always puts an embed's
+   image below its fields;
+3. a row of five buttons under it: **My rank**, **Online players**, **Player
+   stats**, **Leaderboard**, **RP leaderboard** (private answers, as above).
+   **Online players** (`/onlineplayers`) lists who is on, from the same data as
+   the card.
 
 The bot records the player count itself from the status loop and keeps 24
 hours of it in `player_history.json`, so the graph starts empty on a fresh
-install and fills in over a day. `image` mode posts the rendered card with the
-same buttons and no graph. A status card from v0.6.0 (a V2 card) is replaced by
-a new message on the first update.
+install and fills in over a day. A status card from v0.6.0 (a V2 card) is
+replaced by a new message on the first update.
+
+`STATUS_MODE=image` posts the illustrated card instead: the art in
+`assets/status-card-template.png` with the server name, ONLINE / OFFLINE (amber
+dot when RCON is quiet but the bridge files are fresh), each value in its beige
+box, the number of players online (no names), and the 24-hour graph on the
+chalkboard, with the same five buttons under it. It is a JPEG (~0.4 MB) and is
+only redrawn and re-posted when something on it changes. The in-game clock
+moves every update while the server is up, so in practice that is most updates
+while it is online and none while it is offline. The text on the card can't be
+copied.
+
+To change the art, keep the layout of the template (positions are in
+`status_card.py`: `PILLS` and the `_*_BOX` areas whose baked placeholder text
+is erased once at startup).
 
 ### Cards
 

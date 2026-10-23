@@ -24,6 +24,7 @@ PREFIX = "playerpanel:"
 GROUP = Group("\U0001f3ae Player Panel", "Your rank, stats and the leaderboards. Answers are only shown to you.",
               0x5865F2, (
                   Action("myrank", "My rank", "myrank", "\U0001f3c5", BLUE),
+                  Action("onlineplayers", "Online players", "onlineplayers", "\U0001f465"),
                   Action("linkme", "Link account", "linkme", "\U0001f517"),
                   Action("stats", "Player stats", "stats", "\U0001f4ca"),
                   Action("leaderboard", "Leaderboard", "leaderboard", "\U0001f3c6"),
@@ -33,7 +34,7 @@ GROUP = Group("\U0001f3ae Player Panel", "Your rank, stats and the leaderboards.
               ))
 GROUPS = (GROUP,)
 # Under the status card (user, 2026-10-23): no Rep board, Link account or Apply for whitelist.
-STATUS_KEYS = ("myrank", "stats", "leaderboard", "rpleaderboard")
+STATUS_KEYS = ("myrank", "onlineplayers", "stats", "leaderboard", "rpleaderboard")
 STATUS_GROUP = Group(GROUP.title, GROUP.description, GROUP.colour,
                      tuple(a for a in GROUP.actions if a.key in STATUS_KEYS))
 ACTIONS = {a.key: a for a in GROUP.actions}
