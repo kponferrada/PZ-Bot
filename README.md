@@ -143,20 +143,32 @@ that take options open a form first. Anyone in the server can use them, and
 every answer is private to the person who clicked, so nothing is posted into the
 channel.
 
-The buttons are always inside the server status card (`STATUS_CHANNEL_ID`).
-`/playerpanel` (admin) also posts them as their own card into
+`/playerpanel` (admin) posts all seven as their own card into
 `PLAYER_PANEL_CHANNEL_ID` (or the channel it is run in); running it again
 replaces the earlier one.
 
+### Status card
+
+In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is:
+
+1. a graph of players online over the last 24 hours (Philippine time, 5-minute
+   steps, each step the highest count seen in it; gaps where the bot was down);
+2. the status embed: server age, date and time, weather, wind and cycle, siege
+   fields in three columns, then the next restart and the players online;
+3. a row of four buttons under it: **My rank**, **Player stats**,
+   **Leaderboard**, **RP leaderboard** (private answers, as above).
+
+The bot records the player count itself from the status loop and keeps 24
+hours of it in `player_history.json`, so the graph starts empty on a fresh
+install and fills in over a day. `image` mode posts the rendered card with the
+same buttons and no graph. A status card from v0.6.0 (a V2 card) is replaced by
+a new message on the first update.
+
 ### Cards
 
-The bot's messages with buttons (status card, whitelist panel, request and
-approval cards, `/listlinks` pages, the admin and player panels) are Components
-V2 cards: the text and the buttons sit in one box. In `STATUS_MODE=embed` the
-status card shows the banner on top, then the status and the fields (side-by-side
-fields share one block, one per line); in `image` mode it shows the rendered card
-image. The old status message is converted the first time the bot updates it
-(or replaced if Discord refuses). Cards posted before this keep working; the bot turns
+The bot's other messages with buttons (whitelist panel, request and approval
+cards, `/listlinks` pages, the admin and player panels) are Components V2
+cards: the text and the buttons sit in one box. Cards posted before this keep working; the bot turns
 an old request card into the new layout the next time it updates it. Re-run
 `/whitelistsetup` to replace the old whitelist panel. Needs discord.py 2.7+.
 

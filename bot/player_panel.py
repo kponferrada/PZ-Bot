@@ -1,8 +1,8 @@
 """player_panel.py — buttons for the player commands, for everyone.
 
 `/playerpanel` (admins) posts the panel card into PLAYER_PANEL_CHANNEL_ID (or
-the channel it is run in). The same buttons sit inside the server status card
-(server_status.py asks for `status_rows`).
+the channel it is run in). Four of the buttons (STATUS_KEYS) also sit under the
+server status card (server_status.py asks for `status_rows`).
 
 Each button runs the player slash command of the same name (command_panel.py
 has the engine); commands with parameters open a form. Every reply is private
@@ -32,6 +32,10 @@ GROUP = Group("\U0001f3ae Player Panel", "Your rank, stats and the leaderboards.
                   Action("whitelist", "Apply for whitelist", "whitelist", "\U0001f4dd", GREEN),
               ))
 GROUPS = (GROUP,)
+# Under the status card (user, 2026-10-23): no Rep board, Link account or Apply for whitelist.
+STATUS_KEYS = ("myrank", "stats", "leaderboard", "rpleaderboard")
+STATUS_GROUP = Group(GROUP.title, GROUP.description, GROUP.colour,
+                     tuple(a for a in GROUP.actions if a.key in STATUS_KEYS))
 ACTIONS = {a.key: a for a in GROUP.actions}
 
 
@@ -52,8 +56,9 @@ class PlayerPanel(PanelCog):
         return True
 
     def status_rows(self) -> list:
-        """The player buttons, for the status card (fresh instances each update)."""
-        return button_rows(self, GROUP)
+        """The buttons under the status card (fresh instances each update): the
+        look-up ones only; linking and whitelist stay on the player panel."""
+        return button_rows(self, STATUS_GROUP)
 
     @app_commands.command(name="playerpanel",
                           description="Post the player panel (buttons for the player commands).")

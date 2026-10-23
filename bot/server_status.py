@@ -18,9 +18,12 @@ Resilience features:
     brief outages instead of blanking the panel
   - Siege status: shows completed count and current day alongside next siege info
 
-The status is a Components V2 card (the embed as a card in `embed` mode, the
-rendered PNG in `image` mode) with the player panel's buttons inside it
-(player_panel.py; private replies).
+In `embed` mode the message is two embeds: the 24-hour players-online graph
+(player_graph.py) on top, then the status embed (fields in three columns,
+online players last). `image` mode posts the rendered status card. Either way
+a row of player buttons (player_panel.py `status_rows`; private replies) sits
+under the message. A classic embed can't hold buttons inside it, and a V2
+card can't lay fields out in columns, so the buttons sit just below.
 
 Config:
   STATUS_CHANNEL_ID=  (Discord channel ID for the status embed)
@@ -31,13 +34,14 @@ import time
 import asyncio
 import datetime
 import hashlib
+import io
 import json
 import discord
 from pathlib import Path
 from discord.ext import commands, tasks
 
-import cards
 import lua_bridge
+import player_graph
 import status_card
 import server_config
 from command_panel import walk_components as _walk
@@ -48,12 +52,12 @@ from game_calendar import siege_date_string
 # ============================================================================
 
 ICON_URL = ""   # dashboard thumbnail / author icon (set from config)
-IMAGE_URL = ""  # dashboard banner image (set from config)
 
 DASHBOARD_TITLE = "PZ TAMBAYAN"  # overridden from config in the cog's __init__
 
 _ASSET_CACHE = Path(__file__).parent / "dashboard_assets.json"
 _STATUS_FILE = "status.png"  # attachment name of the image-mode card
+_GRAPH_FILE = "players.png"  # the 24-hour player graph (embed mode)
 
 
 def _load_asset_cache() -> dict:
@@ -219,8 +223,6 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
         embed.set_author(name=DASHBOARD_TITLE, icon_url=ICON_URL)
     else:
         embed.set_author(name=DASHBOARD_TITLE)
-    if IMAGE_URL:
-        embed.set_image(url=IMAGE_URL)
 
     pc = world.get("playerCount", 0)
 
@@ -435,10 +437,9 @@ def _build_card_fields(world: dict, siege: dict, online: bool, max_players: int)
 class ServerStatusCog(commands.Cog):
 
     def __init__(self, bot):
-        global DASHBOARD_TITLE, ICON_URL, IMAGE_URL
+        global DASHBOARD_TITLE, ICON_URL
         DASHBOARD_TITLE = getattr(bot.config, 'DASHBOARD_TITLE', 'PZ TAMBAYAN')
         ICON_URL = getattr(bot.config, 'DASHBOARD_ICON_URL', '')
-        IMAGE_URL = getattr(bot.config, 'DASHBOARD_BANNER_URL', '')
         self.bot = bot
         self._channel_id = int(os.getenv('STATUS_CHANNEL_ID', '0'))
         self._message_id = None
@@ -448,6 +449,11 @@ class ServerStatusCog(commands.Cog):
 
         # Grace period state
         self._rcon_fail_count = 0
+
+        # Players-online history for the 24-hour graph (embed mode)
+        self._history = player_graph.PlayerHistory()
+        self._graph_png_cache = None
+        self._graph_dirty = True
 
         # Last known good data (retained across brief outages)
         self._last_world = None
@@ -477,14 +483,22 @@ class ServerStatusCog(commands.Cog):
         self._channel = ch
         return ch
 
-    def _player_rows(self) -> list:
-        """The player panel's buttons for inside the card (none if it isn't loaded)."""
+    def _player_view(self):
+        """The player buttons in a row under the status card (None if the player
+        panel isn't loaded). Fresh buttons each update; their custom_ids match
+        the persistent player panel, so they keep working after a bot restart."""
         panel = self.bot.get_cog("PlayerPanel")
-        return panel.status_rows() if panel is not None else []
+        if panel is None:
+            return None
+        view = discord.ui.View(timeout=None)
+        for row in panel.status_rows():
+            for button in row:
+                view.add_item(button)
+        return view
 
     def _is_status_message(self, msg) -> bool:
-        """Our status card: a V2 card titled with the dashboard title or showing
-        status.png, or (posted before cards) any embed / image the bot left here."""
+        """Our status message: an embed (embed mode) or image (image mode) the bot
+        left here, or the V2 card v0.6.0 posted (replaced on the next update)."""
         if msg.author != self.bot.user:
             return False
         if not msg.flags.components_v2:
@@ -494,15 +508,19 @@ class ServerStatusCog(commands.Cog):
         head = f"### {DASHBOARD_TITLE}"
         return any((getattr(c, "content", "") or "").startswith(head) for c in _walk(msg.components))
 
-    async def _publish(self, view, make_file=None) -> None:
-        """Send or edit the status card. `make_file` builds a fresh status.png
-        (image mode) for each attempt."""
+    async def _publish(self, make_files, embeds=None) -> None:
+        """Send or edit the status message. `make_files` builds fresh attachments
+        for each attempt (a discord.File can only be sent once)."""
         channel = await self._get_channel()
         if not channel:
             return
+        view = self._player_view()
 
         def kwargs():
-            return {"view": view, **({"attachments": [make_file()]} if make_file else {})}
+            out = {"attachments": make_files(), "view": view}
+            if embeds is not None:
+                out["embeds"] = embeds
+            return out
 
         if self._message_id:
             try:
@@ -512,8 +530,8 @@ class ServerStatusCog(commands.Cog):
             except (discord.NotFound, discord.HTTPException):
                 self._message_id = None
 
-        # Reuse our previous status message after a bot restart. One posted
-        # before cards is converted in place; if Discord refuses, it is replaced.
+        # Reuse our previous status message after a bot restart. A V2 card can't
+        # go back to embeds, so that one is replaced by a new message.
         old = None
         try:
             async for msg in channel.history(limit=20):
@@ -522,9 +540,9 @@ class ServerStatusCog(commands.Cog):
                     break
         except discord.HTTPException:
             pass
-        if old is not None:
+        if old is not None and not old.flags.components_v2:
             try:
-                await old.edit(content=None, embeds=[], **kwargs())
+                await old.edit(**kwargs())
                 self._message_id = old.id
                 print(f"[ServerStatus] Found existing status message: {old.id}")
                 return
@@ -532,8 +550,10 @@ class ServerStatusCog(commands.Cog):
                 print(f"[ServerStatus] Could not update status message {old.id} ({e}); posting a new one.")
 
         try:
-            files = [make_file()] if make_file else []
-            msg = await channel.send(view=view, files=files)
+            send = {"files": make_files(), "view": view}
+            if embeds is not None:
+                send["embeds"] = embeds
+            msg = await channel.send(**{k: v for k, v in send.items() if v is not None})
             self._message_id = msg.id
             print(f"[ServerStatus] Created status message: {msg.id}")
         except discord.HTTPException as e:
@@ -545,17 +565,29 @@ class ServerStatusCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    async def _send_or_edit_image(self, online: bool):
-        def _new_file():
-            return discord.File(self._image_path, filename=_STATUS_FILE)
+    async def _send_or_edit_image(self):
+        await self._publish(lambda: [discord.File(self._image_path, filename=_STATUS_FILE)])
 
-        view = cards.CardView(cards.card(
-            image=f"attachment://{_STATUS_FILE}", rows=self._player_rows(),
-            colour=0x00E676 if online else 0xFF5252))
-        await self._publish(view, _new_file)
+    async def _graph_png(self, max_players: int) -> bytes | None:
+        """The 24-hour player chart, re-rendered only when the history changed."""
+        if self._graph_png_cache is None or self._graph_dirty:
+            try:
+                self._graph_png_cache = await asyncio.to_thread(
+                    player_graph.render, self._history.points(), None, max_players)
+                self._graph_dirty = False
+            except Exception as e:
+                print(f"[ServerStatus] player graph failed: {e}")
+        return self._graph_png_cache
 
-    async def _send_or_edit_embed(self, embed):
-        await self._publish(cards.CardView(cards.from_embed(embed, rows=self._player_rows())))
+    async def _send_or_edit_embed(self, embed, max_players: int):
+        png = await self._graph_png(max_players)
+        if png is None:
+            await self._publish(lambda: [], [embed])
+            return
+        # The graph is its own embed above the status one, in the same colour.
+        graph = discord.Embed(colour=embed.colour)
+        graph.set_image(url=f"attachment://{_GRAPH_FILE}")
+        await self._publish(lambda: [discord.File(io.BytesIO(png), filename=_GRAPH_FILE)], [graph, embed])
 
     @tasks.loop(seconds=30)
     async def status_loop(self):
@@ -601,6 +633,8 @@ class ServerStatusCog(commands.Cog):
             siege = siege or self._last_siege or {}
 
             max_players = await server_config.read_max_players(self.bot, getattr(self.bot.config, "MAX_PLAYERS", 32))
+            if self._history.record(world.get("playerCount", 0) if server_online else 0):
+                self._graph_dirty = True
 
             if self._mode == "image":
                 pc = world.get("playerCount", 0)
@@ -616,12 +650,12 @@ class ServerStatusCog(commands.Cog):
                     last_update=f"Last update {now} \u2022 Updates every 30 seconds",
                     background=getattr(self.bot.config, "DASHBOARD_BANNER_IMAGE", "") or "",
                 )
-                await self._send_or_edit_image(server_online)
+                await self._send_or_edit_image()
             else:
                 stale = server_online and not rcon_ok
                 embed = build_embed(server_online, world, siege, False,
                                     stale=stale, max_players=max_players)
-                await self._send_or_edit_embed(embed)
+                await self._send_or_edit_embed(embed, max_players)
 
         except Exception as e:
             print(f"[ServerStatus] Error in status loop: {e}")
@@ -629,17 +663,12 @@ class ServerStatusCog(commands.Cog):
     @status_loop.before_loop
     async def _before_status(self):
         await self.bot.wait_until_ready()
-        global ICON_URL, IMAGE_URL, DASHBOARD_TITLE
+        global ICON_URL, DASHBOARD_TITLE
         cfg = self.bot.config
         ICON_URL = await _resolve_image_url(
             self.bot,
             getattr(cfg, "DASHBOARD_ICON_IMAGE", ""),
             getattr(cfg, "DASHBOARD_ICON_URL", ""),
-        )
-        IMAGE_URL = await _resolve_image_url(
-            self.bot,
-            getattr(cfg, "DASHBOARD_BANNER_IMAGE", ""),
-            getattr(cfg, "DASHBOARD_BANNER_URL", ""),
         )
         DASHBOARD_TITLE = await server_config.read_server_name(
             self.bot, getattr(cfg, "DASHBOARD_TITLE", "PZ TAMBAYAN")
