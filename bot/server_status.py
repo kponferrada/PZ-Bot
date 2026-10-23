@@ -58,7 +58,7 @@ ICON_URL = ""   # dashboard thumbnail / author icon (set from config)
 DASHBOARD_TITLE = "PZ TAMBAYAN"  # overridden from config in the cog's __init__
 
 _ASSET_CACHE = Path(__file__).parent / "dashboard_assets.json"
-_STATUS_FILE = "status.png"  # attachment name of the image-mode card
+_STATUS_FILE = "status.jpg"  # attachment name of the image-mode card
 _GRAPH_FILE = "players.png"  # the 24-hour player graph (embed mode)
 
 
@@ -207,6 +207,55 @@ def _bridge_file_is_fresh(data, max_age=BRIDGE_FRESHNESS_SECONDS):
 # Embed builder
 # ============================================================================
 
+def status_values(world, siege) -> dict:
+    """The status values as text, keyed like status_card.PILLS. Shared by the
+    embed and the illustrated card so both always say the same thing."""
+    world = world or {}
+    hour = world.get("hour", 0)
+    mins = world.get("minutes", 0)
+    period = "AM" if hour < 12 else "PM"
+    hh = hour % 12 or 12
+
+    month = world.get("month", 0)
+    day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
+    mn = MONTH_NAMES[month][:3] if 0 <= month < 12 else "?"
+    year = world.get("year")
+
+    elapsed = world.get("elapsedDays", 0)
+    age_raw = world.get("worldAgeDays", 0)
+    if elapsed and elapsed > 0:
+        age = int(elapsed)
+    elif age_raw >= 1:
+        age = int(age_raw)
+    else:
+        age = max(1, int(age_raw))
+
+    ws = world.get("windSpeed", 0)
+    if ws > 0.6:
+        wd = "Strong"
+    elif ws > 0.3:
+        wd = "Moderate"
+    elif ws > 0.05:
+        wd = "Light"
+    else:
+        wd = "Calm"
+
+    siege_day, siege_status, siege_completed = _siege_fields(siege, world)
+    restart_cd, restart_tm = _next_restart()
+    return {
+        "SERVER AGE": f"Day {age}",
+        "DATE": f"{mn} {day}, {year}" if year else f"{mn} {day}",
+        "TIME": f"{hh}:{mins:02d} {period}",
+        "WEATHER": f"{world.get('weather', 'Clear')} ({_temp_c_f(world.get('temperature', 0))})",
+        "WIND": wd if ws <= 0.05 else f"{wd} ({ws * 10:.0f} mph)",
+        "CYCLE": "Night" if world.get("isNight", False) else "Day",
+        "NEXT SIEGE": siege_day,
+        "SIEGE STATUS": siege_status,
+        "COMPLETED": siege_completed,
+        "RESTART": f"{restart_cd} · {restart_tm}",
+    }
+
+
 def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32):
     """Build the PZ Tambayan status embed (copyable text + PZ aesthetic)."""
     world = world or {}
@@ -239,63 +288,27 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
     )
 
     if server_online or world:
-        hour = world.get("hour", 0)
-        mins = world.get("minutes", 0)
-        period = "AM" if hour < 12 else "PM"
-        hh = hour % 12 or 12
-
-        month = world.get("month", 0)
-        day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
-        mn = MONTH_NAMES[month][:3] if 0 <= month < 12 else "?"
-        year = world.get("year")
-        date_val = f"{mn} {day}, {year}" if year else f"{mn} {day}"
-
-        elapsed = world.get("elapsedDays", 0)
-        age_raw = world.get("worldAgeDays", 0)
-        if elapsed and elapsed > 0:
-            age = int(elapsed)
-        elif age_raw >= 1:
-            age = int(age_raw)
-        else:
-            age = max(1, int(age_raw))
-
-        weather = world.get("weather", "Clear")
-        temp = world.get("temperature", 0)
-
-        ws = world.get("windSpeed", 0)
-        if ws > 0.6:
-            wd = "Strong"
-        elif ws > 0.3:
-            wd = "Moderate"
-        elif ws > 0.05:
-            wd = "Light"
-        else:
-            wd = "Calm"
-        wind_val = wd if ws <= 0.05 else f"{wd} ({ws * 10:.0f} mph)"
-
+        v = status_values(world, siege)
         is_night = world.get("isNight", False)
         cyc_icon = "\U0001f319" if is_night else "☀️"
 
-        siege_day, siege_status, siege_completed = _siege_fields(siege, world)
-        restart_cd, restart_tm = _next_restart()
-
         # Row 1: Server Age | Date | Time
-        embed.add_field(name="\U0001f382 Server Age", value=f"Day {age}", inline=True)
-        embed.add_field(name="\U0001f4c5 Date", value=date_val, inline=True)
-        embed.add_field(name="⏰ Time", value=f"{hh}:{mins:02d} {period}", inline=True)
+        embed.add_field(name="\U0001f382 Server Age", value=v["SERVER AGE"], inline=True)
+        embed.add_field(name="\U0001f4c5 Date", value=v["DATE"], inline=True)
+        embed.add_field(name="⏰ Time", value=v["TIME"], inline=True)
 
         # Row 2: Weather | Wind | Cycle
-        embed.add_field(name="\U0001f324️ Weather", value=f"{weather} ({_temp_c_f(temp)})", inline=True)
-        embed.add_field(name="\U0001f4a8 Wind", value=wind_val, inline=True)
-        embed.add_field(name=f"{cyc_icon} Cycle", value="Night" if is_night else "Day", inline=True)
+        embed.add_field(name="\U0001f324️ Weather", value=v["WEATHER"], inline=True)
+        embed.add_field(name="\U0001f4a8 Wind", value=v["WIND"], inline=True)
+        embed.add_field(name=f"{cyc_icon} Cycle", value=v["CYCLE"], inline=True)
 
         # Row 3: Next Siege | Siege Status | Completed Sieges
-        embed.add_field(name="\U0001f6e1️ Next Siege", value=siege_day, inline=True)
-        embed.add_field(name="\U0001f4cb Siege Status", value=siege_status, inline=True)
-        embed.add_field(name="\U0001f3c6 Completed Sieges", value=siege_completed, inline=True)
+        embed.add_field(name="\U0001f6e1️ Next Siege", value=v["NEXT SIEGE"], inline=True)
+        embed.add_field(name="\U0001f4cb Siege Status", value=v["SIEGE STATUS"], inline=True)
+        embed.add_field(name="\U0001f3c6 Completed Sieges", value=v["COMPLETED"], inline=True)
 
         # Next restart (full width)
-        embed.add_field(name="\U0001f504 Next Restart", value=f"{restart_cd} · {restart_tm}", inline=False)
+        embed.add_field(name="\U0001f504 Next Restart", value=v["RESTART"], inline=False)
 
         # Players online as a count; the names are behind the "Online players" button.
         embed.add_field(name="👥 Players Online", value=f"{pc} / {max_players}", inline=False)
@@ -364,84 +377,6 @@ def online_list_text(names: list, offline: bool) -> str:
 # Discord Cog
 # ============================================================================
 
-def _build_card_fields(world: dict, siege: dict, online: bool, max_players: int) -> list:
-    """Map world/siege data into (label, value, subtext) tuples for the card."""
-    world = world or {}
-    siege = siege or {}
-    fields = []
-
-    hour = world.get("hour", 0)
-    mins = world.get("minutes", 0)
-    period = "AM" if hour < 12 else "PM"
-    hh = hour % 12 or 12
-    fields.append(("TIME", f"{hh}:{mins:02d} {period}", "In-game"))
-
-    month = world.get("month", 0)
-    day = world.get("day", 0) + 1  # PZ in-game day is 0-indexed (0 = 1st of month)
-    mn = MONTH_NAMES[month] if 0 <= month < 12 else "?"
-    year = world.get("year")
-    date_val = f"{mn} {day}, {year}" if year else f"{mn} {day}"
-    fields.append(("DATE", date_val, "In-game"))
-
-    elapsed = world.get("elapsedDays", 0)
-    age_raw = world.get("worldAgeDays", 0)
-    if elapsed and elapsed > 0:
-        age = int(elapsed)
-    elif age_raw >= 1:
-        age = int(age_raw)
-    else:
-        age = max(1, int(age_raw))
-    fields.append(("SERVER AGE", f"Day {age}", f"Since {mn} {day}"))
-
-    pc = world.get("playerCount", 0)
-    raw_players = str(world.get("players", "") or "")
-    names = [n.strip() for n in raw_players.split(",") if n.strip()]
-    players_sub = ", ".join(sorted(names))[:22] if names else "Online"
-    fields.append(("PLAYERS", f"{pc} / {max_players}", players_sub))
-
-    weather = world.get("weather", "Clear")
-    temp = world.get("temperature", 0)
-    fields.append(("WEATHER", weather, _temp_c_f(temp)))
-
-    ws = world.get("windSpeed", 0)
-    if ws > 0.6:
-        wdesc = "Strong"
-    elif ws > 0.3:
-        wdesc = "Moderate"
-    elif ws > 0.05:
-        wdesc = "Light"
-    else:
-        wdesc = "Calm"
-    fields.append(("WIND", wdesc, f"{ws * 10:.0f} mph"))
-
-    is_night = world.get("isNight", False)
-    fields.append(("CYCLE", "Night" if is_night else "Day", f"Day {age}"))
-
-    next_day = siege.get("nextSiegeDay")
-    phase = siege.get("phase", "")
-    if next_day is not None:
-        date_str = siege_date_string(world, siege)
-        label = f"Day {next_day}" + (f" · {date_str}" if date_str else "")
-        fields.append(("SIEGE", label, phase.capitalize() if phase else "None detected"))
-    else:
-        fields.append(("SIEGE", "\u2014", "None detected"))
-
-    restart_cd, restart_tm = _next_restart()
-    fields.append(("RESTART", restart_cd, restart_tm))
-
-    h_status = "Idle"
-    if phase == "active":
-        h_status = "ACTIVE"
-    elif phase == "warning":
-        h_status = "Tonight"
-    fields.append(("STATUS", h_status, "Running smoothly" if online else "Offline"))
-
-    completed = siege.get("totalSiegesCompleted")
-    fields.append(("COMPLETED", str(completed) if completed is not None else "0", "Events"))
-
-    return fields
-
-
 class ServerStatusCog(commands.Cog):
 
     def __init__(self, bot):
@@ -452,7 +387,6 @@ class ServerStatusCog(commands.Cog):
         self._channel_id = int(os.getenv('STATUS_CHANNEL_ID', '0'))
         self._message_id = None
         self._channel = None
-        self._image_path = str(Path(__file__).parent / "status_card.png")
         self._mode = getattr(bot.config, "STATUS_MODE", "embed").strip().lower()
 
         # Grace period state
@@ -462,6 +396,7 @@ class ServerStatusCog(commands.Cog):
         self._history = player_graph.PlayerHistory()
         self._graph_png_cache = None
         self._graph_dirty = True
+        self._card_key = None  # what the posted image-mode card shows (skip unchanged renders)
 
         # Last known good data (retained across brief outages)
         self._last_world = None
@@ -574,8 +509,23 @@ class ServerStatusCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    async def _send_or_edit_image(self):
-        await self._publish(lambda: [discord.File(self._image_path, filename=_STATUS_FILE)])
+    async def _send_or_edit_card(self, state: str, world: dict, siege: dict, max_players: int):
+        """Render the illustrated card and post it, only when something on it changed."""
+        values = status_values(world, siege)
+        # One line in the pill: "Day 5\n(Jul 13, 1993)" -> "Day 5 · Jul 13, 1993".
+        values["NEXT SIEGE"] = " · ".join(
+            p.strip("()") for p in values["NEXT SIEGE"].split("\n") if p.strip())
+        players = world.get("playerCount", 0) if state != "offline" else 0
+        points = self._history.points()
+        key = (DASHBOARD_TITLE, state, tuple(sorted(values.items())), players, max_players, tuple(points))
+        if key == self._card_key:
+            return
+        jpeg = await asyncio.to_thread(
+            status_card.render_status_card, title=DASHBOARD_TITLE, state=state, values=values,
+            players=players, max_players=max_players, graph_points=points)
+        await self._publish(lambda: [discord.File(io.BytesIO(jpeg), filename=_STATUS_FILE)])
+        # Remembered only once it is posted, so a failed post is retried next loop.
+        self._card_key = key if self._message_id else None
 
     async def _graph_png(self, max_players: int) -> bytes | None:
         """The 24-hour player chart, re-rendered only when the history changed."""
@@ -659,20 +609,8 @@ class ServerStatusCog(commands.Cog):
                 self._graph_dirty = True
 
             if self._mode == "image":
-                pc = world.get("playerCount", 0)
-                fields = _build_card_fields(world, siege, server_online, max_players)
-                now = datetime.datetime.now().strftime("%b %d, %I:%M %p")
-                await asyncio.to_thread(
-                    status_card.render_status_card,
-                    self._image_path,
-                    title=DASHBOARD_TITLE,
-                    online=server_online,
-                    players=f"{pc} / {max_players}",
-                    fields=fields,
-                    last_update=f"Last update {now} \u2022 Updates every 30 seconds",
-                    background=getattr(self.bot.config, "DASHBOARD_BANNER_IMAGE", "") or "",
-                )
-                await self._send_or_edit_image()
+                state = "offline" if not server_online else ("stale" if not rcon_ok else "online")
+                await self._send_or_edit_card(state, world, siege, max_players)
             else:
                 stale = server_online and not rcon_ok
                 embed = build_embed(server_online, world, siege, False,

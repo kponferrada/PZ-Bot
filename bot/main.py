@@ -124,9 +124,7 @@ class Config:
         # Dashboard
         self.DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "PZ TAMBAYAN")
         self.DASHBOARD_ICON_URL = _env("DASHBOARD_ICON_URL", "")
-        self.DASHBOARD_BANNER_URL = _env("DASHBOARD_BANNER_URL", "")
         self.DASHBOARD_ICON_IMAGE = _env("DASHBOARD_ICON_IMAGE", "assets/profile-pic.png")
-        self.DASHBOARD_BANNER_IMAGE = _env("DASHBOARD_BANNER_IMAGE", "assets/profile-banner.png")
         self.MAX_PLAYERS = _env_int("MAX_PLAYERS", 32)
         self.STATUS_MODE = _env("STATUS_MODE", "embed").strip().lower()
 

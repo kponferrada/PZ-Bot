@@ -166,9 +166,22 @@ one card:
 
 The bot records the player count itself from the status loop and keeps 24
 hours of it in `player_history.json`, so the graph starts empty on a fresh
-install and fills in over a day. `image` mode posts the rendered card with the
-same buttons and no graph. A status card from v0.6.0 (a V2 card) is replaced by
-a new message on the first update.
+install and fills in over a day. A status card from v0.6.0 (a V2 card) is
+replaced by a new message on the first update.
+
+`STATUS_MODE=image` posts the illustrated card instead: the art in
+`assets/status-card-template.png` with the server name, ONLINE / OFFLINE (amber
+dot when RCON is quiet but the bridge files are fresh), each value in its beige
+box, the number of players online (no names), and the 24-hour graph on the
+chalkboard, with the same five buttons under it. It is a JPEG (~0.4 MB) and is
+only redrawn and re-posted when something on it changes. The in-game clock
+moves every update while the server is up, so in practice that is most updates
+while it is online and none while it is offline. The text on the card can't be
+copied.
+
+To change the art, keep the layout of the template (positions are in
+`status_card.py`: `PILLS` and the `_*_BOX` areas whose baked placeholder text
+is erased once at startup).
 
 ### Cards
 

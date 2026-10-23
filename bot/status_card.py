@@ -1,206 +1,230 @@
-"""status_card.py — renders the PZ Tambayan server-status card image (Pillow).
+"""status_card.py — the illustrated server-status card (STATUS_MODE=image).
 
-Produces a dark, game-themed PNG in the PZ Tambayan style:
-  header ("PZ TAMBAYAN"), a two-card status bar (online + players), a 4-column
-  grid of info cards with icons, and a footer. Fonts and the background image
-  are auto-detected where possible, with safe fallbacks.
+Draws onto assets/status-card-template.png (1201 x 1310): the chalkboard
+players graph at the top, the title and status line on the brush strokes, one
+value per beige pill, and the player count. The art, labels and icons are
+part of the template; everything that changes is drawn here.
+
+The template still carries a few placeholders in its brush strokes and on the
+chalkboard (the server name, the status line, the axis numbers, "Now __/__",
+"(__ / __)"). `_base()` erases them once (masks the text pixels and refills
+them from the surrounding texture, row by row, then softens the patch) and
+caches the cleaned template; each render only draws on a copy of it.
+
+Output is JPEG (painted art: a third of a PNG's size, ~20 ms to encode).
+Coordinates below are template pixels.
 """
+from __future__ import annotations
 
-import os
-from PIL import Image, ImageDraw, ImageFont
+import datetime
+import io
+from functools import lru_cache
+from pathlib import Path
 
-# --- palette ---------------------------------------------------------------
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-BG = (11, 14, 20, 255)
-CARD = (21, 25, 34, 255)
-CARD_BORDER = (42, 47, 58, 255)
-GREEN = (0, 230, 118, 255)
-GREEN_DARK = (0, 128, 74, 255)
-RED = (255, 82, 82, 255)
-RED_DARK = (138, 36, 36, 255)
-BLUE = (127, 179, 232, 255)
-WHITE = (240, 244, 248, 255)
-GREY = (150, 160, 172, 255)
-DIM = (95, 105, 116, 255)
-AMBER = (255, 193, 7, 255)
-ORANGE = (255, 152, 0, 255)
-PINK = (255, 150, 200, 255)
-GOLD = (255, 205, 60, 255)
+import player_graph
 
-WIDTH = 1200
-HEIGHT = 700
+_ASSETS = Path(__file__).parent / "assets"
+TEMPLATE = _ASSETS / "status-card-template.png"
+_FONTS = _ASSETS / "fonts"
 
-# field label -> (emoji icon, icon colour)
-ICONS = {
-    "TIME": ("\u23f0", AMBER),
-    "DATE": ("\U0001f4c5", RED),
-    "SERVER AGE": ("\U0001f382", PINK),
-    "PLAYERS": ("\U0001f465", BLUE),
-    "WEATHER": ("\u2600", AMBER),
-    "WIND": ("\U0001f4a8", BLUE),
-    "CYCLE": ("\U0001f317", AMBER),
-    "SIEGE": ("\U0001f6e1\ufe0f", WHITE),
-    "RESTART": ("\U0001f504", RED),
-    "STATUS": ("\U0001f4cb", ORANGE),
-    "COMPLETED": ("\U0001f3c6", GOLD),
+# Placeholders baked into the template: (box, which pixels are text).
+_TITLE_BOX = (330, 352, 712, 440)          # "PZT TEST" on the red stroke
+_STATUS_BOX = (316, 455, 842, 521)         # red dot + "OFFLINE — SERVER IS DOWN"
+_NOW_BOX = (858, 56, 960, 95)              # "__/__" after "Now"
+_PEAK_BOX = (1028, 56, 1076, 95)           # "__" after "Peak"
+_Y_LABELS_BOX = (138, 108, 172, 262)       # 4 3 2 1 0
+_X_LABELS_BOX = (205, 234, 1078, 286)      # 12 AM ... 8 PM (their tops reach above the 0 line)
+_PLAYERS_BAND_BOX = (182, 1070, 578, 1112)  # "PLAYERS (__ / __) — ONLINE NOW"
+
+# Value pills (the beige boxes under each label).
+PILLS = {
+    "SERVER AGE": (170, 643, 357, 683),
+    "DATE": (481, 643, 641, 682),
+    "TIME": (770, 643, 923, 683),
+    "WEATHER": (171, 755, 356, 795),
+    "WIND": (480, 755, 638, 796),
+    "CYCLE": (769, 758, 922, 798),
+    "NEXT SIEGE": (171, 878, 358, 919),
+    "SIEGE STATUS": (483, 880, 641, 921),
+    "COMPLETED": (769, 882, 923, 922),
+    "RESTART": (175, 1000, 626, 1040),
+    "PLAYERS": (178, 1113, 553, 1152),
 }
+_PILL = (194, 177, 151)
+_INK = (38, 30, 24)
+
+# Chart area on the chalkboard: x span, and the y of the "0" and top lines.
+_PLOT_X = (178, 1070)
+_PLOT_Y0, _PLOT_YTOP = 247, 126
+_CHALK = (232, 232, 226)
+_GREEN = (64, 222, 122)
+
+_TITLE_INK = (244, 236, 222)
+_STATUS_COLOURS = {"online": (46, 204, 96), "stale": (240, 176, 32), "offline": (220, 36, 48)}
 
 
-def _font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """Return a TTF font, trying common OS locations, then PIL's default."""
-    candidates = []
-    if os.name == "nt":
-        if bold:
-            candidates += [r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\segoeuib.ttf"]
-        else:
-            candidates += [r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\segoeui.ttf"]
-    if bold:
-        candidates += [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        ]
-    else:
-        candidates += [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                continue
-    return ImageFont.load_default()
-
-
-def _emoji_font(size: int) -> ImageFont.FreeTypeFont:
-    """A font that can render emoji glyphs (monochrome via Pillow)."""
-    candidates = [
-        r"C:\Windows\Fonts\seguiemj.ttf",
-        r"C:\Windows\Fonts\seguisym.ttf",
-        "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-    ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                continue
-    return _font(size)
-
-
-def _tw(draw: ImageDraw.ImageDraw, text: str, font) -> int:
-    """Text width (bounded, since load_default font has no length support)."""
+def _font(name: str, size: int):
     try:
-        return int(draw.textlength(text, font=font))
-    except Exception:
-        return len(text) * (font.size // 2 if hasattr(font, "size") else 6)
+        return ImageFont.truetype(str(_FONTS / name), size)
+    except OSError:
+        return ImageFont.load_default()
 
 
-def render_status_card(
-    output_path: str,
-    *,
-    title: str = "PZ TAMBAYAN",
-    subtitle: str = "SURVIVE \u2022 BUILD \u2022 TAMBAY",
-    tagline: str = "ANOTHER DAY ANOTHER STORY.",
-    online: bool = True,
-    players: str = "0 / 32",
-    quote: str = "Good luck out there, survivor.",
-    fields: list = None,
-    last_update: str = "",
-    background: str = "",
-) -> str:
-    """Render the status card and save it to `output_path` (PNG)."""
-    fields = fields or []
+def _lum(p) -> float:
+    return 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]
 
-    img = Image.new("RGBA", (WIDTH, HEIGHT), BG)
-    if background and os.path.exists(background):
-        try:
-            bg = Image.open(background).convert("RGBA").resize((WIDTH, HEIGHT))
-            shade = Image.new("RGBA", (WIDTH, HEIGHT), (6, 8, 12, 215))
-            img = Image.alpha_composite(bg, shade)
-        except Exception as e:
-            print(f"[StatusCard] background failed: {e}")
 
+def _erase(img: Image.Image, box: tuple, is_text, grow: int = 2) -> None:
+    """Refill the text pixels in `box` from their left and right neighbours."""
+    region = img.crop(box)
+    px = region.load()
+    w, h = region.size
+    mask = Image.new("L", (w, h), 0)
+    mp = mask.load()
+    for y in range(h):
+        for x in range(w):
+            if is_text(px[x, y]):
+                mp[x, y] = 255
+    mask = mask.filter(ImageFilter.MaxFilter(2 * grow + 1))
+    mp = mask.load()
+    for y in range(h):
+        x = 0
+        while x < w:
+            if not mp[x, y]:
+                x += 1
+                continue
+            start = x
+            while x < w and mp[x, y]:
+                x += 1
+            left = px[start - 1, y] if start > 0 else None
+            right = px[x, y] if x < w else None
+            a, b = left or right, right or left
+            if a is None:
+                continue
+            n = x - start + 1
+            for i in range(start, x):
+                t = (i - start + 1) / n
+                px[i, y] = tuple(int(a[c] * (1 - t) + b[c] * t) for c in range(3))
+    soft = region.filter(ImageFilter.GaussianBlur(1.6))
+    region.paste(soft, (0, 0), mask.filter(ImageFilter.GaussianBlur(1)))
+    img.paste(region, box[:2])
+
+
+@lru_cache(maxsize=1)
+def _base() -> Image.Image:
+    """The template with its placeholders erased (computed once)."""
+    img = Image.open(TEMPLATE).convert("RGB")
+    _erase(img, _TITLE_BOX, lambda p: min(p) > 150)
+    _erase(img, _STATUS_BOX, lambda p: _lum(p) > 95 or (p[0] > 140 and p[1] < 90))
+    _erase(img, _NOW_BOX, lambda p: p[1] > 110 or _lum(p) > 110)
+    _erase(img, _PEAK_BOX, lambda p: p[1] > 110 or _lum(p) > 110)
+    _erase(img, _Y_LABELS_BOX, lambda p: _lum(p) > 110)
+    _erase(img, _X_LABELS_BOX, lambda p: _lum(p) > 110)
+    _erase(img, _PLAYERS_BAND_BOX, lambda p: _lum(p) > 110)
+    return img
+
+
+def _fit(draw, text: str, name: str, size: int, max_w: int, min_size: int = 12):
+    """The largest font (down to `min_size`) that fits `text` in `max_w`."""
+    while size > min_size:
+        font = _font(name, size)
+        if draw.textlength(text, font=font) <= max_w:
+            return font
+        size -= 1
+    return _font(name, min_size)
+
+
+def _pill(draw, box: tuple, text: str) -> None:
+    x0, y0, x1, y1 = box
+    draw.rounded_rectangle((x0 + 1, y0 + 1, x1 - 1, y1 - 1), radius=6, fill=_PILL)
+    font = _fit(draw, text, "Oswald.ttf", 26, x1 - x0 - 20)
+    draw.text((x0 + 10, (y0 + y1) / 2), text, font=font, fill=_INK, anchor="lm")
+
+
+def _graph(img: Image.Image, draw, points: list, now: float) -> None:
+    start = now - player_graph.WINDOW
+    counts = [n for _, n in points]
+    top = max(4, max(counts) if counts else 0)
+    top += -top % 4
+    x_left, x_right = _PLOT_X
+    label = _font("PermanentMarker-Regular.ttf", 17)
+
+    def x(ts):
+        return x_left + (ts - start) / player_graph.WINDOW * (x_right - x_left)
+
+    def y(n):
+        return _PLOT_Y0 - n / top * (_PLOT_Y0 - _PLOT_YTOP)
+
+    for i in range(5):
+        n = top * i // 4
+        draw.text((160, y(n)), str(n), font=label, fill=_CHALK, anchor="rm")
+    t = datetime.datetime.fromtimestamp(start, player_graph._TZ).replace(minute=0, second=0, microsecond=0)
+    t += datetime.timedelta(hours=1)
+    while t.timestamp() <= now:
+        if t.hour % 4 == 0:
+            draw.text((x(t.timestamp()), 268), player_graph._hour_label(t.timestamp()),
+                      font=label, fill=_CHALK, anchor="mm")
+        t += datetime.timedelta(hours=1)
+
+    if not points:
+        return
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    for seg in player_graph._segments(points):
+        line = []
+        for i, (ts, n) in enumerate(seg):
+            end = seg[i + 1][0] if i + 1 < len(seg) else min(ts + player_graph.BUCKET, now)
+            line += [(x(ts), y(n)), (x(end), y(n))]
+        odraw.polygon(line + [(line[-1][0], _PLOT_Y0), (line[0][0], _PLOT_Y0)], fill=(*_GREEN, 70))
+        odraw.line(line, fill=(*_GREEN, 255), width=3)
+    img.paste(overlay, (0, 0), overlay)
+
+
+def render_status_card(*, title: str, state: str, values: dict, players: int, max_players: int,
+                       graph_points: list, now: float | None = None) -> bytes:
+    """The card as JPEG bytes.
+
+    `state` is "online", "stale" (online, RCON quiet) or "offline". `values`
+    maps PILLS keys (except PLAYERS) to their text."""
+    import time
+    now = time.time() if now is None else now
+    img = _base().copy()
     draw = ImageDraw.Draw(img)
 
-    f_small = _font(16, bold=False)
-    f_label = _font(14, bold=False)
-    f_value = _font(23, bold=True)
-    f_sub = _font(12, bold=False)
-    f_title = _font(60, bold=True)
-    f_tag = _font(19, bold=False)
-    f_status = _font(28, bold=True)
-    f_icon = _emoji_font(24)
+    # Title on the red stroke.
+    title_font = _fit(draw, title.upper(), "Anton-Regular.ttf", 74, _TITLE_BOX[2] - _TITLE_BOX[0] - 8, 34)
+    draw.text((_TITLE_BOX[0] + 6, (_TITLE_BOX[1] + _TITLE_BOX[3]) / 2), title.upper(),
+              font=title_font, fill=_TITLE_INK, anchor="lm")
 
-    # --- header -----------------------------------------------------------
-    draw.text((40, 24), "PROJECT ZOMBOID", font=f_small, fill=GREY)
-    parts = title.split(" ", 1)
-    first = parts[0]
-    rest = parts[1] if len(parts) > 1 else ""
-    if rest:
-        w_first = _tw(draw, first + " ", f_title)
-        draw.text((40, 48), first, font=f_title, fill=WHITE)
-        draw.text((40 + w_first, 48), rest, font=f_title, fill=BLUE)
-    else:
-        draw.text((40, 48), first, font=f_title, fill=WHITE)
-    draw.text((42, 128), subtitle, font=f_small, fill=GREY)
-    tw = _tw(draw, tagline, f_tag)
-    draw.text((WIDTH - 40 - tw, 52), tagline, font=f_tag, fill=GREY)
+    # Status line on the black stroke.
+    cx, cy = 346, 488
+    draw.ellipse((cx - 21, cy - 21, cx + 21, cy + 21), fill=_STATUS_COLOURS.get(state, _STATUS_COLOURS["offline"]))
+    head, tail = {"online": ("ONLINE", " — SERVER IS RUNNING"),
+                  "stale": ("ONLINE", " — DATA MAY BE STALE"),
+                  "offline": ("OFFLINE", " — SERVER IS DOWN")}.get(state, ("OFFLINE", " — SERVER IS DOWN"))
+    head_font = _font("Anton-Regular.ttf", 46)
+    draw.text((385, cy), head, font=head_font, fill=_TITLE_INK, anchor="lm")
+    tx = 385 + draw.textlength(head, font=head_font)
+    tail_font = _fit(draw, tail, "Anton-Regular.ttf", 32, _STATUS_BOX[2] - 6 - int(tx), 18)
+    draw.text((tx, cy + 3), tail, font=tail_font, fill=(196, 196, 190), anchor="lm")
 
-    # --- status bar: two cards + quote ------------------------------------
-    bar_y = 185
-    bar_h = 100
+    # Values.
+    for key, box in PILLS.items():
+        if key != "PLAYERS":
+            _pill(draw, box, str(values.get(key, "—")))
+    _pill(draw, PILLS["PLAYERS"], f"{players} / {max_players}")
+    draw.text((192, 1091), "PLAYERS — ONLINE NOW", font=_font("Anton-Regular.ttf", 28),
+              fill=_TITLE_INK, anchor="lm")
 
-    left_col = GREEN_DARK if online else RED_DARK
-    draw.rounded_rectangle([40, bar_y, 400, bar_y + bar_h], radius=12, fill=left_col)
-    draw.ellipse([58, bar_y + 20, 76, bar_y + 38], fill=GREEN if online else RED)
-    status = "ONLINE" if online else "OFFLINE"
-    draw.text((88, bar_y + 8), status, font=f_status, fill=WHITE)
-    sub_col = (180, 240, 210) if online else (255, 200, 200)
-    draw.text((58, bar_y + 58), "SERVER IS RUNNING" if online else "SERVER IS DOWN",
-              font=_font(14, bold=False), fill=sub_col)
+    # Chalkboard: Now / Peak and the 24-hour graph.
+    counts = [n for _, n in graph_points]
+    num = _font("Oswald.ttf", 30)
+    draw.text((864, 75), f"{players}/{max_players}", font=num, fill=_GREEN, anchor="lm")
+    draw.text((1034, 75), str(max(counts) if counts else players), font=num, fill=_GREEN, anchor="lm")
+    _graph(img, draw, graph_points, now)
 
-    draw.rounded_rectangle([416, bar_y, 776, bar_y + bar_h], radius=12,
-                           fill=CARD, outline=CARD_BORDER, width=1)
-    draw.text((436, bar_y + 8), players, font=f_status, fill=WHITE)
-    draw.text((436, bar_y + 58), "PLAYERS ONLINE", font=_font(14, bold=False), fill=GREY)
-
-    qf = _font(16, bold=False)
-    qw = _tw(draw, quote, qf)
-    draw.text((WIDTH - 40 - qw, bar_y + 38), quote, font=qf, fill=GREY)
-
-    # --- info grid --------------------------------------------------------
-    grid_y = bar_y + bar_h + 20
-    gap = 12
-    card_w = (WIDTH - 80 - 3 * gap) // 4
-    card_h = 92
-    row_h = card_h + gap
-
-    for i, (label, value, sub) in enumerate(fields[:12]):
-        col = i % 4
-        row = i // 4
-        x = 40 + col * (card_w + gap)
-        y = grid_y + row * row_h
-        draw.rounded_rectangle([x, y, x + card_w, y + card_h], radius=10,
-                               fill=CARD, outline=CARD_BORDER, width=1)
-        icon, icon_col = ICONS.get(label, ("", WHITE))
-        if icon:
-            draw.text((x + 14, y + 10), icon, font=f_icon, fill=icon_col)
-            lx = x + 14 + 32
-        else:
-            lx = x + 14
-        draw.text((lx, y + 16), label, font=f_label, fill=GREY)
-        draw.text((x + 14, y + 38), str(value), font=f_value, fill=WHITE)
-        draw.text((x + 14, y + 66), sub or "", font=f_sub, fill=DIM)
-
-    # --- footer -----------------------------------------------------------
-    foot_y = grid_y + 3 * row_h + 10
-    draw.text((40, foot_y), last_update, font=_font(15, bold=False), fill=GREY)
-    draw.text((40, foot_y + 26), "KNOX COUNTY NEVER FORGETS.", font=_font(17, bold=True), fill=DIM)
-    stw = _tw(draw, "STAY ALIVE.", _font(17, bold=True))
-    draw.text((WIDTH - 40 - stw, foot_y + 26), "STAY ALIVE.", font=_font(17, bold=True), fill=GREEN)
-
-    img.convert("RGB").save(output_path, "PNG")
-    return output_path
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    return buf.getvalue()
