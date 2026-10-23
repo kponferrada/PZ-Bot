@@ -62,6 +62,7 @@ DASHBOARD_TITLE = "PZ TAMBAYAN"  # overridden from config in the cog's __init__
 _ASSET_CACHE = Path(__file__).parent / "dashboard_assets.json"
 _STATUS_FILE = "status.jpg"  # attachment name of the image-mode card
 _GRAPH_FILE = "players.png"  # the 24-hour player graph (embed mode)
+_BLANK = "\u200b"  # an empty embed field (ends a row of inline fields)
 
 
 def _load_asset_cache() -> dict:
@@ -295,8 +296,9 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
                 siege_at=None):
     """Build the PZ Tambayan status embed (copyable text + PZ aesthetic).
 
-    Layout: a status line (state, players, next restart), two rows of three
-    world fields, then the 24-hour graph as the image (set by the cog).
+    Layout: a status line (state, players, server age), the next restart,
+    two rows of two world fields, Siege Night on its own row, then the 24-hour
+    graph as the image (set by the cog).
     `restart` is (epoch, running), None for none coming, or left out to read
     the schedule. `siege_at` is the next siege's real start (epoch) if known.
     Field icons are the bot's flat emoji (status_icons)."""
@@ -319,12 +321,15 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
     pc = world.get("playerCount", 0) if server_online else 0
     if restart is ...:
         restart = (_next_restart_ts(), False)
-    lines = [f"{state} · {icon('players')} **{pc}** / {max_players} survivors online", restart_line(restart),
-             "-# Good luck out there, survivor."]
+    has_world = bool(server_online or world)
+    v = status_values(world, siege) if has_world else {}
+    status = f"{state} · {icon('players')} **{pc}** / {max_players} survivors online"
+    if has_world:
+        status += f" · {icon('age')} {v['SERVER AGE']}"
+    lines = [status, restart_line(restart), "-# Good luck out there, survivor."]
     embed.description = "\n".join(lines)
 
-    if server_online or world:
-        v = status_values(world, siege)
+    if has_world:
         siege_day, siege_status, siege_completed = _siege_fields(siege, world)
         # "Day 665\n(May 4, 1995)" -> "Day 665 · May 4"
         when = siege_day.split("\n")
@@ -333,14 +338,17 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
         weather = status_icons.weather_key(world.get("weather", "Clear"))
         siege_lines = [siege_when, siege_when_line(siege_at, time.time()),
                        f"{siege_status} · {siege_completed} survived"]
-        embed.add_field(name=f"{icon('age')} Server age", value=v["SERVER AGE"], inline=True)
+        # Two per row: Discord fills rows of three inline fields, so a blank
+        # third field ends each row. Siege Night gets row 3 to itself, on the left.
         embed.add_field(name=f"{icon('date')} In-game date", value=v["DATE"], inline=True)
         embed.add_field(name=f"{icon(cycle)} In-game time", value=f"{v['TIME']} · {v['CYCLE']}", inline=True)
+        embed.add_field(name=_BLANK, value=_BLANK, inline=True)
         embed.add_field(name=f"{icon(weather)} Weather", value=v["WEATHER"].replace(" (", " · ").rstrip(")"),
                         inline=True)
         embed.add_field(name=f"{icon('wind')} Wind", value=v["WIND"].replace(" (", " · ").rstrip(")"), inline=True)
+        embed.add_field(name=_BLANK, value=_BLANK, inline=True)
         embed.add_field(name=f"{icon('siege')} Siege Night", value="\n".join(l for l in siege_lines if l),
-                        inline=True)
+                        inline=False)
 
     footer = "Knox County never forgets · Stay alive"
     embed.set_footer(text=footer, icon_url=ICON_URL or None)

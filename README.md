@@ -153,14 +153,14 @@ In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
 one card:
 
 1. a status line: Online / Offline (amber "data delayed" when RCON is quiet but
-   the bridge files are fresh) and the number of players online (`6 / 32`; no
-   names), then the next restart as Discord timestamps: each viewer sees it in
+   the bridge files are fresh), the number of players online (`6 / 32`; no
+   names) and the server age (`Day 659`), then the next restart as Discord timestamps: each viewer sees it in
    their own timezone, and "in 36 minutes" counts down by itself. It follows
    the restart controls: a running countdown shows "Restarting in …", a
    deferral its new time, and a skipped scheduled slot is passed over;
-2. two rows of three, each with a flat icon: Server age, In-game date, In-game
-   time (sun or moon); Weather (icon follows the weather), Wind, Siege Night:
-   the next siege day, **when it starts in real life** (a Discord timestamp,
+2. fields with a flat icon each, two per row: In-game date and In-game time
+   (sun or moon); Weather (icon follows the weather) and Wind. Siege Night has
+   the third row to itself, on the left: the next siege day, **when it starts in real life** (a Discord timestamp,
    e.g. "≈ 6:42 PM · in 3 hours"), its status and how many survived.
    The real time is worked out from the siege's in-game start
    (`SiegeNight.SiegeStartHour` in the server's `*_SandboxVars.lua`, default
@@ -173,8 +173,8 @@ one card:
    bot's own emojis (application emojis: no server emoji slots used). If that
    upload fails the embed falls back to plain emoji;
 3. inside the same card, under the fields: a graph of players online over the
-   last 24 hours (Philippine time, 5-minute steps, each step the highest count
-   seen in it; gaps where the bot was down). Discord always puts an embed's
+   last 24 hours (Philippine time; one point per 5 minutes, the highest count
+   seen in it, joined by straight lines; gaps where the bot was down). Discord always puts an embed's
    image below its fields;
 4. a row of five buttons under it: **My rank**, **Online players**, **Player
    stats**, **Leaderboard**, **RP leaderboard** (private answers, as above).
