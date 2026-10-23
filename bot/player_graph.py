@@ -107,8 +107,9 @@ def _segments(points: list) -> list:
 
 
 def render(points: list, now: float | None = None, max_players: int = 0,
-           width: int = 900, height: int = 260) -> bytes:
-    """The chart as PNG bytes."""
+           width: int = 800, height: int = 300) -> bytes:
+    """The chart as PNG bytes. Sized for an embed image (Discord shows it at
+    about half size), so the type is large."""
     now = time.time() if now is None else now
     start = now - WINDOW
     counts = [n for _, n in points]
@@ -119,14 +120,17 @@ def render(points: list, now: float | None = None, max_players: int = 0,
 
     img = Image.new("RGB", (width, height), _BG)
     draw = ImageDraw.Draw(img)
-    title_f, label_f = _font("Oswald.ttf", 22), _font("IBMPlexMono-Regular.ttf", 14)
+    title_f, label_f = _font("Oswald.ttf", 30), _font("NotoSans-Bold.ttf", 19)
+    stat_f = _font("Oswald.ttf", 30)
 
-    draw.text((16, 10), "PLAYERS · LAST 24 HOURS", font=title_f, fill=_TITLE)
+    draw.text((20, 12), "Players · last 24 hours", font=title_f, fill=_TITLE)
     cap = f" / {max_players}" if max_players else ""
-    stats = f"Now {current}{cap}   Peak {peak}"
-    draw.text((width - 16, 14), stats, font=title_f, fill=_LINE, anchor="ra")
+    peak_text = f"Peak {peak}"
+    draw.text((width - 20, 14), peak_text, font=stat_f, fill=_AXIS_TEXT, anchor="ra")
+    now_x = width - 20 - draw.textlength(peak_text, font=stat_f) - 24
+    draw.text((now_x, 14), f"Now {current}{cap}", font=stat_f, fill=_LINE, anchor="ra")
 
-    left, right, top_px, bottom = 46, width - 16, 50, height - 30
+    left, right, top_px, bottom = 50, width - 20, 72, height - 40
     plot_w, plot_h = right - left, bottom - top_px
 
     def x(ts):
@@ -139,7 +143,8 @@ def render(points: list, now: float | None = None, max_players: int = 0,
         n = top * i / 4
         yy = y(n)
         draw.line([(left, yy), (right, yy)], fill=_GRID, width=1)
-        draw.text((left - 8, yy), f"{n:g}", font=label_f, fill=_AXIS_TEXT, anchor="rm")
+        if i % 2 == 0:  # 0, half, top: enough to read, not cluttered
+            draw.text((left - 10, yy), f"{n:g}", font=label_f, fill=_AXIS_TEXT, anchor="rm")
 
     # Hour labels every 4 hours, on the hour in PHT.
     first = datetime.datetime.fromtimestamp(start, _TZ).replace(minute=0, second=0, microsecond=0)
@@ -147,8 +152,7 @@ def render(points: list, now: float | None = None, max_players: int = 0,
     while t.timestamp() <= now:
         if t.hour % 4 == 0:
             xx = x(t.timestamp())
-            draw.line([(xx, top_px), (xx, bottom)], fill=_GRID, width=1)
-            draw.text((xx, bottom + 6), _hour_label(t.timestamp()), font=label_f, fill=_AXIS_TEXT, anchor="ma")
+            draw.text((xx, bottom + 8), _hour_label(t.timestamp()), font=label_f, fill=_AXIS_TEXT, anchor="ma")
         t += datetime.timedelta(hours=1)
 
     if points:
@@ -160,8 +164,8 @@ def render(points: list, now: float | None = None, max_players: int = 0,
             for i, (ts, n) in enumerate(seg):
                 end = seg[i + 1][0] if i + 1 < len(seg) else min(ts + BUCKET, now)
                 line += [(x(ts), y(n)), (x(end), y(n))]
-            odraw.polygon(line + [(line[-1][0], bottom), (line[0][0], bottom)], fill=(*_LINE, 60))
-            odraw.line(line, fill=(*_LINE, 255), width=2)
+            odraw.polygon(line + [(line[-1][0], bottom), (line[0][0], bottom)], fill=(*_LINE, 55))
+            odraw.line(line, fill=(*_LINE, 255), width=4)
         img.paste(overlay, (0, 0), overlay)
     else:
         draw.text(((left + right) / 2, (top_px + bottom) / 2), "Collecting data…",

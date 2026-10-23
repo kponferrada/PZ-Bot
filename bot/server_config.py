@@ -114,6 +114,54 @@ async def read_server_name(bot, fallback: str = "PZ TAMBAYAN") -> str:
     return value
 
 
+# --- Siege Night start hour (sandbox, cached) --------------------------------
+
+_siege_hour_cache = {"value": None, "ts": 0.0}
+SIEGE_DEFAULT_START_HOUR = 20  # Siege Night's own default (SN.DUSK_HOUR)
+
+
+def sandbox_number(text: str, block: str, key: str):
+    """`key = <number>` inside the `block = { ... }` table of a SandboxVars.lua."""
+    start = text.find(f"{block} = {{")
+    if start < 0:
+        return None
+    end = text.find("}", start)
+    for line in text[start:end].splitlines():
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == key:
+            try:
+                return float(value.strip().rstrip(","))
+            except ValueError:
+                return None
+    return None
+
+
+async def read_siege_start_hour(bot) -> int:
+    """The in-game hour a scheduled siege starts (SandboxVars SiegeNight.SiegeStartHour,
+    read from <Server>/<name>_SandboxVars.lua, cached ~5 min; default 20)."""
+    now = time.time()
+    cached = _siege_hour_cache["value"]
+    if cached is not None and (now - _siege_hour_cache["ts"]) < _MAX_PLAYERS_TTL:
+        return cached
+    value = SIEGE_DEFAULT_START_HOUR
+    server_dir = _server_dir(bot)
+    if server_dir:
+        try:
+            sftp = sftp_client.get()
+            for name in await sftp.list_dir(server_dir):
+                if name.endswith("_SandboxVars.lua"):
+                    hour = sandbox_number(await sftp.read_text(f"{server_dir.rstrip('/')}/{name}"),
+                                          "SiegeNight", "SiegeStartHour")
+                    if hour is not None and 0 <= hour < 24:
+                        value = int(hour)
+                    break
+        except sftp_client.SftpError as e:
+            print(f"[ServerConfig] Could not read SiegeStartHour, using {value}: {e}")
+    _siege_hour_cache["value"] = value
+    _siege_hour_cache["ts"] = now
+    return value
+
+
 # --- Workshop items ---------------------------------------------------------
 
 

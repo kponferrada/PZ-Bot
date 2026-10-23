@@ -447,6 +447,23 @@ class RestartWatch(commands.Cog):
     def _countdown_running(self) -> bool:
         return self._restart_task is not None and not self._restart_task.done()
 
+    def next_restart(self) -> tuple | None:
+        """(epoch seconds, running) of the next restart, for the status card: a
+        countdown in progress (running=True), a deferred restart, or the next
+        scheduled slot that isn't skipped. None when nothing is coming."""
+        if self._countdown_running() and not self._maintenance_active():
+            return self._restart_at, True
+        if self._is_deferred() and self._deferred_kind:
+            return self._defer_until, False
+        if not self.bot.features.is_enabled("scheduled_restarts"):
+            return None
+        slot = self._next_scheduled_restart()
+        for _ in range(len(self._schedule_hours) * 2):
+            if not self._slot_skipped(int(slot.timestamp())):
+                return slot.timestamp(), False
+            slot = self._next_scheduled_restart(slot)
+        return None
+
     def _slot_skipped(self, key: int) -> str:
         """Why the scheduled slot `key` won't run ("" = it will)."""
         if key == self._skip_slot:

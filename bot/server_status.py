@@ -47,7 +47,9 @@ import player_graph
 import status_card
 import server_config
 from command_panel import walk_components as _walk
-from game_calendar import siege_date_string
+import status_icons
+from game_calendar import GameClockRate, siege_date_string, siege_real_time
+from status_icons import icon
 
 # ============================================================================
 # Constants
@@ -256,69 +258,92 @@ def status_values(world, siege) -> dict:
     }
 
 
-def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32):
-    """Build the PZ Tambayan status embed (copyable text + PZ aesthetic)."""
+def _next_restart_ts() -> float:
+    """The next restart in the schedule (fallback when RestartWatch isn't loaded)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    candidates = []
+    for h in RESTART_HOURS_UTC:
+        t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if t <= now:
+            t += datetime.timedelta(days=1)
+        candidates.append(t)
+    return min(candidates).timestamp()
+
+
+def restart_line(restart) -> str:
+    """The restart line of the status embed. `restart` is (epoch, running) or
+    None. Discord timestamps show in each viewer's own timezone, and the
+    relative one counts down by itself between updates."""
+    if restart is None:
+        return f"{icon('restart')} No restart scheduled"
+    ts, running = int(restart[0]), restart[1]
+    if running:
+        return f"{icon('restart')} **Restarting <t:{ts}:R>**"
+    return f"{icon('restart')} Next restart **<t:{ts}:t>** · <t:{ts}:R>"
+
+
+def siege_when_line(siege_at, now: float) -> str:
+    """The real-world start of the next siege as Discord timestamps ("" if unknown)."""
+    if not siege_at:
+        return ""
+    ts = int(siege_at)
+    # Within a day the clock time is enough; further out it needs the date.
+    return f"≈ <t:{ts}:{'t' if ts - now < 20 * 3600 else 'f'}> · <t:{ts}:R>"
+
+
+def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32, restart=...,
+                siege_at=None):
+    """Build the PZ Tambayan status embed (copyable text + PZ aesthetic).
+
+    Layout: a status line (state, players, next restart), two rows of three
+    world fields, then the 24-hour graph as the image (set by the cog).
+    `restart` is (epoch, running), None for none coming, or left out to read
+    the schedule. `siege_at` is the next siege's real start (epoch) if known.
+    Field icons are the bot's flat emoji (status_icons)."""
     world = world or {}
     siege = siege or {}
 
     if server_online and not stale:
-        colour = 0x00E676
-    elif server_online and stale:
-        colour = 0xFFB300
+        colour, state = 0x00E676, "🟢 **Online**"
+    elif server_online:
+        colour, state = 0xFFB300, "🟡 **Online** · data delayed"
     else:
-        colour = 0xFF5252
+        colour, state = 0xFF5252, "🔴 **Offline**"
 
     embed = discord.Embed(colour=colour)
-
     if ICON_URL:
         embed.set_author(name=DASHBOARD_TITLE, icon_url=ICON_URL)
     else:
         embed.set_author(name=DASHBOARD_TITLE)
 
-    pc = world.get("playerCount", 0)
-
-    # --- status bar (description) ---
-    if server_online:
-        head = "\U0001f7e2 **ONLINE** \u2014 SERVER IS RUNNING"
-    else:
-        head = "\U0001f534 **OFFLINE** \u2014 SERVER IS DOWN"
-    embed.description = (
-        f"{head}\n"
-        f"*Good luck out there, survivor.*"
-    )
+    pc = world.get("playerCount", 0) if server_online else 0
+    if restart is ...:
+        restart = (_next_restart_ts(), False)
+    lines = [f"{state} · {icon('players')} **{pc}** / {max_players} survivors online", restart_line(restart),
+             "-# Good luck out there, survivor."]
+    embed.description = "\n".join(lines)
 
     if server_online or world:
         v = status_values(world, siege)
-        is_night = world.get("isNight", False)
-        cyc_icon = "\U0001f319" if is_night else "☀️"
+        siege_day, siege_status, siege_completed = _siege_fields(siege, world)
+        # "Day 665\n(May 4, 1995)" -> "Day 665 · May 4"
+        when = siege_day.split("\n")
+        siege_when = when[0] + (f" · {when[1].strip('()').rsplit(', ', 1)[0]}" if len(when) > 1 else "")
+        cycle = "night" if world.get("isNight", False) else "day"
+        weather = status_icons.weather_key(world.get("weather", "Clear"))
+        siege_lines = [siege_when, siege_when_line(siege_at, time.time()),
+                       f"{siege_status} · {siege_completed} survived"]
+        embed.add_field(name=f"{icon('age')} Server age", value=v["SERVER AGE"], inline=True)
+        embed.add_field(name=f"{icon('date')} In-game date", value=v["DATE"], inline=True)
+        embed.add_field(name=f"{icon(cycle)} In-game time", value=f"{v['TIME']} · {v['CYCLE']}", inline=True)
+        embed.add_field(name=f"{icon(weather)} Weather", value=v["WEATHER"].replace(" (", " · ").rstrip(")"),
+                        inline=True)
+        embed.add_field(name=f"{icon('wind')} Wind", value=v["WIND"].replace(" (", " · ").rstrip(")"), inline=True)
+        embed.add_field(name=f"{icon('siege')} Siege Night", value="\n".join(l for l in siege_lines if l),
+                        inline=True)
 
-        # Row 1: Server Age | Date | Time
-        embed.add_field(name="\U0001f382 Server Age", value=v["SERVER AGE"], inline=True)
-        embed.add_field(name="\U0001f4c5 Date", value=v["DATE"], inline=True)
-        embed.add_field(name="⏰ Time", value=v["TIME"], inline=True)
-
-        # Row 2: Weather | Wind | Cycle
-        embed.add_field(name="\U0001f324️ Weather", value=v["WEATHER"], inline=True)
-        embed.add_field(name="\U0001f4a8 Wind", value=v["WIND"], inline=True)
-        embed.add_field(name=f"{cyc_icon} Cycle", value=v["CYCLE"], inline=True)
-
-        # Row 3: Next Siege | Siege Status | Completed Sieges
-        embed.add_field(name="\U0001f6e1️ Next Siege", value=v["NEXT SIEGE"], inline=True)
-        embed.add_field(name="\U0001f4cb Siege Status", value=v["SIEGE STATUS"], inline=True)
-        embed.add_field(name="\U0001f3c6 Completed Sieges", value=v["COMPLETED"], inline=True)
-
-        # Next restart (full width)
-        embed.add_field(name="\U0001f504 Next Restart", value=v["RESTART"], inline=False)
-
-        # Players online as a count; the names are behind the "Online players" button.
-        embed.add_field(name="👥 Players Online", value=f"{pc} / {max_players}", inline=False)
-    else:
-        embed.add_field(name="\u200b", value="\U0001f534 **Server Offline**", inline=False)
-
-    footer = "KNOX COUNTY NEVER FORGETS. \u2022 STAY ALIVE."
-    if stale:
-        footer += " \u2022 Data may be stale"
-    embed.set_footer(text=footer)
+    footer = "Knox County never forgets · Stay alive"
+    embed.set_footer(text=footer, icon_url=ICON_URL or None)
     embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return embed
 
@@ -401,6 +426,7 @@ class ServerStatusCog(commands.Cog):
         # Last known good data (retained across brief outages)
         self._last_world = None
         self._last_world_at = 0.0
+        self._clock = GameClockRate()  # in-game clock speed, for the siege's real start time
         self._last_siege = None
 
         if not self._channel_id:
@@ -599,6 +625,7 @@ class ServerStatusCog(commands.Cog):
             if world:
                 self._last_world = world
                 self._last_world_at = time.time()
+                self._clock.record(self._last_world_at, world)
             if siege:
                 self._last_siege = siege
             world = world or self._last_world or {}
@@ -613,8 +640,14 @@ class ServerStatusCog(commands.Cog):
                 await self._send_or_edit_card(state, world, siege, max_players)
             else:
                 stale = server_online and not rcon_ok
-                embed = build_embed(server_online, world, siege, False,
-                                    stale=stale, max_players=max_players)
+                watch = self.bot.get_cog("RestartWatch")
+                restart = watch.next_restart() if watch is not None else (_next_restart_ts(), False)
+                siege_at = None
+                if server_online and siege:
+                    start_hour = await server_config.read_siege_start_hour(self.bot)
+                    siege_at = siege_real_time(world, siege, start_hour, self._clock.rate(), time.time())
+                embed = build_embed(server_online, world, siege, False, stale=stale,
+                                    max_players=max_players, restart=restart, siege_at=siege_at)
                 await self._send_or_edit_embed(embed, max_players)
 
         except Exception as e:
@@ -630,6 +663,11 @@ class ServerStatusCog(commands.Cog):
             getattr(cfg, "DASHBOARD_ICON_IMAGE", ""),
             getattr(cfg, "DASHBOARD_ICON_URL", ""),
         )
+        try:
+            uploaded = await status_icons.sync(self.bot)
+            print(f"[ServerStatus] Flat status icons ready ({uploaded} uploaded)")
+        except Exception as e:
+            print(f"[ServerStatus] Flat icons unavailable, using plain emoji: {e}")
         DASHBOARD_TITLE = await server_config.read_server_name(
             self.bot, getattr(cfg, "DASHBOARD_TITLE", "PZ TAMBAYAN")
         )

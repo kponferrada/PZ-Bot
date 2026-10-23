@@ -52,4 +52,4 @@ def test_render_is_a_png():
     pts = [(T0 + i * pg.BUCKET, i % 9) for i in range(1, 288)]
     for points in (pts, []):
         img = Image.open(io.BytesIO(pg.render(points, now, max_players=32)))
-        assert img.format == "PNG" and img.size == (900, 260)
+        assert img.format == "PNG" and img.size == (800, 300)

@@ -21,9 +21,22 @@ def test_online_list_text():
 
 def test_status_embed_shows_a_count_not_names():
     embed = server_status.build_embed(True, {"playerCount": 2, "players": "Ana,Juan", "month": 6, "day": 8},
-                                      {}, False, max_players=32)
-    last = embed.fields[-1]
-    assert last.name.endswith("Players Online") and last.value == "2 / 32" and not last.inline
-    assert all("Juan" not in f.value for f in embed.fields)
-    inline = [f for f in embed.fields if f.inline]
-    assert len(inline) == 9   # three rows of three columns
+                                      {}, False, max_players=32, restart=(1_792_728_000, False))
+    first = embed.description.split("\n")[0]
+    assert "**2** / 32 survivors online" in first and "**Online**" in first
+    assert "Juan" not in embed.description and all("Juan" not in f.value for f in embed.fields)
+    names = [f.name.split(" ", 1)[1] for f in embed.fields]   # after the icon
+    assert names == ["Server age", "In-game date", "In-game time", "Weather", "Wind", "Siege Night"]
+    assert all(f.inline for f in embed.fields)   # two rows of three columns
+
+
+def test_restart_line_uses_discord_timestamps():
+    assert server_status.restart_line((1_792_728_000, False)).endswith(
+        "Next restart **<t:1792728000:t>** · <t:1792728000:R>")
+    assert "Restarting <t:1792728000:R>" in server_status.restart_line((1_792_728_000, True))
+    assert "No restart scheduled" in server_status.restart_line(None)
+
+
+def test_offline_embed_counts_no_players():
+    embed = server_status.build_embed(False, {"playerCount": 5}, {}, False, max_players=32, restart=None)
+    assert embed.description.startswith("🔴 **Offline** · ") and "**0** / 32" in embed.description
