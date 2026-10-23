@@ -107,9 +107,9 @@ def _segments(points: list) -> list:
 
 
 def render(points: list, now: float | None = None, max_players: int = 0,
-           width: int = 800, height: int = 300) -> bytes:
+           width: int = 800, height: int = 220) -> bytes:
     """The chart as PNG bytes. Sized for an embed image (Discord shows it at
-    about half size), so the type is large."""
+    about half size), so the type is large and the chart is short."""
     now = time.time() if now is None else now
     start = now - WINDOW
     counts = [n for _, n in points]
@@ -130,7 +130,7 @@ def render(points: list, now: float | None = None, max_players: int = 0,
     now_x = width - 20 - draw.textlength(peak_text, font=stat_f) - 24
     draw.text((now_x, 14), f"Now {current}{cap}", font=stat_f, fill=_LINE, anchor="ra")
 
-    left, right, top_px, bottom = 50, width - 20, 72, height - 40
+    left, right, top_px, bottom = 50, width - 20, 66, height - 36
     plot_w, plot_h = right - left, bottom - top_px
 
     def x(ts):
@@ -139,12 +139,11 @@ def render(points: list, now: float | None = None, max_players: int = 0,
     def y(n):
         return bottom - n / top * plot_h
 
-    for i in range(5):
-        n = top * i / 4
+    for i in range(3):  # 0, half, top: enough to read, not cluttered
+        n = top * i / 2
         yy = y(n)
         draw.line([(left, yy), (right, yy)], fill=_GRID, width=1)
-        if i % 2 == 0:  # 0, half, top: enough to read, not cluttered
-            draw.text((left - 10, yy), f"{n:g}", font=label_f, fill=_AXIS_TEXT, anchor="rm")
+        draw.text((left - 10, yy), f"{n:g}", font=label_f, fill=_AXIS_TEXT, anchor="rm")
 
     # Hour labels every 4 hours, on the hour in PHT.
     first = datetime.datetime.fromtimestamp(start, _TZ).replace(minute=0, second=0, microsecond=0)
@@ -156,16 +155,21 @@ def render(points: list, now: float | None = None, max_players: int = 0,
         t += datetime.timedelta(hours=1)
 
     if points:
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        # Drawn at 3x and scaled down: Pillow's lines aren't anti-aliased, and
+        # diagonals look jagged at 1x.
+        k = 3
+        overlay = Image.new("RGBA", (width * k, height * k), (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
         for seg in _segments(points):
-            # Step line: each bucket holds its value until the next one.
-            line = []
-            for i, (ts, n) in enumerate(seg):
-                end = seg[i + 1][0] if i + 1 < len(seg) else min(ts + BUCKET, now)
-                line += [(x(ts), y(n)), (x(end), y(n))]
-            odraw.polygon(line + [(line[-1][0], bottom), (line[0][0], bottom)], fill=(*_LINE, 55))
-            odraw.line(line, fill=(*_LINE, 255), width=4)
+            # One point per bucket, at its middle; straight lines between them.
+            line = [(x(ts + BUCKET / 2) * k, y(n) * k) for ts, n in seg]
+            if len(line) == 1:
+                cx, cy = line[0]
+                odraw.ellipse((cx - 3 * k, cy - 3 * k, cx + 3 * k, cy + 3 * k), fill=(*_LINE, 255))
+                continue
+            odraw.polygon(line + [(line[-1][0], bottom * k), (line[0][0], bottom * k)], fill=(*_LINE, 45))
+            odraw.line(line, fill=(*_LINE, 255), width=3 * k, joint="curve")
+        overlay = overlay.resize((width, height), Image.LANCZOS)
         img.paste(overlay, (0, 0), overlay)
     else:
         draw.text(((left + right) / 2, (top_px + bottom) / 2), "Collecting data…",
