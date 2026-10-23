@@ -22,6 +22,7 @@ status_card.png
 feature_state.json
 mod_update_state.json
 restart_state.json
+player_history.json
 whitelist_requests.csv
 deaths.json
 

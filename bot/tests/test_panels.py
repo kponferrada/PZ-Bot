@@ -153,26 +153,15 @@ def test_private_interaction_forces_ephemeral():
                      ("send", {"ephemeral": True}), ("followup", {"ephemeral": True})]
 
 
-def test_status_style_embed_becomes_a_card_with_buttons():
+def test_status_card_buttons_are_the_look_up_ones():
     async def build():
-        embed = discord.Embed(colour=0x00E676, description="ONLINE")
-        embed.set_author(name="PZ TAMBAYAN", icon_url="https://example.com/i.png")
-        embed.set_image(url="https://example.com/b.png")
-        embed.add_field(name="Age", value="Day 3", inline=True)
-        embed.add_field(name="Date", value="Jul 9", inline=True)
-        embed.add_field(name="Players", value="• Juan", inline=False)
-        panel = _Panel(player_panel.PREFIX)
-        rows = command_panel.button_rows(panel, player_panel.GROUP)
-        return cards.CardView(cards.from_embed(embed, rows=rows))
+        return command_panel.button_rows(_Panel(player_panel.PREFIX), player_panel.STATUS_GROUP)
 
-    view = asyncio.run(build())
-    texts = [getattr(i, "content", "") for i in view.walk_children()]
-    assert any(t.startswith("### PZ TAMBAYAN") for t in texts)
-    assert "**Age** · Day 3\n**Date** · Jul 9" in texts          # inline fields share one block
-    assert any(isinstance(i, discord.ui.MediaGallery) for i in view.walk_children())
-    assert [b.custom_id for b in cards.buttons(view)] == [
-        player_panel.PREFIX + a.key for a in player_panel.GROUP.actions]
-    assert sum(1 for _ in view.walk_children()) <= 40
+    ids = [b.custom_id for row in asyncio.run(build()) for b in row]
+    assert ids == [player_panel.PREFIX + k for k in ("myrank", "stats", "leaderboard", "rpleaderboard")]
+    # Linking, whitelist and the rep board stay on /playerpanel only.
+    for key in ("linkme", "whitelist", "repboard"):
+        assert key in player_panel.ACTIONS and key not in player_panel.STATUS_KEYS
 
 
 class _Panel:
