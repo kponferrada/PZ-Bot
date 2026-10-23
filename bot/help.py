@@ -14,6 +14,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/playerlist", "Everyone who has ever joined (+ session counts). [admin]"),
         ("/modlist", "Show configured mods / Workshop items. [admin]"),
         ("/features", "List notification features and their on/off state."),
+        ("/onlineplayers", "List the players online right now (private answer)."),
     ],
     "🔧 Server Control": [
         ("/stop", "Graceful shutdown (RCON save + quit). [admin]"),
@@ -74,7 +75,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "🎛️ Admin Panel": [
         ("/adminpanel", "Post the admin control panel: every admin command as a button, grouped by function. [admin]"),
-        ("/playerpanel", "Post the player panel (rank, link, stats, leaderboards, rep board, whitelist); four of them are under the status card. [admin]"),
+        ("/playerpanel", "Post the player panel (rank, online players, link, stats, leaderboards, rep board, whitelist); five of them are under the status card. [admin]"),
     ],
 }
 

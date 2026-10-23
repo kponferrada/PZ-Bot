@@ -24,7 +24,8 @@ import command_panel  # noqa: E402
 import player_panel  # noqa: E402
 
 _COG_MODULES = ("rank_sync", "siege_night", "jeeves_drops", "jeeves_modmanager", "restart_watch",
-                "feature_controls", "whitelist", "stats", "weekly_rp", "admin_panel", "player_panel")
+                "feature_controls", "whitelist", "stats", "weekly_rp", "server_status", "admin_panel",
+                "player_panel")
 _MAIN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
 _PANELS = ((admin_panel.PREFIX, admin_panel.GROUPS), (player_panel.PREFIX, player_panel.GROUPS))
 _ALL_ACTIONS = [a for _, groups in _PANELS for g in groups for a in g.actions]
@@ -158,7 +159,7 @@ def test_status_card_buttons_are_the_look_up_ones():
         return command_panel.button_rows(_Panel(player_panel.PREFIX), player_panel.STATUS_GROUP)
 
     ids = [b.custom_id for row in asyncio.run(build()) for b in row]
-    assert ids == [player_panel.PREFIX + k for k in ("myrank", "stats", "leaderboard", "rpleaderboard")]
+    assert ids == [player_panel.PREFIX + k for k in ("myrank", "onlineplayers", "stats", "leaderboard", "rpleaderboard")]
     # Linking, whitelist and the rep board stay on /playerpanel only.
     for key in ("linkme", "whitelist", "repboard"):
         assert key in player_panel.ACTIONS and key not in player_panel.STATUS_KEYS

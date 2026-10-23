@@ -18,9 +18,10 @@ Resilience features:
     brief outages instead of blanking the panel
   - Siege status: shows completed count and current day alongside next siege info
 
-In `embed` mode the message is two embeds: the 24-hour players-online graph
-(player_graph.py) on top, then the status embed (fields in three columns,
-online players last). `image` mode posts the rendered status card. Either way
+In `embed` mode the message is one embed: the fields in three columns, the
+next restart and the player count, with the 24-hour players-online graph
+(player_graph.py) as its image. The names of who is online are behind the
+"Online players" button (/onlineplayers). `image` mode posts the rendered status card. Either way
 a row of player buttons (player_panel.py `status_rows`; private replies) sits
 under the message. A classic embed can't hold buttons inside it, and a V2
 card can't lay fields out in columns, so the buttons sit just below.
@@ -38,6 +39,7 @@ import io
 import json
 import discord
 from pathlib import Path
+from discord import app_commands
 from discord.ext import commands, tasks
 
 import lua_bridge
@@ -295,14 +297,8 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
         # Next restart (full width)
         embed.add_field(name="\U0001f504 Next Restart", value=f"{restart_cd} · {restart_tm}", inline=False)
 
-        # Players (x / y) — Online Now, one per line
-        raw_players = str(world.get("players", "") or "")
-        names = sorted((n.strip() for n in raw_players.split(",") if n.strip()), key=str.lower)
-        players_val = "\n".join(f"• {n}" for n in names) if names else "*No survivors online*"
-        if len(players_val) > 1024:  # Discord field value limit
-            players_val = players_val[:1000].rsplit("\n", 1)[0] + "\n…"
-        embed.add_field(name=f"\U0001f465 Players ({pc} / {max_players}) — Online Now",
-                        value=players_val, inline=False)
+        # Players online as a count; the names are behind the "Online players" button.
+        embed.add_field(name="👥 Players Online", value=f"{pc} / {max_players}", inline=False)
     else:
         embed.add_field(name="\u200b", value="\U0001f534 **Server Offline**", inline=False)
 
@@ -350,6 +346,18 @@ def _siege_fields(siege, world=None):
     siege_completed = str(completed) if completed is not None else "0"
 
     return (siege_day, siege_status, siege_completed)
+
+
+def online_list_text(names: list, offline: bool) -> str:
+    """The /onlineplayers answer body."""
+    if offline:
+        return "🔴 The server is offline."
+    if not names:
+        return "*No survivors online.*"
+    text = "\n".join(f"• {n}" for n in names)
+    if len(text) > 4000:  # embed description limit
+        text = text[:3990].rsplit("\n", 1)[0] + "\n…"
+    return text
 
 
 # ============================================================================
@@ -457,6 +465,7 @@ class ServerStatusCog(commands.Cog):
 
         # Last known good data (retained across brief outages)
         self._last_world = None
+        self._last_world_at = 0.0
         self._last_siege = None
 
         if not self._channel_id:
@@ -584,10 +593,22 @@ class ServerStatusCog(commands.Cog):
         if png is None:
             await self._publish(lambda: [], [embed])
             return
-        # The graph is its own embed above the status one, in the same colour.
-        graph = discord.Embed(colour=embed.colour)
-        graph.set_image(url=f"attachment://{_GRAPH_FILE}")
-        await self._publish(lambda: [discord.File(io.BytesIO(png), filename=_GRAPH_FILE)], [graph, embed])
+        # The graph is the embed's image: inside the same card, under the fields.
+        embed.set_image(url=f"attachment://{_GRAPH_FILE}")
+        await self._publish(lambda: [discord.File(io.BytesIO(png), filename=_GRAPH_FILE)], [embed])
+
+    @app_commands.command(name="onlineplayers", description="List the players online right now.")
+    async def cmd_online_players(self, interaction: discord.Interaction) -> None:
+        world = self._last_world or {}
+        names = sorted((n.strip() for n in str(world.get("players", "") or "").split(",") if n.strip()),
+                       key=str.lower)
+        offline = self._rcon_fail_count >= OFFLINE_GRACE_COUNT
+        embed = discord.Embed(title=f"👥 Online now ({0 if offline else len(names)})", colour=0x00E676,
+                              description=online_list_text(names, offline))
+        if self._last_world_at:
+            embed.set_footer(text="From the status card")
+            embed.timestamp = datetime.datetime.fromtimestamp(self._last_world_at, datetime.timezone.utc)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @tasks.loop(seconds=30)
     async def status_loop(self):
@@ -627,6 +648,7 @@ class ServerStatusCog(commands.Cog):
 
             if world:
                 self._last_world = world
+                self._last_world_at = time.time()
             if siege:
                 self._last_siege = siege
             world = world or self._last_world or {}
