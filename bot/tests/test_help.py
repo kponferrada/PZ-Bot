@@ -18,7 +18,7 @@ import help as help_cog  # noqa: E402
 _COGS = ("death_log", "rank_sync", "chat_relay", "siege_night", "jeeves_drops",
          "jamies_fortune", "jeeves_modmanager", "server_status", "restart_watch",
          "feature_controls", "stats", "weekly_rp", "cleanup", "help", "player_tracker",
-         "admin_panel")
+         "admin_panel", "player_panel")
 
 
 def _is_admin_check(check) -> bool:

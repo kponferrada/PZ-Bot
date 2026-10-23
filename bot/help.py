@@ -74,6 +74,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "🎛️ Admin Panel": [
         ("/adminpanel", "Post the admin control panel: every admin command as a button, grouped by function. [admin]"),
+        ("/playerpanel", "Post the player panel (rank, stats, leaderboards, whitelist); the same buttons are on the status card. [admin]"),
     ],
 }
 

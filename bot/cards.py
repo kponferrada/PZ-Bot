@@ -27,20 +27,40 @@ def _rows(rows) -> list:
     return out
 
 
+def _field_blocks(fields) -> list:
+    """Text blocks for (name, value[, inline]) fields: one block per field,
+    except that a run of inline fields shares one block, one field per line."""
+    blocks, run = [], []
+    for f in fields:
+        name, value = f[0], f[1]
+        if len(f) > 2 and f[2]:
+            run.append(f"**{name}** · {' '.join(str(value).split())}" if name else str(value))
+            continue
+        if run:
+            blocks.append("\n".join(run))
+            run = []
+        blocks.append(f"**{name}**\n{value}" if name else str(value))
+    if run:
+        blocks.append("\n".join(run))
+    return blocks
+
+
 def card(*, title: str = "", description: str = "", fields=(), footer: str = "",
-         colour=None, thumbnail: str = "", rows=()) -> discord.ui.Container:
-    """A Container: title + description (beside an optional thumbnail), one
-    text block per (name, value) field, a footer line, then the button rows."""
+         colour=None, thumbnail: str = "", image: str = "", rows=()) -> discord.ui.Container:
+    """A Container: an optional banner `image`, title + description (beside an
+    optional thumbnail), the fields, a footer line, then the button rows.
+    `fields` are (name, value) or (name, value, inline) tuples."""
     head = "\n".join(p for p in (f"### {title}" if title else "", description or "") if p)
     items = []
+    if image:
+        items.append(discord.ui.MediaGallery(discord.MediaGalleryItem(image)))
     if head and thumbnail:
         items.append(discord.ui.Section(head[:_TEXT_LIMIT], accessory=discord.ui.Thumbnail(thumbnail)))
     elif head:
         items.append(discord.ui.TextDisplay(head[:_TEXT_LIMIT]))
     if fields:
         items.append(discord.ui.Separator())
-        for name, value in fields:
-            text = f"**{name}**\n{value}" if name else str(value)
+        for text in _field_blocks(fields):
             items.append(discord.ui.TextDisplay(text[:_TEXT_LIMIT]))
     if footer:
         items.append(discord.ui.TextDisplay(f"-# {footer}"))
@@ -52,15 +72,22 @@ def card(*, title: str = "", description: str = "", fields=(), footer: str = "",
 
 
 def from_embed(embed: discord.Embed, rows=()) -> discord.ui.Container:
-    """The embed as a card, with `rows` of buttons inside it."""
+    """The embed as a card, with `rows` of buttons inside it. An embed with an
+    author and no title uses the author as the title and its icon as the
+    thumbnail; the embed image becomes the banner."""
     footer = embed.footer.text if embed.footer and embed.footer.text else ""
     if embed.timestamp:
         stamp = f"<t:{int(embed.timestamp.timestamp())}:f>"
         footer = f"{footer} • {stamp}" if footer else stamp
     thumb = embed.thumbnail.url if embed.thumbnail and embed.thumbnail.url else ""
-    return card(title=embed.title or "", description=embed.description or "",
-                fields=[(f.name, f.value) for f in embed.fields], footer=footer,
-                colour=embed.colour, thumbnail=thumb or "", rows=rows)
+    title = embed.title or ""
+    if not title and embed.author and embed.author.name:
+        title = embed.author.name
+        thumb = thumb or embed.author.icon_url or ""
+    image = embed.image.url if embed.image and embed.image.url else ""
+    return card(title=title, description=embed.description or "",
+                fields=[(f.name, f.value, f.inline) for f in embed.fields], footer=footer,
+                colour=embed.colour, thumbnail=thumb or "", image=image or "", rows=rows)
 
 
 class CardView(discord.ui.LayoutView):

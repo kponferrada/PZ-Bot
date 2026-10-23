@@ -73,7 +73,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel` |
 | Features | `/enable <feature>`, `/disable <feature>` |
-| Admin panel | `/adminpanel` (see below) |
+| Panels | `/adminpanel`, `/playerpanel` (see below) |
 
 ### Restart flow
 
@@ -133,11 +133,30 @@ confirmation first. Only members with the admin role (`DEFAULT_ROLE`) can use
 the buttons, and replies are private where the command's are. Put the panel in a
 staff-only channel.
 
+### Player panel and status card buttons
+
+The player buttons are **My rank**, **Link account**, **Player stats**,
+**Leaderboard**, **RP leaderboard**, **Rep board** and **Apply for whitelist**.
+Each one runs the player command of the same name (`/myrank`, `/linkme`,
+`/stats`, `/leaderboard`, `/rpleaderboard`, `/repboard`, `/whitelist`). Commands
+that take options open a form first. Anyone in the server can use them, and
+every answer is private to the person who clicked, so nothing is posted into the
+channel.
+
+The buttons are always inside the server status card (`STATUS_CHANNEL_ID`).
+`/playerpanel` (admin) also posts them as their own card into
+`PLAYER_PANEL_CHANNEL_ID` (or the channel it is run in); running it again
+replaces the earlier one.
+
 ### Cards
 
-The bot's messages with buttons (whitelist panel, request and approval cards,
-`/listlinks` pages, the admin panel) are Components V2 cards: the text and
-the buttons sit in one box. Cards posted before this keep working; the bot turns
+The bot's messages with buttons (status card, whitelist panel, request and
+approval cards, `/listlinks` pages, the admin and player panels) are Components
+V2 cards: the text and the buttons sit in one box. In `STATUS_MODE=embed` the
+status card shows the banner on top, then the status and the fields (side-by-side
+fields share one block, one per line); in `image` mode it shows the rendered card
+image. The old status message is converted the first time the bot updates it
+(or replaced if Discord refuses). Cards posted before this keep working; the bot turns
 an old request card into the new layout the next time it updates it. Re-run
 `/whitelistsetup` to replace the old whitelist panel. Needs discord.py 2.7+.
 
@@ -325,6 +344,7 @@ feature is off.
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
 | `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |
+| `PLAYER_PANEL_CHANNEL_ID` | player panel (`/playerpanel`); the same buttons are on the status card |
 
 `WORKSHOP_UPDATE_CHANNEL_ID` and `WORKSHOP_UPDATE_ROLE_ID` are read but unused.
 
