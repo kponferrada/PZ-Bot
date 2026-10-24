@@ -435,6 +435,7 @@ class ServerStatusCog(commands.Cog):
         self._last_world = None
         self._last_world_at = 0.0
         self._clock = GameClockRate()  # in-game clock speed, for the siege's real start time
+        self._siege_at = None          # ((nextSiegeDay, start hour), epoch): worked out once per siege
         self._last_siege = None
 
         if not self._channel_id:
@@ -561,6 +562,28 @@ class ServerStatusCog(commands.Cog):
         # Remembered only once it is posted, so a failed post is retried next loop.
         self._card_key = key if self._message_id else None
 
+    async def _siege_time(self, server_online: bool, world: dict, siege: dict) -> float | None:
+        """The next siege's real-world start, worked out once and then kept.
+
+        It is worked out again only when the siege it belongs to changes (a new
+        nextSiegeDay or start hour), when that time has passed without the siege
+        starting, or after the server was down: the game clock stops while the
+        server is down, so the siege really does move later."""
+        if not server_online:
+            self._siege_at = None
+            self._clock.samples = []  # a speed measured across the downtime would be too slow
+            return None
+        if not siege or str(siege.get("phase", "")).lower() in ("active", "dawn"):
+            self._siege_at = None
+            return None
+        start_hour = await server_config.read_siege_start_hour(self.bot)
+        key = (siege.get("nextSiegeDay"), start_hour)
+        if self._siege_at is not None and self._siege_at[0] == key and self._siege_at[1] > time.time():
+            return self._siege_at[1]
+        at = siege_real_time(world, siege, start_hour, self._clock.rate(), time.time())
+        self._siege_at = (key, at) if at else None
+        return at
+
     async def _graph_png(self, max_players: int) -> bytes | None:
         """The 24-hour player chart, re-rendered only when the history changed."""
         if self._graph_png_cache is None or self._graph_dirty:
@@ -650,10 +673,7 @@ class ServerStatusCog(commands.Cog):
                 stale = server_online and not rcon_ok
                 watch = self.bot.get_cog("RestartWatch")
                 restart = watch.next_restart() if watch is not None else (_next_restart_ts(), False)
-                siege_at = None
-                if server_online and siege:
-                    start_hour = await server_config.read_siege_start_hour(self.bot)
-                    siege_at = siege_real_time(world, siege, start_hour, self._clock.rate(), time.time())
+                siege_at = await self._siege_time(server_online, world, siege)
                 embed = build_embed(server_online, world, siege, False, stale=stale,
                                     max_players=max_players, restart=restart, siege_at=siege_at)
                 await self._send_or_edit_embed(embed, max_players)

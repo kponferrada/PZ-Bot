@@ -168,6 +168,10 @@ one card:
    from the world status over the last 15 minutes. It appears about 2 minutes
    after the bot starts, hides during a siege, and assumes the clock keeps
    running (a server that pauses when empty starts the siege later).
+   It is worked out once per siege and then stays put. It is worked out again
+   only for a new siege day or start hour, when the time passes without the
+   siege starting, or about 2 minutes after a server restart (the game clock
+   stops while the server is down, so the siege moves later by that much).
 
    The icons are drawn by the bot (`status_icons.py`) and uploaded once as the
    bot's own emojis (application emojis: no server emoji slots used). If that
