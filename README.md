@@ -233,7 +233,14 @@ Once a request is approved, its card in the approval channel has four admin butt
 - **Change Username:** Project Zomboid has no RCON command to rename an account, so the bot adds the new account and then removes the old one. **PZ saves characters per username, so the player starts a new character.** The Discord link moves to the new name.
 - **Change Password:** removes and re-adds the account with the new password. If re-adding fails, the old password is put back.
 - **Check Status:** the account on the server whitelist (SteamID, access level, last connection, banned), whether the player is in game, and their Discord link.
-- **Delete Account:** removes the account and its SteamID, with a reason, and takes the whitelist role away (below).
+- **Delete Account:** asks for a reason, then:
+  - deletes the account (`removeuser` removes its row from the server's account database, `db/<server>.db`; `removeSteamID` drops its SteamID) and checks the row is really gone (the reply warns if it still shows);
+  - unlinks the Discord account from it, so `/myrank` and the rank role stop and the member can apply again;
+  - takes the whitelist role away (below).
+
+  `/whitelistremove <username>` does the same for an account without a request card.
+
+  The **character** is not deleted: Project Zomboid keeps it in the world's `Saves/Multiplayer/<world>/players.db`, which `removeuser` doesn't touch and the bot can't safely edit while the server runs. If the same username is added again later, that player gets the old character back.
 
 Name and password changes are refused while the player is in game. Both update the CSV and the card, and DM the requester their new login. Cards approved before this version only show Delete Account.
 
