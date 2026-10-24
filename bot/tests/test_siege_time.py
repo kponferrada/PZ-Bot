@@ -61,7 +61,7 @@ def test_siege_line_in_the_embed():
     siege = embed.fields[-1].value
     assert f"<t:{now + 3600}:t>" in siege and f"<t:{now + 3600}:R>" in siege
     far = server_status.siege_when_line(now + 3 * 86400, now)
-    assert far.startswith("≈ <t:") and ":f>" in far
+    assert far.startswith("<t:") and ":f>" in far
     assert server_status.siege_when_line(None, now) == ""
 
 

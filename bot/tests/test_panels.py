@@ -158,10 +158,13 @@ def test_status_card_buttons_are_the_look_up_ones():
     async def build():
         return command_panel.button_rows(_Panel(player_panel.PREFIX), player_panel.STATUS_GROUP)
 
-    ids = [b.custom_id for row in asyncio.run(build()) for b in row]
-    assert ids == [player_panel.PREFIX + k for k in ("myrank", "onlineplayers", "stats", "leaderboard", "rpleaderboard")]
-    # Linking, whitelist and the rep board stay on /playerpanel only.
-    for key in ("linkme", "whitelist", "repboard"):
+    buttons = [b for row in asyncio.run(build()) for b in row]
+    assert [b.custom_id for b in buttons] == [player_panel.PREFIX + k
+                                              for k in ("myrank", "onlineplayers", "stats", "leaderboard")]
+    assert [b.label for b in buttons] == ["My rank", "Online players", "Player stats", "Leaderboards"]
+    assert all(b.emoji is None for b in buttons)
+    # Linking, whitelist, the RP leaderboard and the rep board stay on /playerpanel only.
+    for key in ("linkme", "whitelist", "rpleaderboard", "repboard"):
         assert key in player_panel.ACTIONS and key not in player_panel.STATUS_KEYS
 
 

@@ -152,16 +152,20 @@ replaces the earlier one.
 In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
 one card:
 
-1. a status line: Online / Offline (amber "data delayed" when RCON is quiet but
-   the bridge files are fresh), the number of players online (`6 / 32`; no
-   names) and the server age (`Day 659`), then the next restart as Discord timestamps: each viewer sees it in
-   their own timezone, and "in 36 minutes" counts down by itself. It follows
-   the restart controls: a running countdown shows "Restarting in …", a
-   deferral its new time, and a skipped scheduled slot is passed over;
-2. fields with a flat icon each, two per row: In-game date and In-game time
-   (sun or moon); Weather (icon follows the weather) and Wind. Siege Night has
-   the third row to itself, on the left: the next siege day, **when it starts in real life** (a Discord timestamp,
-   e.g. "≈ 6:42 PM · in 3 hours"), its status and how many survived.
+1. the server name (author) and **Server status** (title), then one status
+   line: Online / Offline (amber "data delayed" when RCON is quiet but the
+   bridge files are fresh), the server age (`Day 670`) and the next restart as
+   Discord timestamps: each viewer sees it in their own timezone, and "in 6
+   hours" counts down by itself. It follows the restart controls: a running
+   countdown shows "Restarting in …", a deferral its new time, and a skipped
+   scheduled slot is passed over;
+2. three rows of fields: **Survivors** (`2 / 32`; no names), **Peak today**
+   (the most online since midnight Philippine time) and **Next restart**;
+   **In-game date**, **In-game time** (with Day / Night) and **Weather**
+   (`Clear · 10°C`); then **Next siege night**: the siege day and its in-game
+   date, how many sieges have been survived (and the siege's status when it
+   is coming tonight or running), with **when it starts in real life** beside
+   it (a Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
    The real time is worked out from the siege's in-game start
    (`SiegeNight.SiegeStartHour` in the server's `*_SandboxVars.lua`, default
    20:00) and how fast the in-game clock is running, which the bot measures
@@ -171,19 +175,18 @@ one card:
    It is worked out once per siege and then stays put. It is worked out again
    only for a new siege day or start hour, when the time passes without the
    siege starting, or about 2 minutes after a server restart (the game clock
-   stops while the server is down, so the siege moves later by that much).
-
-   The icons are drawn by the bot (`status_icons.py`) and uploaded once as the
-   bot's own emojis (application emojis: no server emoji slots used). If that
-   upload fails the embed falls back to plain emoji;
+   stops while the server is down, so the siege moves later by that much);
 3. inside the same card, under the fields: a graph of players online over the
    last 24 hours (Philippine time; one point per 5 minutes, the highest count
-   seen in it, joined by straight lines; gaps where the bot was down). Discord always puts an embed's
-   image below its fields;
-4. a row of five buttons under it: **My rank**, **Online players**, **Player
-   stats**, **Leaderboard**, **RP leaderboard** (private answers, as above).
+   seen in it, joined by straight lines, with a dot on the peak; gaps where the
+   bot was down). It is amber on a transparent background, so it reads on
+   Discord's light and dark themes. Discord always puts an embed's image below
+   its fields;
+4. a row of four buttons under it: **My rank**, **Online players**, **Player
+   stats**, **Leaderboards** (`/leaderboard`; private answers, as above).
    **Online players** (`/onlineplayers`) lists who is on, from the same data as
-   the card.
+   the card. RP leaderboard, Rep board, Link account and Apply for whitelist
+   are on `/playerpanel` only.
 
 The bot records the player count itself from the status loop and keeps 24
 hours of it in `player_history.json`, so the graph starts empty on a fresh
@@ -194,7 +197,7 @@ replaced by a new message on the first update.
 `assets/status-card-template.png` with the server name, ONLINE / OFFLINE (amber
 dot when RCON is quiet but the bridge files are fresh), each value in its beige
 box, the number of players online (no names), and the 24-hour graph on the
-chalkboard, with the same five buttons under it. It is a JPEG (~0.4 MB) and is
+chalkboard, with the same four buttons under it. It is a JPEG (~0.4 MB) and is
 only redrawn and re-posted when something on it changes. The in-game clock
 moves every update while the server is up, so in practice that is most updates
 while it is online and none while it is offline. The text on the card can't be

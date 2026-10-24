@@ -18,11 +18,12 @@ Resilience features:
     brief outages instead of blanking the panel
   - Siege status: shows completed count and current day alongside next siege info
 
-In `embed` mode the message is one embed: the fields in three columns, the
-next restart and the player count, with the 24-hour players-online graph
-(player_graph.py) as its image. The names of who is online are behind the
-"Online players" button (/onlineplayers). `image` mode posts the rendered status card. Either way
-a row of player buttons (player_panel.py `status_rows`; private replies) sits
+In `embed` mode the message is one embed laid out like the user's mockup
+(2026-10-25): status line, three rows of fields (players, world, next siege)
+and the 24-hour players-online graph (player_graph.py) as its image. The
+names of who is online are behind the "Online players" button
+(/onlineplayers). `image` mode posts the rendered status card. Either way a
+row of player buttons (player_panel.py `status_rows`; private replies) sits
 under the message. A classic embed can't hold buttons inside it, and a V2
 card can't lay fields out in columns, so the buttons sit just below.
 
@@ -49,7 +50,6 @@ import server_config
 from command_panel import walk_components as _walk
 import status_icons
 from game_calendar import GameClockRate, siege_date_string, siege_real_time
-from status_icons import icon
 
 # ============================================================================
 # Constants
@@ -272,15 +272,15 @@ def _next_restart_ts() -> float:
 
 
 def restart_line(restart) -> str:
-    """The restart line of the status embed. `restart` is (epoch, running) or
+    """The restart part of the status line. `restart` is (epoch, running) or
     None. Discord timestamps show in each viewer's own timezone, and the
     relative one counts down by itself between updates."""
     if restart is None:
-        return f"{icon('restart')} No restart scheduled"
+        return "No restart scheduled"
     ts, running = int(restart[0]), restart[1]
     if running:
-        return f"{icon('restart')} **Restarting <t:{ts}:R>**"
-    return f"{icon('restart')} Next restart **<t:{ts}:t>** · <t:{ts}:R>"
+        return f"**Restarting <t:{ts}:R>**"
+    return f"Restart at <t:{ts}:t> <t:{ts}:R>"
 
 
 def siege_when_line(siege_at, now: float) -> str:
@@ -289,30 +289,35 @@ def siege_when_line(siege_at, now: float) -> str:
         return ""
     ts = int(siege_at)
     # Within a day the clock time is enough; further out it needs the date.
-    return f"≈ <t:{ts}:{'t' if ts - now < 20 * 3600 else 'f'}> · <t:{ts}:R>"
+    return f"<t:{ts}:{'t' if ts - now < 20 * 3600 else 'f'}> <t:{ts}:R>"
+
+
+ACCENT = 0xB7791F  # the card's amber edge while the server is up
 
 
 def build_embed(server_online, world, siege, skip_active, stale=False, max_players=32, restart=...,
-                siege_at=None):
-    """Build the PZ Tambayan status embed (copyable text + PZ aesthetic).
+                siege_at=None, peak_today=None):
+    """Build the PZ Tambayan status embed.
 
-    Layout: a status line (state, players, server age), the next restart,
-    two rows of two world fields, Siege Night on its own row, then the 24-hour
-    graph as the image (set by the cog).
+    Layout (user's mockup, 2026-10-25): the server name as the author, "Server
+    status" as the title, one status line (state, server age, next restart),
+    then three rows of fields: Survivors / Peak today / Next restart, In-game
+    date / In-game time / Weather, and Next siege night with its real-world
+    start beside it. The 24-hour graph is the image (set by the cog).
     `restart` is (epoch, running), None for none coming, or left out to read
-    the schedule. `siege_at` is the next siege's real start (epoch) if known.
-    Field icons are the bot's flat emoji (status_icons)."""
+    the schedule. `siege_at` is the next siege's real start (epoch) if known;
+    `peak_today` the most players online since midnight PHT."""
     world = world or {}
     siege = siege or {}
 
     if server_online and not stale:
-        colour, state = 0x00E676, "🟢 **Online**"
+        colour, state = ACCENT, "🟢 Online"
     elif server_online:
-        colour, state = 0xFFB300, "🟡 **Online** · data delayed"
+        colour, state = 0xFFB300, "🟡 Online · data delayed"
     else:
-        colour, state = 0xFF5252, "🔴 **Offline**"
+        colour, state = 0xFF5252, "🔴 Offline"
 
-    embed = discord.Embed(colour=colour)
+    embed = discord.Embed(colour=colour, title="Server status")
     if ICON_URL:
         embed.set_author(name=DASHBOARD_TITLE, icon_url=ICON_URL)
     else:
@@ -323,35 +328,43 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
         restart = (_next_restart_ts(), False)
     has_world = bool(server_online or world)
     v = status_values(world, siege) if has_world else {}
-    status = f"{state} · {icon('players')} **{pc}** / {max_players} survivors online"
+    status = [state]
     if has_world:
-        status += f" · {icon('age')} {v['SERVER AGE']}"
-    lines = [status, restart_line(restart), "-# Good luck out there, survivor."]
-    embed.description = "\n".join(lines)
+        status.append(v["SERVER AGE"])
+    status.append(restart_line(restart))
+    embed.description = " · ".join(status)
+
+    if restart is None:
+        next_restart = "—"
+    elif restart[1]:
+        next_restart = f"Restarting <t:{int(restart[0])}:R>"
+    else:
+        next_restart = f"<t:{int(restart[0])}:t>"
+    embed.add_field(name="Survivors", value=f"{pc} / {max_players}", inline=True)
+    embed.add_field(name="Peak today", value=str(max(peak_today or 0, pc)), inline=True)
+    embed.add_field(name="Next restart", value=next_restart, inline=True)
 
     if has_world:
         siege_day, siege_status, siege_completed = _siege_fields(siege, world)
-        # "Day 665\n(May 4, 1995)" -> "Day 665 · May 4"
+        # "Day 665\n(May 4, 1995)" -> "**Day 665** · May 4 in-game"
         when = siege_day.split("\n")
-        siege_when = when[0] + (f" · {when[1].strip('()').rsplit(', ', 1)[0]}" if len(when) > 1 else "")
-        cycle = "night" if world.get("isNight", False) else "day"
-        weather = status_icons.weather_key(world.get("weather", "Clear"))
-        siege_lines = [siege_when, siege_when_line(siege_at, time.time()),
-                       f"{siege_status} · {siege_completed} survived"]
-        # Two per row: Discord fills rows of three inline fields, so a blank
-        # third field ends each row. Siege Night gets row 3 to itself, on the left.
-        embed.add_field(name=f"{icon('date')} In-game date", value=v["DATE"], inline=True)
-        embed.add_field(name=f"{icon(cycle)} In-game time", value=f"{v['TIME']} · {v['CYCLE']}", inline=True)
-        embed.add_field(name=_BLANK, value=_BLANK, inline=True)
-        embed.add_field(name=f"{icon(weather)} Weather", value=v["WEATHER"].replace(" (", " · ").rstrip(")"),
-                        inline=True)
-        embed.add_field(name=f"{icon('wind')} Wind", value=v["WIND"].replace(" (", " · ").rstrip(")"), inline=True)
-        embed.add_field(name=_BLANK, value=_BLANK, inline=True)
-        embed.add_field(name=f"{icon('siege')} Siege Night", value="\n".join(l for l in siege_lines if l),
-                        inline=False)
+        siege_when = f"**{when[0]}**" if when[0] != "—" else when[0]
+        if len(when) > 1:
+            siege_when += f" · {when[1].strip('()').rsplit(', ', 1)[0]} in-game"
+        survived = f"{siege_completed} {'siege' if siege_completed == '1' else 'sieges'} survived"
+        siege_lines = [siege_when, survived if siege_status == "Idle" else f"{siege_status} · {survived}"]
+        embed.add_field(name="In-game date", value=v["DATE"], inline=True)
+        embed.add_field(name="In-game time", value=f"{v['TIME']} · {v['CYCLE']}", inline=True)
+        temp = world.get("temperature", 0)
+        embed.add_field(name="Weather", value=f"{world.get('weather', 'Clear')} · {temp:.0f}°C", inline=True)
+        # Two inline fields share a row half and half: the siege, then when it starts.
+        embed.add_field(name="Next siege night", value="\n".join(siege_lines), inline=True)
+        when_real = siege_when_line(siege_at, time.time())
+        if when_real:
+            embed.add_field(name=_BLANK, value=when_real, inline=True)
 
-    footer = "Knox County never forgets · Stay alive"
-    embed.set_footer(text=footer, icon_url=ICON_URL or None)
+    footer = "Knox County never forgets · Updated every 30 s"
+    embed.set_footer(text=footer)
     embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return embed
 
@@ -674,8 +687,11 @@ class ServerStatusCog(commands.Cog):
                 watch = self.bot.get_cog("RestartWatch")
                 restart = watch.next_restart() if watch is not None else (_next_restart_ts(), False)
                 siege_at = await self._siege_time(server_online, world, siege)
+                points = self._history.points()
+                peak_today = player_graph.peak_since(points, player_graph.day_start(time.time()))
                 embed = build_embed(server_online, world, siege, False, stale=stale,
-                                    max_players=max_players, restart=restart, siege_at=siege_at)
+                                    max_players=max_players, restart=restart, siege_at=siege_at,
+                                    peak_today=peak_today)
                 await self._send_or_edit_embed(embed, max_players)
 
         except Exception as e:

@@ -12,6 +12,8 @@ themselves refuse repeats (/linkme refuses a second link).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -33,10 +35,13 @@ GROUP = Group("\U0001f3ae Player Panel", "Your rank, stats and the leaderboards.
                   Action("whitelist", "Apply for whitelist", "whitelist", "\U0001f4dd", GREEN),
               ))
 GROUPS = (GROUP,)
-# Under the status card (user, 2026-10-23): no Rep board, Link account or Apply for whitelist.
-STATUS_KEYS = ("myrank", "onlineplayers", "stats", "leaderboard", "rpleaderboard")
+# Under the status card (user, 2026-10-25): My rank, Online players, Player stats and
+# Leaderboards, plain (no emoji). The rest stay on /playerpanel.
+STATUS_KEYS = ("myrank", "onlineplayers", "stats", "leaderboard")
+_STATUS_LABELS = {"leaderboard": "Leaderboards"}
 STATUS_GROUP = Group(GROUP.title, GROUP.description, GROUP.colour,
-                     tuple(a for a in GROUP.actions if a.key in STATUS_KEYS))
+                     tuple(replace(a, emoji="", label=_STATUS_LABELS.get(a.key, a.label))
+                           for a in GROUP.actions if a.key in STATUS_KEYS))
 ACTIONS = {a.key: a for a in GROUP.actions}
 
 

@@ -25,12 +25,13 @@ _HISTORY = Path(__file__).parent / "player_history.json"
 _TZ = datetime.timezone(datetime.timedelta(hours=8))  # GMT+8 (Philippines)
 _FONTS = Path(__file__).parent / "assets" / "fonts"
 
-# Discord's dark embed background, so the chart blends into the card.
-_BG = (43, 45, 49)
-_GRID = (64, 66, 72)
-_AXIS_TEXT = (148, 155, 164)
-_TITLE = (242, 243, 245)
-_LINE = (0, 230, 118)
+# Colours that read on Discord's light and dark themes alike: the image is
+# transparent outside a faint grey panel, the text mid-grey, the line amber
+# (the status embed's accent).
+_PANEL = (128, 128, 128, 22)
+_GUIDE = (128, 128, 128, 90)
+_TEXT = (128, 132, 142, 255)
+_LINE = (183, 121, 31)
 
 
 class PlayerHistory:
@@ -93,6 +94,17 @@ def _hour_label(ts: float) -> str:
     return f"{h} {'AM' if t.hour < 12 else 'PM'}"
 
 
+def day_start(now: float) -> float:
+    """Midnight Philippine time of `now`'s day."""
+    t = datetime.datetime.fromtimestamp(now, _TZ)
+    return t.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def peak_since(points: list, since: float) -> int:
+    """The highest count in buckets that end after `since` (0 if none)."""
+    return max((n for ts, n in points if ts + BUCKET > since), default=0)
+
+
 def _segments(points: list) -> list:
     """Split the points where samples are missing (bot down) for over 2 buckets."""
     segs, cur = [], []
@@ -109,72 +121,77 @@ def _segments(points: list) -> list:
 def render(points: list, now: float | None = None, max_players: int = 0,
            width: int = 800, height: int = 220) -> bytes:
     """The chart as PNG bytes. Sized for an embed image (Discord shows it at
-    about half size), so the type is large and the chart is short."""
+    about half size), so the type is large and the chart is short. Everything
+    is drawn at 3x and scaled down: Pillow's lines and rounded corners aren't
+    anti-aliased. `max_players` is unused (the scale follows the peak)."""
     now = time.time() if now is None else now
     start = now - WINDOW
     counts = [n for _, n in points]
     peak = max(counts) if counts else 0
     current = counts[-1] if counts else 0
-    top = max(4, peak)
-    top = top + (-top % 4)  # a multiple of 4: four even grid steps
+    top = max(4, peak) * 1.15  # headroom over the peak
 
-    img = Image.new("RGB", (width, height), _BG)
+    k = 3
+    img = Image.new("RGBA", (width * k, height * k), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    title_f, label_f = _font("Oswald.ttf", 30), _font("NotoSans-Bold.ttf", 19)
-    stat_f = _font("Oswald.ttf", 30)
+    text_f, label_f = _font("NotoSans-Bold.ttf", 21 * k), _font("NotoSans-Bold.ttf", 18 * k)
+    draw.rounded_rectangle((0, 0, width * k - 1, height * k - 1), radius=12 * k, fill=_PANEL)
 
-    draw.text((20, 12), "Players · last 24 hours", font=title_f, fill=_TITLE)
-    cap = f" / {max_players}" if max_players else ""
-    peak_text = f"Peak {peak}"
-    draw.text((width - 20, 14), peak_text, font=stat_f, fill=_AXIS_TEXT, anchor="ra")
-    now_x = width - 20 - draw.textlength(peak_text, font=stat_f) - 24
-    draw.text((now_x, 14), f"Now {current}{cap}", font=stat_f, fill=_LINE, anchor="ra")
+    draw.text((22 * k, 16 * k), "Players · last 24 hours", font=text_f, fill=_TEXT)
+    draw.text(((width - 22) * k, 16 * k), f"Now {current} · Peak {peak}", font=text_f, fill=_TEXT, anchor="ra")
 
-    left, right, top_px, bottom = 50, width - 20, 66, height - 36
-    plot_w, plot_h = right - left, bottom - top_px
+    left, right, top_px, bottom = 30, width - 30, 64, height - 46
 
     def x(ts):
-        return left + (ts - start) / WINDOW * plot_w
+        return (left + (ts - start) / WINDOW * (right - left)) * k
 
     def y(n):
-        return bottom - n / top * plot_h
+        return (bottom - n / top * (bottom - top_px)) * k
 
-    for i in range(3):  # 0, half, top: enough to read, not cluttered
-        n = top * i / 2
-        yy = y(n)
-        draw.line([(left, yy), (right, yy)], fill=_GRID, width=1)
-        draw.text((left - 10, yy), f"{n:g}", font=label_f, fill=_AXIS_TEXT, anchor="rm")
+    # One dashed guide at half the scale.
+    gy = y(top / 2)
+    for gx in range(left * k, right * k, 12 * k):
+        draw.line([(gx, gy), (min(gx + 6 * k, right * k), gy)], fill=_GUIDE, width=k)
 
-    # Hour labels every 4 hours, on the hour in PHT.
+    # Clock labels every 6 hours on the hour (PHT), then "Now" at the right end.
+    label_y = (bottom + 14) * k
     first = datetime.datetime.fromtimestamp(start, _TZ).replace(minute=0, second=0, microsecond=0)
     t = first + datetime.timedelta(hours=1)
     while t.timestamp() <= now:
-        if t.hour % 4 == 0:
-            xx = x(t.timestamp())
-            draw.text((xx, bottom + 8), _hour_label(t.timestamp()), font=label_f, fill=_AXIS_TEXT, anchor="ma")
+        xx = x(t.timestamp())
+        if t.hour % 6 == 0 and right * k - xx > 70 * k:
+            # Right at the left edge the label starts there instead of centring on it.
+            edge = xx - left * k < 30 * k
+            draw.text((left * k if edge else xx, label_y), _hour_label(t.timestamp()), font=label_f,
+                      fill=_TEXT, anchor="la" if edge else "ma")
         t += datetime.timedelta(hours=1)
+    draw.text((right * k, label_y), "Now", font=label_f, fill=_TEXT, anchor="ma")
 
     if points:
-        # Drawn at 3x and scaled down: Pillow's lines aren't anti-aliased, and
-        # diagonals look jagged at 1x.
-        k = 3
-        overlay = Image.new("RGBA", (width * k, height * k), (0, 0, 0, 0))
-        odraw = ImageDraw.Draw(overlay)
+        peak_xy = None
         for seg in _segments(points):
             # One point per bucket, at its middle; straight lines between them.
-            line = [(x(ts + BUCKET / 2) * k, y(n) * k) for ts, n in seg]
+            line = [(x(ts + BUCKET / 2), y(n)) for ts, n in seg]
+            for (ts, n), xy in zip(seg, line):
+                if n == peak and peak_xy is None or n == peak and xy[0] > peak_xy[0]:
+                    peak_xy = xy  # the latest peak
             if len(line) == 1:
                 cx, cy = line[0]
-                odraw.ellipse((cx - 3 * k, cy - 3 * k, cx + 3 * k, cy + 3 * k), fill=(*_LINE, 255))
+                draw.ellipse((cx - 3 * k, cy - 3 * k, cx + 3 * k, cy + 3 * k), fill=(*_LINE, 255))
                 continue
-            odraw.polygon(line + [(line[-1][0], bottom * k), (line[0][0], bottom * k)], fill=(*_LINE, 45))
-            odraw.line(line, fill=(*_LINE, 255), width=3 * k, joint="curve")
-        overlay = overlay.resize((width, height), Image.LANCZOS)
-        img.paste(overlay, (0, 0), overlay)
+            fill = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(fill).polygon(line + [(line[-1][0], bottom * k), (line[0][0], bottom * k)],
+                                         fill=(*_LINE, 40))
+            img.alpha_composite(fill)
+            draw.line(line, fill=(*_LINE, 255), width=3 * k, joint="curve")
+        if peak_xy and peak:
+            cx, cy = peak_xy
+            draw.ellipse((cx - 6 * k, cy - 6 * k, cx + 6 * k, cy + 6 * k), fill=(*_LINE, 255))
     else:
-        draw.text(((left + right) / 2, (top_px + bottom) / 2), "Collecting data…",
-                  font=title_f, fill=_AXIS_TEXT, anchor="mm")
+        draw.text(((left + right) / 2 * k, (top_px + bottom) / 2 * k), "Collecting data…",
+                  font=text_f, fill=_TEXT, anchor="mm")
 
+    img = img.resize((width, height), Image.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()

@@ -47,6 +47,15 @@ def test_gap_when_the_bot_was_down():
     assert [len(s) for s in pg._segments(pts)] == [2, 1]
 
 
+def test_peak_today():
+    pts = [(T0, 9), (T0 + pg.BUCKET, 4), (T0 + 2 * pg.BUCKET, 6)]
+    assert pg.peak_since(pts, T0 + pg.BUCKET) == 6        # the 9 ended before
+    assert pg.peak_since(pts, T0 + pg.BUCKET - 1) == 9    # still running then
+    assert pg.peak_since([], T0) == 0
+    start = pg.day_start(T0)
+    assert start <= T0 < start + 86400 and (start + 8 * 3600) % 86400 == 0   # midnight PHT
+
+
 def test_render_is_a_png():
     now = T0 + pg.WINDOW
     pts = [(T0 + i * pg.BUCKET, i % 9) for i in range(1, 288)]
