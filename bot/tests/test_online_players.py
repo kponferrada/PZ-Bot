@@ -60,3 +60,33 @@ def test_no_world_data_no_server_age():
     embed = server_status.build_embed(False, {}, {}, False, max_players=32, restart=None)
     assert embed.description == "🔴 Offline · No restart scheduled"
     assert [f.name for f in embed.fields] == ["Survivors", "Peak today", "Next restart"]
+
+
+def test_status_card_holds_graph_and_buttons():
+    import asyncio
+
+    import discord
+    embed = server_status.build_embed(True, {"playerCount": 2, "month": 4, "day": 9, "year": 1995, "hour": 2,
+                                             "minutes": 52, "isNight": True, "temperature": 10, "elapsedDays": 670},
+                                      {"phase": "idle", "nextSiegeDay": 686, "totalSiegesCompleted": 34},
+                                      False, max_players=32, restart=(1_792_728_000, False), peak_today=16,
+                                      siege_at=1_792_900_000)
+
+    async def build():
+        rows = [[discord.ui.Button(label=n, custom_id=f"x:{n}") for n in ("My rank", "Online players")]]
+        return server_status.build_card(embed, rows=rows, image="attachment://players.png")
+
+    card = asyncio.run(build())
+    assert card.accent_colour == discord.Colour(server_status.ACCENT)
+    kinds = [type(c).__name__ for c in card.children]
+    assert kinds == ["TextDisplay", "TextDisplay", "Separator", "TextDisplay", "MediaGallery",
+                     "Separator", "ActionRow", "TextDisplay"]
+    head, grid, _, siege = (c.content if hasattr(c, "content") else None for c in card.children[:4])
+    assert head.splitlines()[1] == "### Server status" and head.splitlines()[2].startswith("🟢 Online · Day 670")
+    assert grid.splitlines() == ["Survivors **2 / 32** · Peak today **16** · Next restart **<t:1792728000:t>**",
+                                 "In-game date **May 10, 1995** · In-game time **2:52 AM · Night** · "
+                                 "Weather **Clear · 10°C**"]
+    assert siege.startswith("-# Next siege night\n**Day 686**") and "<t:1792900000:" in siege.splitlines()[1]
+    assert siege.endswith("\n34 sieges survived")
+    assert [b.label for b in card.children[6].children] == ["My rank", "Online players"]
+    assert card.children[-1].content.startswith("-# Knox County never forgets")

@@ -150,22 +150,23 @@ replaces the earlier one.
 ### Status card
 
 In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
-one card:
+one card (a Discord Components V2 card), with everything below inside it:
 
-1. the server name (author) and **Server status** (title), then one status
+1. the server name and **Server status** (title), then one status
    line: Online / Offline (amber "data delayed" when RCON is quiet but the
    bridge files are fresh), the server age (`Day 670`) and the next restart as
    Discord timestamps: each viewer sees it in their own timezone, and "in 6
    hours" counts down by itself. It follows the restart controls: a running
    countdown shows "Restarting in …", a deferral its new time, and a skipped
    scheduled slot is passed over;
-2. three rows of fields: **Survivors** (`2 / 32`; no names), **Peak today**
-   (the most online since midnight Philippine time) and **Next restart**;
-   **In-game date**, **In-game time** (with Day / Night) and **Weather**
-   (`Clear · 10°C`); then **Next siege night**: the siege day and its in-game
+2. two lines of values (a V2 card has no columns, so each row is one line):
+   **Survivors** (`2 / 32`; no names), **Peak today** (the most online since
+   midnight Philippine time) and **Next restart**; **In-game date**,
+   **In-game time** (with Day / Night) and **Weather** (`Clear · 10°C`); then,
+   under a divider, **Next siege night**: the siege day and its in-game
    date, how many sieges have been survived (and the siege's status when it
-   is coming tonight or running), with **when it starts in real life** beside
-   it (a Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
+   is coming tonight or running), with **when it starts in real life** on
+   the same line (a Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
    The real time is worked out from the siege's in-game start
    (`SiegeNight.SiegeStartHour` in the server's `*_SandboxVars.lua`, default
    20:00) and how fast the in-game clock is running, which the bot measures
@@ -176,22 +177,23 @@ one card:
    only for a new siege day or start hour, when the time passes without the
    siege starting, or about 2 minutes after a server restart (the game clock
    stops while the server is down, so the siege moves later by that much);
-3. inside the same card, under the fields: a graph of players online over the
+3. a graph of players online over the
    last 24 hours (Philippine time; one point per 5 minutes, the highest count
    seen in it, joined by straight lines, with a dot on the peak; gaps where the
    bot was down). It is amber on a transparent background, so it reads on
-   Discord's light and dark themes. Discord always puts an embed's image below
-   its fields;
-4. a row of four buttons under it: **My rank**, **Online players**, **Player
+   Discord's light and dark themes;
+4. under a divider, four buttons: **My rank**, **Online players**, **Player
    stats**, **Leaderboards** (`/leaderboard`; private answers, as above).
    **Online players** (`/onlineplayers`) lists who is on, from the same data as
    the card. RP leaderboard, Rep board, Link account and Apply for whitelist
-   are on `/playerpanel` only.
+   are on `/playerpanel` only;
+5. the footer line.
 
 The bot records the player count itself from the status loop and keeps 24
 hours of it in `player_history.json`, so the graph starts empty on a fresh
-install and fills in over a day. A status card from v0.6.0 (a V2 card) is
-replaced by a new message on the first update.
+install and fills in over a day. An older status message (a classic embed
+from v0.6.1-v0.6.5 or the v0.6.0 card) is turned into the new card on the
+first update, or replaced by a new message if Discord refuses the edit.
 
 `STATUS_MODE=image` posts the illustrated card instead: the art in
 `assets/status-card-template.png` with the server name, ONLINE / OFFLINE (amber
