@@ -61,7 +61,7 @@ def test_siege_line_in_the_embed():
     siege = embed.fields[-1].value
     assert f"<t:{now + 3600}:t>" in siege and f"<t:{now + 3600}:R>" in siege
     far = server_status.siege_when_line(now + 3 * 86400, now)
-    assert far.startswith("≈ <t:") and ":f>" in far
+    assert far.startswith("<t:") and ":f>" in far
     assert server_status.siege_when_line(None, now) == ""
 
 
@@ -90,3 +90,27 @@ def test_icons_draw_and_fall_back():
         assert status_icons.icon(key)                               # a plain emoji until synced
     assert len(names) == len(status_icons.KEYS)
     assert status_icons.weather_key("Heavy Rain") == "rain" and status_icons.weather_key("Clear") == "clear"
+
+
+def test_siege_time_is_worked_out_once(monkeypatch):
+    import asyncio
+
+    async def start_hour(_bot):
+        return 20
+    monkeypatch.setattr(server_config, "read_siege_start_hour", start_hour)
+    cog = server_status.ServerStatusCog.__new__(server_status.ServerStatusCog)
+    cog.bot, cog._siege_at, cog._clock = None, None, gc.GameClockRate()
+    rates = iter([0.4, 0.5, 0.6, 0.7])
+    cog._clock.rate = lambda: next(rates)
+
+    async def run():
+        first = await cog._siege_time(True, WORLD, SIEGE)
+        again = await cog._siege_time(True, {**WORLD, "minutes": 40}, SIEGE)    # next update: kept
+        moved = await cog._siege_time(True, WORLD, {**SIEGE, "nextSiegeDay": 666})   # another siege
+        down = await cog._siege_time(False, WORLD, SIEGE)                       # server down: dropped
+        back = await cog._siege_time(True, WORLD, SIEGE)                        # back: worked out again
+        return first, again, moved, down, back
+
+    first, again, moved, down, back = asyncio.run(run())
+    assert first == again                       # the clock-speed estimate moved, the shown time didn't
+    assert moved != first and down is None and back not in (None, first)
