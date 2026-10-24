@@ -159,14 +159,14 @@ one card (a Discord Components V2 card), with everything below inside it:
    hours" counts down by itself. It follows the restart controls: a running
    countdown shows "Restarting in …", a deferral its new time, and a skipped
    scheduled slot is passed over;
-2. two lines of values (a V2 card has no columns, so each row is one line):
-   **Survivors** (`2 / 32`; no names), **Peak today** (the most online since
-   midnight Philippine time) and **Next restart**; **In-game date**,
-   **In-game time** (with Day / Night) and **Weather** (`Clear · 10°C`); then,
-   under a divider, **Next siege night**: the siege day and its in-game
+2. after a gap, the values stacked (a V2 card has no columns), each a small
+   grey label over its value: **Survivors** (`2 / 32 · peak today 16`; no
+   names; the peak is the most online since midnight Philippine time),
+   **In-game** (`May 10, 1995 · 2:52 AM · Night`) and **Weather**
+   (`Clear · 10°C`); then, under a divider, **Next siege night**: the siege day and its in-game
    date, how many sieges have been survived (and the siege's status when it
-   is coming tonight or running), with **when it starts in real life** on
-   the same line (a Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
+   is coming tonight or running), and **when it starts in real life** (a
+   Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
    The real time is worked out from the siege's in-game start
    (`SiegeNight.SiegeStartHour` in the server's `*_SandboxVars.lua`, default
    20:00) and how fast the in-game clock is running, which the bot measures

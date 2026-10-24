@@ -68,7 +68,7 @@ def test_status_card_holds_graph_and_buttons():
     import discord
     embed = server_status.build_embed(True, {"playerCount": 2, "month": 4, "day": 9, "year": 1995, "hour": 2,
                                              "minutes": 52, "isNight": True, "temperature": 10, "elapsedDays": 670},
-                                      {"phase": "idle", "nextSiegeDay": 686, "totalSiegesCompleted": 34},
+                                      {"phase": "idle", "eventDay": 670, "nextSiegeDay": 686, "totalSiegesCompleted": 34},
                                       False, max_players=32, restart=(1_792_728_000, False), peak_today=16,
                                       siege_at=1_792_900_000)
 
@@ -78,15 +78,19 @@ def test_status_card_holds_graph_and_buttons():
 
     card = asyncio.run(build())
     assert card.accent_colour == discord.Colour(server_status.ACCENT)
-    kinds = [type(c).__name__ for c in card.children]
-    assert kinds == ["TextDisplay", "TextDisplay", "Separator", "TextDisplay", "MediaGallery",
-                     "Separator", "ActionRow", "TextDisplay"]
-    head, grid, _, siege = (c.content if hasattr(c, "content") else None for c in card.children[:4])
-    assert head.splitlines()[1] == "### Server status" and head.splitlines()[2].startswith("🟢 Online · Day 670")
-    assert grid.splitlines() == ["Survivors **2 / 32** · Peak today **16** · Next restart **<t:1792728000:t>**",
-                                 "In-game date **May 10, 1995** · In-game time **2:52 AM · Night** · "
-                                 "Weather **Clear · 10°C**"]
-    assert siege.startswith("-# Next siege night\n**Day 686**") and "<t:1792900000:" in siege.splitlines()[1]
-    assert siege.endswith("\n34 sieges survived")
-    assert [b.label for b in card.children[6].children] == ["My rank", "Online players"]
+    kids = card.children
+    kinds = [type(c).__name__ for c in kids]
+    assert kinds == ["TextDisplay", "Separator", "TextDisplay", "TextDisplay", "TextDisplay", "Separator",
+                     "TextDisplay", "Separator", "MediaGallery", "Separator", "ActionRow", "TextDisplay"]
+    assert [c.visible for c in kids if isinstance(c, discord.ui.Separator)] == [False, True, False, True]
+    head = kids[0].content.splitlines()
+    assert head[1] == "### Server status" and head[2].startswith("🟢 Online · Day 670")
+    assert kids[2].content == "-# Survivors\n**2 / 32** · peak today 16"
+    assert kids[3].content == "-# In-game\n**May 10, 1995 · 2:52 AM · Night**"
+    assert kids[4].content == "-# Weather\n**Clear · 10°C**"
+    siege = kids[6].content.splitlines()
+    assert siege[:2] == ["-# Next siege night", "**Day 686** · May 26 in-game"]
+    assert siege[2].startswith("<t:1792900000:") and siege[2].endswith(" · <t:1792900000:R>")
+    assert siege[3] == "34 sieges survived"
+    assert [b.label for b in kids[10].children] == ["My rank", "Online players"]
     assert card.children[-1].content.startswith("-# Knox County never forgets")

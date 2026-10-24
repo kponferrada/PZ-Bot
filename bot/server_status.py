@@ -370,33 +370,51 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
     return embed
 
 
-_CARD_ROWS = (("Survivors", "Peak today", "Next restart"), ("In-game date", "In-game time", "Weather"))
+def _gap(visible: bool = False) -> discord.ui.Separator:
+    """Space between the card's sections (a line when `visible`)."""
+    return discord.ui.Separator(visible=visible, spacing=discord.SeparatorSpacing.large)
+
+
+def _block(label: str, value: str) -> discord.ui.TextDisplay:
+    """A small grey label with its value under it."""
+    return discord.ui.TextDisplay(f"-# {label}\n{value}")
 
 
 def build_card(embed: discord.Embed, rows=(), image: str = "") -> discord.ui.Container:
     """The status embed as the V2 card, with the graph `image` and the button
-    `rows` inside it: server name, title and status line; one line per row of
-    values ("Survivors **2 / 32** · ..."); the next siege; graph; buttons;
-    footer. The accent bar is the embed's colour."""
+    `rows` inside it. A V2 card has no columns, so the values are stacked,
+    each a grey label over its value, with space between the sections
+    (user's choice, 2026-10-25): server name, title and status line;
+    Survivors, In-game, Weather; a line; Next siege night; the graph; a line;
+    the buttons; the footer. The next restart is in the status line. The
+    accent bar is the embed's colour."""
     fields = {f.name: f.value for f in embed.fields}
     head = [f"-# {embed.author.name}" if embed.author and embed.author.name else "",
             f"### {embed.title}" if embed.title else "", embed.description or ""]
     items = [discord.ui.TextDisplay("\n".join(p for p in head if p))]
-    grid = [" · ".join(f"{name} **{fields[name]}**" for name in row if name in fields) for row in _CARD_ROWS]
-    grid = "\n".join(line for line in grid if line)
-    if grid:
-        items.append(discord.ui.TextDisplay(grid))
+    blocks = []
+    if "Survivors" in fields:
+        peak = f" · peak today {fields['Peak today']}" if "Peak today" in fields else ""
+        blocks.append(_block("Survivors", f"**{fields['Survivors']}**{peak}"))
+    ingame = " · ".join(fields[n] for n in ("In-game date", "In-game time") if n in fields)
+    if ingame:
+        blocks.append(_block("In-game", f"**{ingame}**"))
+    if "Weather" in fields:
+        blocks.append(_block("Weather", f"**{fields['Weather']}**"))
+    if blocks:
+        items.append(_gap())
+        items.extend(blocks)
     siege = fields.get("Next siege night")
     if siege:
         first, _, rest = siege.partition("\n")
         when = fields.get(_BLANK)  # its real-world start, when known
-        text = f"-# Next siege night\n{first}" + (f" · {when}" if when else "") + (f"\n{rest}" if rest else "")
-        items += [discord.ui.Separator(), discord.ui.TextDisplay(text)]
+        lines = [first] + ([when.replace("> <", "> · <")] if when else []) + ([rest] if rest else [])
+        items += [_gap(visible=True), _block("Next siege night", "\n".join(lines))]
     if image:
-        items.append(discord.ui.MediaGallery(discord.MediaGalleryItem(image)))
+        items += [_gap(), discord.ui.MediaGallery(discord.MediaGalleryItem(image))]
     action_rows = [discord.ui.ActionRow(*row) for row in rows if row]
     if action_rows:
-        items.append(discord.ui.Separator())
+        items.append(_gap(visible=True))
         items.extend(action_rows)
     if embed.footer and embed.footer.text:
         items.append(discord.ui.TextDisplay(f"-# {embed.footer.text}"))
