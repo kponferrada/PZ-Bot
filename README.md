@@ -71,7 +71,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
-| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel` |
+| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
 | Features | `/enable <feature>`, `/disable <feature>` |
 | Panels | `/adminpanel`, `/playerpanel` (see below) |
 
@@ -150,22 +150,23 @@ replaces the earlier one.
 ### Status card
 
 In `STATUS_MODE=embed` the status message (`STATUS_CHANNEL_ID`, every 30 s) is
-one card:
+one card (a Discord Components V2 card), with everything below inside it:
 
-1. the server name (author) and **Server status** (title), then one status
+1. the server name and **Server status** (title), then one status
    line: Online / Offline (amber "data delayed" when RCON is quiet but the
    bridge files are fresh), the server age (`Day 670`) and the next restart as
    Discord timestamps: each viewer sees it in their own timezone, and "in 6
    hours" counts down by itself. It follows the restart controls: a running
    countdown shows "Restarting in …", a deferral its new time, and a skipped
    scheduled slot is passed over;
-2. three rows of fields: **Survivors** (`2 / 32`; no names), **Peak today**
-   (the most online since midnight Philippine time) and **Next restart**;
-   **In-game date**, **In-game time** (with Day / Night) and **Weather**
-   (`Clear · 10°C`); then **Next siege night**: the siege day and its in-game
+2. after a gap, the values stacked (a V2 card has no columns), each a small
+   grey label over its value: **Survivors** (`2 / 32 · peak today 16`; no
+   names; the peak is the most online since midnight Philippine time),
+   **In-game** (`May 10, 1995 · 2:52 AM · Night`) and **Weather**
+   (`Clear · 10°C`); then, under a divider, **Next siege night**: the siege day and its in-game
    date, how many sieges have been survived (and the siege's status when it
-   is coming tonight or running), with **when it starts in real life** beside
-   it (a Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
+   is coming tonight or running), and **when it starts in real life** (a
+   Discord timestamp, e.g. "Oct 26, 1:15 PM · in 2 days").
    The real time is worked out from the siege's in-game start
    (`SiegeNight.SiegeStartHour` in the server's `*_SandboxVars.lua`, default
    20:00) and how fast the in-game clock is running, which the bot measures
@@ -176,22 +177,23 @@ one card:
    only for a new siege day or start hour, when the time passes without the
    siege starting, or about 2 minutes after a server restart (the game clock
    stops while the server is down, so the siege moves later by that much);
-3. inside the same card, under the fields: a graph of players online over the
+3. a graph of players online over the
    last 24 hours (Philippine time; one point per 5 minutes, the highest count
    seen in it, joined by straight lines, with a dot on the peak; gaps where the
    bot was down). It is amber on a transparent background, so it reads on
-   Discord's light and dark themes. Discord always puts an embed's image below
-   its fields;
-4. a row of four buttons under it: **My rank**, **Online players**, **Player
+   Discord's light and dark themes;
+4. under a divider, four buttons: **My rank**, **Online players**, **Player
    stats**, **Leaderboards** (`/leaderboard`; private answers, as above).
    **Online players** (`/onlineplayers`) lists who is on, from the same data as
    the card. RP leaderboard, Rep board, Link account and Apply for whitelist
-   are on `/playerpanel` only.
+   are on `/playerpanel` only;
+5. the footer line.
 
 The bot records the player count itself from the status loop and keeps 24
 hours of it in `player_history.json`, so the graph starts empty on a fresh
-install and fills in over a day. A status card from v0.6.0 (a V2 card) is
-replaced by a new message on the first update.
+install and fills in over a day. An older status message (a classic embed
+from v0.6.1-v0.6.5 or the v0.6.0 card) is turned into the new card on the
+first update, or replaced by a new message if Discord refuses the edit.
 
 `STATUS_MODE=image` posts the illustrated card instead: the art in
 `assets/status-card-template.png` with the server name, ONLINE / OFFLINE (amber
@@ -231,9 +233,21 @@ Once a request is approved, its card in the approval channel has four admin butt
 - **Change Username:** Project Zomboid has no RCON command to rename an account, so the bot adds the new account and then removes the old one. **PZ saves characters per username, so the player starts a new character.** The Discord link moves to the new name.
 - **Change Password:** removes and re-adds the account with the new password. If re-adding fails, the old password is put back.
 - **Check Status:** the account on the server whitelist (SteamID, access level, last connection, banned), whether the player is in game, and their Discord link.
-- **Delete Account:** removes the account and its SteamID, with a reason.
+- **Delete Account:** removes the account and its SteamID, with a reason, and takes the whitelist role away (below).
 
 Name and password changes are refused while the player is in game. Both update the CSV and the card, and DM the requester their new login. Cards approved before this version only show Delete Account.
+
+### Whitelist role
+
+Set `WHITELIST_ROLE_ID` to a role's ID and the bot keeps that role in step with the whitelist:
+
+- **Approve** gives it to the requester;
+- **Delete Account** takes it away from the requester;
+- `/whitelistadd ... member:@someone` gives it to that member (without `member` no role changes);
+- `/whitelistremove <username>` takes it from whoever requested that username, or, if no request is on record, whoever is linked to it;
+- `/whitelistrolesync` (admin) gives it to everyone whose request is approved and not deleted, so players approved before the role existed get it too. It only adds the role, never removes it.
+
+Change Username and Change Password keep the role. The admin's reply says what happened to the role (given, already had it, not in the server, …). The bot needs the **Manage Roles** permission, and its own role must sit above the whitelist role in Server Settings → Roles; otherwise Discord refuses and the reply says so. `0` (the default) turns this off.
 
 ### Weekly RP leaderboard
 
@@ -318,7 +332,7 @@ the ladder rank too. `RANK_SOURCE=roles` restores the old role-based ranks.
 1. [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**.
 2. **Bot** → **Reset Token**. The token is `DISCORD_TOKEN`.
 3. Turn on all three **Privileged Gateway Intents** (Presence, Server Members, Message Content). The bot uses `Intents.all()`.
-4. **OAuth2 → URL Generator**: scopes `bot` **and** `applications.commands`; permissions Send Messages, Embed Links, Attach Files, Manage Messages, Read Message History. Open the URL to invite the bot.
+4. **OAuth2 → URL Generator**: scopes `bot` **and** `applications.commands`; permissions Send Messages, Embed Links, Attach Files, Manage Messages, Read Message History, Manage Roles (rank roles and the whitelist role). Open the URL to invite the bot.
 5. Turn on Developer Mode in Discord (Settings → Advanced) to copy channel and role IDs.
 
 ### 2. Game server
@@ -398,6 +412,7 @@ feature is off.
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
+| `WHITELIST_ROLE_ID` | role given on whitelist approval, taken on account deletion (0 = off) |
 | `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |
 | `PLAYER_PANEL_CHANNEL_ID` | player panel (`/playerpanel`); the same buttons are on the status card |
 

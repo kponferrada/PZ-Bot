@@ -18,14 +18,14 @@ Resilience features:
     brief outages instead of blanking the panel
   - Siege status: shows completed count and current day alongside next siege info
 
-In `embed` mode the message is one embed laid out like the user's mockup
-(2026-10-25): status line, three rows of fields (players, world, next siege)
-and the 24-hour players-online graph (player_graph.py) as its image. The
-names of who is online are behind the "Online players" button
-(/onlineplayers). `image` mode posts the rendered status card. Either way a
-row of player buttons (player_panel.py `status_rows`; private replies) sits
-under the message. A classic embed can't hold buttons inside it, and a V2
-card can't lay fields out in columns, so the buttons sit just below.
+In `embed` mode the message is one Components V2 card laid out like the
+user's mockup (2026-10-25): status line, the players and world values, the
+next siege, the 24-hour players-online graph (player_graph.py) and the player
+buttons (player_panel.py `status_rows`; private replies), all inside the card
+(user, 2026-10-25). `build_embed` makes the text and `build_card` lays it out;
+a V2 card has no columns, so each row of values is one line. The names of
+who is online are behind the "Online players" button (/onlineplayers).
+`image` mode posts the rendered status card, with the buttons under it.
 
 Config:
   STATUS_CHANNEL_ID=  (Discord channel ID for the status embed)
@@ -43,6 +43,7 @@ from pathlib import Path
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import cards
 import lua_bridge
 import player_graph
 import status_card
@@ -369,6 +370,57 @@ def build_embed(server_online, world, siege, skip_active, stale=False, max_playe
     return embed
 
 
+def _gap(visible: bool = False) -> discord.ui.Separator:
+    """Space between the card's sections (a line when `visible`)."""
+    return discord.ui.Separator(visible=visible, spacing=discord.SeparatorSpacing.large)
+
+
+def _block(label: str, value: str) -> discord.ui.TextDisplay:
+    """A small grey label with its value under it."""
+    return discord.ui.TextDisplay(f"-# {label}\n{value}")
+
+
+def build_card(embed: discord.Embed, rows=(), image: str = "") -> discord.ui.Container:
+    """The status embed as the V2 card, with the graph `image` and the button
+    `rows` inside it. A V2 card has no columns, so the values are stacked,
+    each a grey label over its value, with space between the sections
+    (user's choice, 2026-10-25): server name, title and status line;
+    Survivors, In-game, Weather; a line; Next siege night; the graph; a line;
+    the buttons; the footer. The next restart is in the status line. The
+    accent bar is the embed's colour."""
+    fields = {f.name: f.value for f in embed.fields}
+    head = [f"-# {embed.author.name}" if embed.author and embed.author.name else "",
+            f"### {embed.title}" if embed.title else "", embed.description or ""]
+    items = [discord.ui.TextDisplay("\n".join(p for p in head if p))]
+    blocks = []
+    if "Survivors" in fields:
+        peak = f" · peak today {fields['Peak today']}" if "Peak today" in fields else ""
+        blocks.append(_block("Survivors", f"**{fields['Survivors']}**{peak}"))
+    ingame = " · ".join(fields[n] for n in ("In-game date", "In-game time") if n in fields)
+    if ingame:
+        blocks.append(_block("In-game", f"**{ingame}**"))
+    if "Weather" in fields:
+        blocks.append(_block("Weather", f"**{fields['Weather']}**"))
+    if blocks:
+        items.append(_gap())
+        items.extend(blocks)
+    siege = fields.get("Next siege night")
+    if siege:
+        first, _, rest = siege.partition("\n")
+        when = fields.get(_BLANK)  # its real-world start, when known
+        lines = [first] + ([when.replace("> <", "> · <")] if when else []) + ([rest] if rest else [])
+        items += [_gap(visible=True), _block("Next siege night", "\n".join(lines))]
+    if image:
+        items += [_gap(), discord.ui.MediaGallery(discord.MediaGalleryItem(image))]
+    action_rows = [discord.ui.ActionRow(*row) for row in rows if row]
+    if action_rows:
+        items.append(_gap(visible=True))
+        items.extend(action_rows)
+    if embed.footer and embed.footer.text:
+        items.append(discord.ui.TextDisplay(f"-# {embed.footer.text}"))
+    return discord.ui.Container(*items, accent_colour=embed.colour)
+
+
 def _siege_fields(siege, world=None):
     """Return (siege_day, siege_status, completed) for three inline fields."""
     if not siege:
@@ -489,28 +541,31 @@ class ServerStatusCog(commands.Cog):
         return view
 
     def _is_status_message(self, msg) -> bool:
-        """Our status message: an embed (embed mode) or image (image mode) the bot
-        left here, or the V2 card v0.6.0 posted (replaced on the next update)."""
+        """Our status message: the V2 card (embed mode), an image (image mode), a
+        classic embed from before the card, or the V2 card v0.6.0 posted."""
         if msg.author != self.bot.user:
             return False
         if not msg.flags.components_v2:
             return bool(msg.attachments if self._mode == "image" else msg.embeds)
-        if any(a.filename == _STATUS_FILE for a in msg.attachments):
+        if any(a.filename in (_STATUS_FILE, _GRAPH_FILE) for a in msg.attachments):
             return True
-        head = f"### {DASHBOARD_TITLE}"
-        return any((getattr(c, "content", "") or "").startswith(head) for c in _walk(msg.components))
+        texts = [getattr(c, "content", "") or "" for c in _walk(msg.components)]
+        return any("### Server status" in t or t.startswith(f"### {DASHBOARD_TITLE}") for t in texts)
 
-    async def _publish(self, make_files, embeds=None) -> None:
+    async def _publish(self, make_files, embeds=None, layout=None) -> None:
         """Send or edit the status message. `make_files` builds fresh attachments
-        for each attempt (a discord.File can only be sent once)."""
+        for each attempt (a discord.File can only be sent once). With `layout`
+        (a V2 card holding its own buttons) the message is that card."""
         channel = await self._get_channel()
         if not channel:
             return
-        view = self._player_view()
+        view = layout if layout is not None else self._player_view()
 
         def kwargs():
             out = {"attachments": make_files(), "view": view}
-            if embeds is not None:
+            if layout is not None:
+                out.update(content=None, embeds=[])  # turns an old classic message into the card
+            elif embeds is not None:
                 out["embeds"] = embeds
             return out
 
@@ -523,7 +578,8 @@ class ServerStatusCog(commands.Cog):
                 self._message_id = None
 
         # Reuse our previous status message after a bot restart. A V2 card can't
-        # go back to embeds, so that one is replaced by a new message.
+        # go back to embeds, so that one is replaced by a new message; a classic
+        # one is turned into the card if Discord allows it, else replaced.
         old = None
         try:
             async for msg in channel.history(limit=20):
@@ -532,7 +588,7 @@ class ServerStatusCog(commands.Cog):
                     break
         except discord.HTTPException:
             pass
-        if old is not None and not old.flags.components_v2:
+        if old is not None and (layout is not None or not old.flags.components_v2):
             try:
                 await old.edit(**kwargs())
                 self._message_id = old.id
@@ -543,7 +599,7 @@ class ServerStatusCog(commands.Cog):
 
         try:
             send = {"files": make_files(), "view": view}
-            if embeds is not None:
+            if embeds is not None and layout is None:
                 send["embeds"] = embeds
             msg = await channel.send(**{k: v for k, v in send.items() if v is not None})
             self._message_id = msg.id
@@ -609,13 +665,14 @@ class ServerStatusCog(commands.Cog):
         return self._graph_png_cache
 
     async def _send_or_edit_embed(self, embed, max_players: int):
+        """Post the status as the V2 card: graph and player buttons inside it."""
         png = await self._graph_png(max_players)
-        if png is None:
-            await self._publish(lambda: [], [embed])
-            return
-        # The graph is the embed's image: inside the same card, under the fields.
-        embed.set_image(url=f"attachment://{_GRAPH_FILE}")
-        await self._publish(lambda: [discord.File(io.BytesIO(png), filename=_GRAPH_FILE)], [embed])
+        panel = self.bot.get_cog("PlayerPanel")
+        rows = panel.status_rows() if panel is not None else []
+        image = f"attachment://{_GRAPH_FILE}" if png is not None else ""
+        layout = cards.CardView(build_card(embed, rows=rows, image=image))
+        files = (lambda: [discord.File(io.BytesIO(png), filename=_GRAPH_FILE)]) if png is not None else (lambda: [])
+        await self._publish(files, layout=layout)
 
     @app_commands.command(name="onlineplayers", description="List the players online right now.")
     async def cmd_online_players(self, interaction: discord.Interaction) -> None:

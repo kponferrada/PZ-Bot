@@ -18,8 +18,9 @@ Flow:
   4. Approve → adds the user over RCON (`adduser` + `addSteamID` so the account
      is bound to a single SteamID), records the RCON command in `Code`, the admin
      in `Whitelisted By`, flags `isWhitelisted`, links the requester's Discord
-     account to the username (as `/linkme` would, through RankSync) and DMs a
-     welcome message. The link is skipped if either side is already linked.
+     account to the username (as `/linkme` would, through RankSync), gives them
+     the whitelist role (WHITELIST_ROLE_ID, if set) and DMs a welcome message.
+     The link is skipped if either side is already linked.
      Deny → asks the admin for a reason, records it in `Notes`, and DMs the
      requester the denial reason.
   5. After approval the card keeps four buttons:
@@ -32,7 +33,8 @@ Flow:
      - Check Status → the account on the server whitelist (SteamID, access
        level, last connection), whether the player is online, and the link.
      - Delete Account → removes the account over RCON (`removeuser` +
-       `removeSteamID`), records the reason in `Notes`, and updates the form.
+       `removeSteamID`), records the reason in `Notes`, takes the whitelist
+       role away from the requester, and updates the form.
      Name and password changes are refused while the player is online, update
      the CSV and the card, and DM the requester their new login.
 
@@ -51,6 +53,9 @@ Config (see config.env.example):
   WHITELIST_CHANNEL_ID          — channel that holds the request button.
   WHITELIST_APPROVAL_CHANNEL_ID — channel that receives new requests.
   WHITELIST_CSV_PATH            — where requests are stored (default whitelist_requests.csv).
+  WHITELIST_ROLE_ID             — role given on approval and taken on deletion (0 = off).
+                                  `/whitelistadd [member]` gives it, `/whitelistremove` takes
+                                  it, `/whitelistrolesync` gives it to everyone already approved.
 """
 from __future__ import annotations
 
@@ -66,6 +71,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import cards
+import roles
 import sftp_client
 
 _DEFAULT_CSV = "whitelist_requests.csv"
@@ -186,6 +192,30 @@ def is_pending(row: dict) -> bool:
         return (row.get(key, "") or "").strip()
     whitelisted = get("isWhitelisted").lower() == "true"
     return not whitelisted and not get("Notes") and not get("Code") and not get("Whitelisted By")
+
+
+def _is_whitelisted(row: dict) -> bool:
+    return (row.get("isWhitelisted", "false") or "false").strip().lower() == "true"
+
+
+def whitelisted_requesters(rows: list) -> list:
+    """Discord ids of everyone whose request is approved and not deleted (once each)."""
+    out = []
+    for row in rows:
+        did = str(row.get("discord_id", "") or "").strip()
+        if _is_whitelisted(row) and did.isdigit() and did not in out:
+            out.append(did)
+    return out
+
+
+def requester_for_username(rows: list, username: str) -> str:
+    """The Discord id of whoever requested `username` (the latest such request), or ""."""
+    name = (username or "").strip().lower()
+    for row in reversed(rows):
+        did = str(row.get("discord_id", "") or "").strip()
+        if (row.get("Username", "") or "").strip().lower() == name and did.isdigit():
+            return did
+    return ""
 
 
 def find_pending_request(rows: list, discord_id: str, discord_name: str = "") -> dict | None:
@@ -490,6 +520,7 @@ class WhitelistCog(commands.Cog):
         self.bot = bot
         self._channel_id = int(getattr(bot.config, "WHITELIST_CHANNEL_ID", 0) or 0)
         self._approval_channel_id = int(getattr(bot.config, "WHITELIST_APPROVAL_CHANNEL_ID", 0) or 0)
+        self._role_id = int(getattr(bot.config, "WHITELIST_ROLE_ID", 0) or 0)
 
         csv_path = getattr(bot.config, "WHITELIST_CSV_PATH", "") or _DEFAULT_CSV
         self._csv_path = Path(csv_path)
@@ -511,6 +542,7 @@ class WhitelistCog(commands.Cog):
 
         print(f"[Whitelist] channel={self._channel_id or 'unset'} "
               f"approval={self._approval_channel_id or 'unset'} "
+              f"role={self._role_id or 'off'} "
               f"csv={self._csv_path}")
 
     # ---- helpers -------------------------------------------------------------
@@ -1115,6 +1147,10 @@ class WhitelistCog(commands.Cog):
         await self._finalize_approval(interaction.message, request, interaction.user, "approved")
 
         link_note = await self._link_requester(request.get("discord_id", ""), username)
+        role_note = await self._set_role(interaction.guild, request.get("discord_id", ""), True,
+                                         f"{username} approved by {interaction.user}")
+        if role_note:
+            link_note += "\n" + role_note
 
         submitter = await self._fetch_submitter(request.get("discord_id", ""))
         if submitter is not None:
@@ -1123,6 +1159,11 @@ class WhitelistCog(commands.Cog):
         await interaction.followup.send(
             f"\u2705 Approved **{username}** and added to the whitelist.\n{link_note}", ephemeral=True)
         print(f"[Whitelist] Approved {username} (SteamID {request.get('SteamID', '')})")
+
+    async def _set_role(self, guild, discord_id, give: bool, why: str) -> str:
+        """Give or take the whitelist role; returns a line for the admin ("" when off)."""
+        _result, line = await roles.set_member_role(guild, discord_id, self._role_id, give, f"Whitelist: {why}")
+        return line
 
     async def _link_requester(self, discord_id: str, username: str) -> str:
         """Link the requester to their approved username; returns a line for the admin."""
@@ -1208,8 +1249,11 @@ class WhitelistCog(commands.Cog):
         })
         request = self._lookup_request(request_id)
         await self._finalize_approval(message, request, interaction.user, "deleted", reason)
+        role_note = await self._set_role(interaction.guild, request.get("discord_id", ""), False,
+                                         f"{username} deleted by {interaction.user}: {reason}")
         await interaction.followup.send(
-            f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV.",
+            f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV."
+            + (f"\n{role_note}" if role_note else ""),
             ephemeral=True)
         print(f"[Whitelist] Deleted account {username} (request {request_id}): {reason}")
 
@@ -1478,9 +1522,11 @@ class WhitelistCog(commands.Cog):
         username="In-game username",
         password="Account password",
         steamid="17-digit SteamID64",
+        member="Discord member to give the whitelist role (optional)",
     )
     async def cmd_whitelist_add(self, interaction: discord.Interaction,
-                                username: str, password: str, steamid: str) -> None:
+                                username: str, password: str, steamid: str,
+                                member: discord.Member = None) -> None:
         if not self._is_admin(interaction):
             await interaction.response.send_message(
                 "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
@@ -1498,8 +1544,13 @@ class WhitelistCog(commands.Cog):
                 colour=discord.Colour.red(),
             ), ephemeral=True)
             return
+        role_note = ""
+        if member is not None:
+            role_note = await self._set_role(interaction.guild, member.id, True,
+                                             f"{username} added by {interaction.user}")
         await interaction.followup.send(
-            f"\u2705 Added **{username}** (SteamID `{steamid}`) to the whitelist.", ephemeral=True)
+            f"\u2705 Added **{username}** (SteamID `{steamid}`) to the whitelist."
+            + (f"\n{role_note}" if role_note else ""), ephemeral=True)
         print(f"[Whitelist] Manually added {username} (SteamID {steamid}) by {interaction.user}")
 
     @app_commands.command(
@@ -1614,9 +1665,46 @@ class WhitelistCog(commands.Cog):
         msg = f"\U0001f5d1\ufe0f Removed **{username}** from the whitelist."
         if reason:
             msg += f"\nReason: {reason}"
+        if self._role_id:
+            discord_id = requester_for_username(self._read_csv(), username)
+            rank_cog = self.bot.get_cog("RankSync")
+            if not discord_id and rank_cog is not None:
+                discord_id = str(rank_cog.discord_id_for_pz_username(username) or "")
+            role_note = await self._set_role(interaction.guild, discord_id, False,
+                                             f"{username} removed by {interaction.user}")
+            msg += f"\n{role_note}"
         await interaction.followup.send(msg, ephemeral=True)
         print(f"[Whitelist] Removed {username} (SteamID {steamid or '-'}) "
               f"by {interaction.user}; reason: {reason or '-'}")
+
+    @app_commands.command(
+        name="whitelistrolesync",
+        description="Give the whitelist role to everyone with an approved request.",
+    )
+    async def cmd_whitelist_role_sync(self, interaction: discord.Interaction) -> None:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message(
+                "\u274c You don't have permission to manage the whitelist.", ephemeral=True)
+            return
+        if not self._role_id:
+            await interaction.response.send_message(
+                "\u274c No whitelist role set (`WHITELIST_ROLE_ID` in the bot config).", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        counts = {}
+        for discord_id in whitelisted_requesters(self._read_csv()):
+            result, line = await roles.set_member_role(interaction.guild, discord_id, self._role_id, True,
+                                                       f"Whitelist role sync by {interaction.user}")
+            if result in (roles.FORBIDDEN, roles.NO_ROLE):
+                await interaction.followup.send(line, ephemeral=True)
+                return
+            counts[result] = counts.get(result, 0) + 1
+        await interaction.followup.send(
+            f"\U0001f3ad Whitelist role: given to **{counts.get(roles.GIVEN, 0)}**, "
+            f"already had it **{counts.get(roles.ALREADY, 0)}**, "
+            f"not in the server **{counts.get(roles.NO_MEMBER, 0)}**"
+            + (f", failed **{counts[roles.FAILED]}**" if counts.get(roles.FAILED) else "") + ".",
+            ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

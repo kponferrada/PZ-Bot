@@ -65,6 +65,7 @@ GROUPS = (
         Action("whitelistremove", "Remove", "whitelistremove", "\U0001f5d1️", RED),
         Action("whitelistcancel", "Cancel request", "whitelistcancel", "\U0001f6ab"),
         Action("whitelistlist", "List", "whitelistlist", "\U0001f4cb"),
+        Action("whitelistrolesync", "Sync roles", "whitelistrolesync", "\U0001f3ad"),
         Action("whitelistsetup", "Post apply panel", "whitelistsetup", "\U0001f4cc"),
     )),
     Group("\U0001f319 Events", "Siege Night, airdrops and supply events.", 0x1ABC9C, (
