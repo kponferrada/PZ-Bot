@@ -115,6 +115,7 @@ class Config:
         self.WHITELIST_CHANNEL_ID = _env_int("WHITELIST_CHANNEL_ID", 0)
         self.WHITELIST_APPROVAL_CHANNEL_ID = _env_int("WHITELIST_APPROVAL_CHANNEL_ID", 0)
         self.WHITELIST_CSV_PATH = _env("WHITELIST_CSV_PATH", "whitelist_requests.csv")
+        self.WHITELIST_ROLE_ID = _env_int("WHITELIST_ROLE_ID", 0)
 
         # Admin control panel (/adminpanel posts it here; 0 = the channel it is run in)
         self.ADMIN_PANEL_CHANNEL_ID = _env_int("ADMIN_PANEL_CHANNEL_ID", 0)

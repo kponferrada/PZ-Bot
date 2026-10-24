@@ -71,7 +71,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
-| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel` |
+| Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
 | Features | `/enable <feature>`, `/disable <feature>` |
 | Panels | `/adminpanel`, `/playerpanel` (see below) |
 
@@ -233,9 +233,21 @@ Once a request is approved, its card in the approval channel has four admin butt
 - **Change Username:** Project Zomboid has no RCON command to rename an account, so the bot adds the new account and then removes the old one. **PZ saves characters per username, so the player starts a new character.** The Discord link moves to the new name.
 - **Change Password:** removes and re-adds the account with the new password. If re-adding fails, the old password is put back.
 - **Check Status:** the account on the server whitelist (SteamID, access level, last connection, banned), whether the player is in game, and their Discord link.
-- **Delete Account:** removes the account and its SteamID, with a reason.
+- **Delete Account:** removes the account and its SteamID, with a reason, and takes the whitelist role away (below).
 
 Name and password changes are refused while the player is in game. Both update the CSV and the card, and DM the requester their new login. Cards approved before this version only show Delete Account.
+
+### Whitelist role
+
+Set `WHITELIST_ROLE_ID` to a role's ID and the bot keeps that role in step with the whitelist:
+
+- **Approve** gives it to the requester;
+- **Delete Account** takes it away from the requester;
+- `/whitelistadd ... member:@someone` gives it to that member (without `member` no role changes);
+- `/whitelistremove <username>` takes it from whoever requested that username, or, if no request is on record, whoever is linked to it;
+- `/whitelistrolesync` (admin) gives it to everyone whose request is approved and not deleted, so players approved before the role existed get it too. It only adds the role, never removes it.
+
+Change Username and Change Password keep the role. The admin's reply says what happened to the role (given, already had it, not in the server, …). The bot needs the **Manage Roles** permission, and its own role must sit above the whitelist role in Server Settings → Roles; otherwise Discord refuses and the reply says so. `0` (the default) turns this off.
 
 ### Weekly RP leaderboard
 
@@ -320,7 +332,7 @@ the ladder rank too. `RANK_SOURCE=roles` restores the old role-based ranks.
 1. [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**.
 2. **Bot** → **Reset Token**. The token is `DISCORD_TOKEN`.
 3. Turn on all three **Privileged Gateway Intents** (Presence, Server Members, Message Content). The bot uses `Intents.all()`.
-4. **OAuth2 → URL Generator**: scopes `bot` **and** `applications.commands`; permissions Send Messages, Embed Links, Attach Files, Manage Messages, Read Message History. Open the URL to invite the bot.
+4. **OAuth2 → URL Generator**: scopes `bot` **and** `applications.commands`; permissions Send Messages, Embed Links, Attach Files, Manage Messages, Read Message History, Manage Roles (rank roles and the whitelist role). Open the URL to invite the bot.
 5. Turn on Developer Mode in Discord (Settings → Advanced) to copy channel and role IDs.
 
 ### 2. Game server
@@ -400,6 +412,7 @@ feature is off.
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
+| `WHITELIST_ROLE_ID` | role given on whitelist approval, taken on account deletion (0 = off) |
 | `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |
 | `PLAYER_PANEL_CHANNEL_ID` | player panel (`/playerpanel`); the same buttons are on the status card |
 

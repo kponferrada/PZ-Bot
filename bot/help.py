@@ -51,10 +51,11 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
     "📝 Whitelist": [
         ("/whitelistsetup", "Post the whitelist application button into the whitelist channel. [admin]"),
         ("/whitelist", "Open the whitelist request form."),
-        ("/whitelistadd <username> <password> <steamid>", "Manually add a user to the whitelist. [admin]"),
+        ("/whitelistadd <username> <password> <steamid> [member]", "Manually add a user to the whitelist; gives `member` the whitelist role. [admin]"),
         ("/whitelistmodify <username> <steamid> [new…]", "Modify a whitelisted user's password/username/SteamID. [admin]"),
         ("/whitelistlist", "List all whitelisted users. [admin]"),
-        ("/whitelistremove <username> [reason]", "Remove a user from the whitelist. [admin]"),
+        ("/whitelistremove <username> [reason]", "Remove a user from the whitelist and take their whitelist role. [admin]"),
+        ("/whitelistrolesync", "Give the whitelist role to everyone with an approved request. [admin]"),
         ("/whitelistcancel <member> [reason]", "Cancel a member's pending whitelist request so they can apply again. [admin]"),
     ],
     "🌙 Siege Night (Siege Night mod)": [
