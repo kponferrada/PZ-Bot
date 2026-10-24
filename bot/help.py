@@ -12,7 +12,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/online", "Check whether the game server is online. [admin]"),
         ("/players", "List players currently connected. [admin]"),
         ("/playerlist", "Everyone who has ever joined (+ session counts). [admin]"),
-        ("/modlist", "Show configured mods / Workshop items. [admin]"),
+        ("/modlist", "List the server's Workshop mods as Mod Name - Workshop page, plus the list as a file. [admin]"),
         ("/features", "List notification features and their on/off state."),
         ("/onlineplayers", "List the players online right now (private answer)."),
     ],

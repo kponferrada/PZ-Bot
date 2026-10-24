@@ -1,8 +1,15 @@
 """
 jeeves_modmanager.py — /modlist only (remote).
 
-Shows the server's configured mods and Workshop items by reading the server
-`.ini` over SFTP (via the shared `server_config` helper).
+Shows the server's Workshop items as "Mod Name - <Workshop page link>", one per
+line, in the server config's order (user, 2026-10-25), plus a summary of the
+Mods= and Map= lines and the same list as a text file. It reads the server
+`.ini` over SFTP (via the shared `server_config` helper); the names come from
+the Steam Workshop through `mod_checker.ModChecker` (public API, then the keyed
+API, then the server's Workshop manifest + mod.info for unlisted items).
+
+The text file can be pasted into the workspace Mod Builder
+(`tools/modbuilder`) to make a Steam collection of the list.
 
 Removed from the original Jeeves mod manager:
   - /modadd, /modremove  -> require SteamCMD (same-server)
@@ -20,6 +27,43 @@ from discord.ext import commands
 
 import server_config
 from checks import admin_only
+from mod_checker import ModChecker
+
+WORKSHOP_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id={}"
+_PAGE = 4000  # characters per embed page (Discord allows 4096)
+
+
+def workshop_url(item_id: str) -> str:
+    return WORKSHOP_URL.format(item_id)
+
+
+def _name(titles: dict, item_id: str) -> str:
+    title = " ".join(str(titles.get(item_id) or "").split())
+    return title or f"Workshop item {item_id}"
+
+
+def link_lines(ids: list, titles: dict) -> list:
+    """ "Mod Name - <link>" per item, for Discord (<> stops link previews)."""
+    return [f"{discord.utils.escape_markdown(_name(titles, i))} - <{workshop_url(i)}>" for i in ids]
+
+
+def file_lines(ids: list, titles: dict) -> list:
+    """The same list as plain text: "Mod Name - link"."""
+    return [f"{_name(titles, i)} - {workshop_url(i)}" for i in ids]
+
+
+def pages(lines: list, limit: int = _PAGE) -> list:
+    """Join lines into pages of at most `limit` characters, never splitting a line."""
+    out, cur = [], ""
+    for line in lines:
+        line = line[:limit]
+        if cur and len(cur) + 1 + len(line) > limit:
+            out.append(cur)
+            cur = ""
+        cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        out.append(cur)
+    return out
 
 
 class JeevesModManagerCog(commands.Cog):
@@ -37,9 +81,18 @@ class JeevesModManagerCog(commands.Cog):
                     out.append(p)
         return out
 
+    async def _titles(self, ids: list) -> dict:
+        """Workshop titles by id (missing ones are left out)."""
+        try:
+            state = await ModChecker(self.bot)._fetch_workshop_state(ids)
+        except Exception as e:
+            print(f"[ModManager] Workshop titles failed: {e}")
+            return {}
+        return {i: v.get("title", "") for i, v in state.items()}
+
     @app_commands.command(
         name="modlist",
-        description="Show all mods and Workshop items in the server config.",
+        description="List the server's Workshop mods with their names and Workshop pages.",
     )
     @admin_only()
     async def cmd_modlist(self, interaction: discord.Interaction) -> None:
@@ -56,7 +109,7 @@ class JeevesModManagerCog(commands.Cog):
             return
 
         mods = self._split_items(server_config.ini_value(text, "Mods"))
-        workshop = self._split_items(server_config.ini_value(text, "WorkshopItems"))
+        workshop = list(dict.fromkeys(self._split_items(server_config.ini_value(text, "WorkshopItems"))))
         maps = [m for m in server_config.ini_value(text, "Map") if m.strip()]
 
         if not mods and not workshop and not maps:
@@ -65,38 +118,39 @@ class JeevesModManagerCog(commands.Cog):
                 colour=discord.Colour.purple()))
             return
 
-        # A short summary embed (never trips Discord's size limits) plus the
-        # full list as an attached text file (files have no size limits), so a
-        # long mod list can never overflow an embed.
-        summary = []
-        if mods:
-            preview = ", ".join(f"`{m}`" for m in mods[:12])
-            summary.append(f"**Mods ({len(mods)})**\n{preview}{' …' if len(mods) > 12 else ''}")
-        if maps:
-            summary.append(f"**Maps ({len(maps)})**\n" + ", ".join(f"`{m}`" for m in maps))
-        if workshop:
-            summary.append(f"**Workshop items ({len(workshop)})** — see file")
+        titles = await self._titles(workshop) if workshop else {}
 
-        embed = discord.Embed(
-            title="📋 Server Mod List",
-            description="\n\n".join(summary),
-            colour=discord.Colour.purple(),
-        )
+        summary = [f"**{len(workshop)}** Workshop items · **{len(mods)}** mods enabled · **{len(maps)}** maps"]
+        if maps:
+            summary.append("**Maps:** " + ", ".join(f"`{m}`" for m in maps))
+        unnamed = [i for i in workshop if not titles.get(i)]
+        if unnamed:
+            summary.append(f"-# {len(unnamed)} item(s) had no name on the Workshop (unlisted or removed).")
+        summary.append("-# The attached file has the same list; paste it into the Mod Builder "
+                       "to make a Steam collection.")
 
         lines = []
-        if mods:
-            lines.append(f"MODS ({len(mods)})")
-            lines.extend(f"  {m}" for m in mods)
-        if maps:
-            lines.append(f"\nMAPS ({len(maps)})")
-            lines.extend(f"  {m}" for m in maps)
         if workshop:
-            lines.append(f"\nWORKSHOP ITEMS ({len(workshop)})")
-            lines.extend(f"  {w}" for w in workshop)
-        content = "\n".join(lines)
-        file = discord.File(io.BytesIO(content.encode("utf-8")), filename="server-modlist.txt")
+            lines.append(f"WORKSHOP ITEMS ({len(workshop)})")
+            lines.extend(file_lines(workshop, titles))
+        if mods:
+            lines.append(f"\nMods={';'.join(mods)}")
+        if maps:
+            lines.append(f"Map={';'.join(maps)}")
+        lines.append(f"WorkshopItems={';'.join(workshop)}")
+        file = discord.File(io.BytesIO("\n".join(lines).encode("utf-8")), filename="server-modlist.txt")
 
-        await interaction.followup.send(embed=embed, file=file)
+        await interaction.followup.send(embed=discord.Embed(
+            title="📋 Server Mod List", description="\n".join(summary), colour=discord.Colour.purple(),
+        ), file=file)
+
+        # One embed per message keeps each under Discord's 6000-character message limit.
+        body = pages(link_lines(workshop, titles))
+        for n, page in enumerate(body, 1):
+            embed = discord.Embed(description=page, colour=discord.Colour.purple())
+            if len(body) > 1:
+                embed.set_footer(text=f"Page {n} of {len(body)}")
+            await interaction.followup.send(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:

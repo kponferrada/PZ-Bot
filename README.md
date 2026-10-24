@@ -45,7 +45,7 @@ on boot.
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
 | `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
-| `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
+| `/modlist`: every Workshop item as "Mod Name - <Workshop page>" in the server's order (names from the Workshop, or the item's mod.info when unlisted), a summary of Mods=/Map=, and the list as a text file (paste it into the workspace Mod Builder to make a Steam collection) | `jeeves_modmanager.py`, `server_config.py`, `mod_checker.py` | server `.ini`, Steam Workshop | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
 | Cleanup of regenerable bot files | `cleanup.py` | — | — |
 
