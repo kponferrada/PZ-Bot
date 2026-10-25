@@ -46,6 +46,7 @@ except ImportError:
     sys.exit("ERROR: rcon package not installed. Install with: pip install rcon")
 
 import lua_bridge
+import status_notice
 import ranks
 import sftp_client
 import features
@@ -98,6 +99,9 @@ class Config:
         self.NOTIFY_ROLE_ID = _env_int("NOTIFY_ROLE_ID", 0)
         # Dedicated channel for server up/down banners (0 = fall back to DISCORD_CHANNEL_ID)
         self.SERVER_NOTIFICATION_CHANNEL_ID = _env_int("SERVER_NOTIFICATION_CHANNEL_ID", 0)
+        # Extra channels that get a one-line "server down / back up" notice (status_notice.py)
+        self.STATUS_NOTICE_CHANNEL_IDS = status_notice.channel_ids(_env("STATUS_NOTICE_CHANNEL_IDS", ""))
+        self.STATUS_NOTICE_ROLE_ID = _env_int("STATUS_NOTICE_ROLE_ID", 0)
         # Dedicated channel for the workshop-update / restart relay (0 = fall back to chat relay, then notification)
         self.WORKSHOP_UPDATE_CHANNEL_ID = _env_int("WORKSHOP_UPDATE_CHANNEL_ID", 0)
         self.WORKSHOP_UPDATE_ROLE_ID = _env_int("WORKSHOP_UPDATE_ROLE_ID", 0)
@@ -378,6 +382,7 @@ class PZBot(commands.Bot):
         self._offline_since = None
         self._down_announced = False
         self._restart_announced = False
+        self._down_noticed = False  # the one-line "down" notice went out (status_notice.py)
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.config.GUILD_ID)
@@ -588,6 +593,8 @@ class PZBot(commands.Bot):
                             await self.send_banner(self.config.ANNOUNCE_UP_IMAGE,
                                                    f"{Emojis.HAPPY} Server is back online!")
                     print("[Announce] Server UP transition")
+                    if self._down_noticed:
+                        await self._status_notice(True)
                     self._down_announced = False
                     self._offline_since = None
                     self.state.expecting_restart = False
@@ -605,6 +612,16 @@ class PZBot(commands.Bot):
                 # Still offline. After the blip debounce, announce "restarting";
                 # after the longer grace period, correct it to a real "down".
                 offline_duration = (now - self._offline_since) if self._offline_since else 0
+                # A restart the bot started (players kicked) is down for sure: no need to wait.
+                if not self._down_noticed and (offline_duration > UP_DEBOUNCE_SECONDS
+                                               or self.state.restart_shutdown_started):
+                    if self.state.maintenance:
+                        reason = "maintenance"
+                    elif self.state.restart_expected():
+                        reason = "restarting"
+                    else:
+                        reason = ""
+                    await self._status_notice(False, reason)
                 if (not self._restart_announced
                         and not self.state.restart_expected()
                         and offline_duration > UP_DEBOUNCE_SECONDS):
@@ -624,6 +641,16 @@ class PZBot(commands.Bot):
                     print("[Announce] Server DOWN (real outage)")
 
         self._was_online = online
+
+    async def _status_notice(self, up: bool, reason: str = "") -> None:
+        """The one-line notice in STATUS_NOTICE_CHANNEL_IDS (status_notice.py)."""
+        self._down_noticed = not up
+        ids = self.config.STATUS_NOTICE_CHANNEL_IDS
+        if not ids or not self.features.is_enabled("status_notices"):
+            return
+        sent = await status_notice.send(self, ids, status_notice.notice_text(up, reason),
+                                        self.config.STATUS_NOTICE_ROLE_ID)
+        print(f"[StatusNotice] {'up' if up else 'down'} notice sent to {sent}/{len(ids)} channel(s)")
 
     @monitor_server_state.before_loop
     async def _before_monitor(self):

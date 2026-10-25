@@ -25,6 +25,7 @@ FEATURES = {
     "scheduled_restarts": "Scheduled restarts",
     "mod_updates": "Workshop mod update checker",
     "server_up_down": "Server up/down notifications",
+    "status_notices": "One-line up/down notices in extra channels",
     "chat_relay": "In-game \u2194 Discord chat relay",
     "status_dashboard": "Status dashboard (auto-updating panel)",
     "whitelist": "Whitelist application notifications",
