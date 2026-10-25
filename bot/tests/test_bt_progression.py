@@ -182,12 +182,62 @@ class _Bot:
     config = _Cfg()
 
 
-def test_export_paths_blib_first_then_legacy_until_blib_seen(monkeypatch):
-    monkeypatch.setitem(btp._cache, "blib_seen", False)
-    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json",
-                                  "/srv/Lua/BarangayTales/progression.json"]
-    monkeypatch.setitem(btp._cache, "blib_seen", True)
-    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json"]
+_BT2 = "/srv/Lua/BLib2/mods/barangaytales2/progression.json"
+_BT1 = "/srv/Lua/BLib/mods/barangaytales/progression.json"
+_OLD = "/srv/Lua/BarangayTales/progression.json"
+
+
+def test_export_paths_newest_first_and_older_dropped_once_newer_seen(monkeypatch):
+    monkeypatch.setitem(btp._cache, "seen", None)
+    assert btp._paths(_Bot()) == [_BT2, _BT1, _OLD]
+    monkeypatch.setitem(btp._cache, "seen", 1)   # a v1 server: BT2 still tried first
+    assert btp._paths(_Bot()) == [_BT2, _BT1]
+    monkeypatch.setitem(btp._cache, "seen", 0)   # BT2 read once: a stale v1 file is never used
+    assert btp._paths(_Bot()) == [_BT2]
+
+
+class _FakeSftp:
+    def __init__(self, files):
+        self.files = files
+        self.reads = []
+
+    async def exists(self, path):
+        return path in self.files
+
+    async def read_text(self, path):
+        self.reads.append(path)
+        if path not in self.files:
+            raise btp.sftp_client.SftpError("no such file")
+        return self.files[path]
+
+
+def _read(monkeypatch, files):
+    import asyncio
+    import json
+    fake = _FakeSftp({p: json.dumps({"generatedAt": g}) for p, g in files.items()})
+    monkeypatch.setattr(btp.sftp_client, "get", lambda: fake)
+    monkeypatch.setitem(btp._cache, "data", None)
+    monkeypatch.setitem(btp._cache, "at", 0.0)
+    return asyncio.run(btp.read_progression(_Bot(), force=True)), fake
+
+
+def test_read_prefers_bt2_and_then_sticks_to_it(monkeypatch):
+    monkeypatch.setitem(btp._cache, "seen", None)
+    data, fake = _read(monkeypatch, {_BT2: 2, _BT1: 1})
+    assert data["generatedAt"] == 2 and fake.reads == [_BT2]
+    assert btp._cache["seen"] == 0
+    # BT2's file mid-write / gone for a moment: the stale v1 file is not used.
+    data, fake = _read(monkeypatch, {_BT1: 1})
+    assert fake.reads == [_BT2]
+
+
+def test_read_on_a_v1_server_skips_the_missing_bt2_file_quietly(monkeypatch):
+    monkeypatch.setitem(btp._cache, "seen", None)
+    data, fake = _read(monkeypatch, {_BT1: 1, _OLD: 0})
+    assert data["generatedAt"] == 1 and fake.reads == [_BT1]
+    assert btp._cache["seen"] == 1
+    data, fake = _read(monkeypatch, {_BT2: 5, _BT1: 1})   # the server moves to v2
+    assert data["generatedAt"] == 5 and btp._cache["seen"] == 0
 
 
 def test_export_path_override(monkeypatch):

@@ -281,10 +281,12 @@ each top-5 place earns (Legendary, Elite, Master, Veteran, Rising Faction; every
 member may wear it next week), and last week's faction title holders.
 
 Since Barangay Tales 0.83 the export is written through BLib to
-`Lua/BLib/mods/barangaytales/progression.json`. The bot reads that and falls back
-to the old `Lua/BarangayTales/progression.json` (BT 0.82 and older) until the
-BLib file has been read once, so it works on either version. `BT_PROGRESSION_PATH`
-overrides both.
+`Lua/BLib/mods/barangaytales/progression.json`; Barangay Tales v2 (on BLib2)
+writes the same JSON to `Lua/BLib2/mods/barangaytales2/progression.json`. The
+bot tries the BT2 file, then the BLib file, then the old
+`Lua/BarangayTales/progression.json` (BT 0.82 and older), and once it has read
+a newer one it stops reading the older ones (they stay on disk, stale), so it
+works on any version. `BT_PROGRESSION_PATH` overrides all of them.
 
 The export doesn't contain the place → title tables, so the bot keeps copies in
 `DEFAULT_WEEKLY_TITLES` and `DEFAULT_FACTION_TITLES` (`bot/bt_progression.py`).

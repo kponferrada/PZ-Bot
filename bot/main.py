@@ -147,8 +147,8 @@ class Config:
         self.AEGIS_STATS_PATH = _env("AEGIS_STATS_PATH")
 
         # Barangay Tales progression export (weekly RP leaderboard, ladder ranks).
-        # Defaults to {SFTP_LUA_DIR}/BLib/mods/barangaytales/progression.json
-        # (BT 0.83+), falling back to the pre-0.83 path, in bt_progression.
+        # Defaults to BT2's {SFTP_LUA_DIR}/BLib2/mods/barangaytales2/progression.json,
+        # then BT 0.83+'s BLib path, then the pre-0.83 path, in bt_progression.
         self.BT_PROGRESSION_PATH = _env("BT_PROGRESSION_PATH")
         # Where in-game ranks come from: "bt_ladder" (Barangay Tales weekly
         # reputation ladder) or "roles" (the RANK_1..6 Discord roles).
