@@ -1,10 +1,10 @@
 """bt_progression.py — read the Barangay Tales progression export.
 
-Barangay Tales (server mod) writes its full progression state as JSON
-(`JsonExport.lua`), refreshed at most every 5 minutes and at least every 10.
-Since BT 0.83 every BT file goes through BLib.Files (scope "server"), so the
-export is `Lua/BLib/mods/barangaytales/progression.json`; BT 0.82 and older
-wrote `Lua/BarangayTales/progression.json`. This module reads it over SFTP,
+Barangay Tales v2 (server mod, BT2 on BLib2) writes its full progression
+state as JSON (`JsonExport.lua`), refreshed at most every 5 minutes and at
+least every 10, through BLib2.Files (scope "server"):
+`Lua/BLib2/mods/barangaytales2/progression.json`. Barangay Tales v1's paths
+are not read (user, 2026-10-25). This module reads the export over SFTP,
 caches it briefly, and shapes the parts the bot shows.
 
 Weekly Survivor Ranking (BT `WeeklyRanking.lua`):
@@ -75,34 +75,19 @@ _CATEGORIES = ("wealth", "kills", "quests", "events")
 # The export changes every 5-10 minutes; a minute of caching is plenty.
 _CACHE_TTL = 60.0
 
-# `blib_seen`: the BLib path has been read once, so the pre-0.83 file (which
-# stays on disk, stale, after the upgrade) is never used again.
-_cache: dict = {"data": None, "at": 0.0, "blib_seen": False}
+_cache: dict = {"data": None, "at": 0.0}
 
-# Under SFTP_LUA_DIR: BT 0.83+ (BLib.Files, scope "server") and BT 0.82 and older.
-BLIB_EXPORT = "BLib/mods/barangaytales/progression.json"
-LEGACY_EXPORT = "BarangayTales/progression.json"
+# Under SFTP_LUA_DIR (BT2 via BLib2.Files, scope "server").
+EXPORT = "BLib2/mods/barangaytales2/progression.json"
 
 
-def default_path(bot) -> str:
-    lua = getattr(bot.config, "SFTP_LUA_DIR", "") or ""
-    return f"{lua.rstrip('/')}/{BLIB_EXPORT}" if lua else ""
-
-
-def legacy_path(bot) -> str:
-    lua = getattr(bot.config, "SFTP_LUA_DIR", "") or ""
-    return f"{lua.rstrip('/')}/{LEGACY_EXPORT}" if lua else ""
-
-
-def _paths(bot) -> list:
-    """Paths to try, in order."""
+def export_path(bot) -> str:
+    """BT_PROGRESSION_PATH, else {SFTP_LUA_DIR}/EXPORT ("" when neither is set)."""
     override = (getattr(bot.config, "BT_PROGRESSION_PATH", "") or "").strip()
     if override:
-        return [override]
-    paths = [default_path(bot)]
-    if not _cache["blib_seen"]:
-        paths.append(legacy_path(bot))
-    return [p for p in paths if p]
+        return override
+    lua = getattr(bot.config, "SFTP_LUA_DIR", "") or ""
+    return f"{lua.rstrip('/')}/{EXPORT}" if lua else ""
 
 
 # The only parts of the export the bot reads. The rest (per-player stats,
@@ -148,17 +133,13 @@ async def read_progression(bot, force: bool = False) -> Optional[dict]:
     now = time.time()
     if not force and _cache["data"] is not None and now - _cache["at"] < _CACHE_TTL:
         return _cache["data"]
-    paths = _paths(bot)
-    for i, path in enumerate(paths):
-        data = await _read_json(path)
-        if data is None:
-            continue
-        if i == 0 and path == default_path(bot):
-            _cache["blib_seen"] = True
-        _cache["data"] = data
-        _cache["at"] = now
-        return data
-    return _cache["data"]
+    path = export_path(bot)
+    data = await _read_json(path) if path else None
+    if data is None:
+        return _cache["data"]
+    _cache["data"] = data
+    _cache["at"] = now
+    return data
 
 
 # ---- shaping (pure: no I/O, unit-tested) ------------------------------------

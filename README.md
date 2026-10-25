@@ -38,12 +38,13 @@ on boot.
 | Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
 | Airdrop / supply-event notices and triggers | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
+| Jamie's Collapse announcements (event start, results, event nights, votes, season champion) as cards | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse` |
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
 | Scheduled restarts (UTC hours) | `restart_watch.py` | RCON | `scheduled_restarts` |
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
 | Whitelist applications, approval (also links the requester's Discord account to the approved username, like `/linkme`), admin. An approved card has Change Username, Change Password, Check Status and Delete Account buttons | `whitelist.py`, `rank_sync.py` | RCON, SFTP (`db/pzserver.db` for the status) | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
-| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
+| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales v2 (`BLib2/mods/barangaytales2/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
 | `/modlist`: every Workshop item as "Mod Name - <Workshop page>" in the server's order (names from the Workshop, or the item's mod.info when unlisted), a summary of Mods=/Map=, and the list as a text file (paste it into the workspace Mod Builder to make a Steam collection) | `jeeves_modmanager.py`, `server_config.py`, `mod_checker.py` | server `.ini`, Steam Workshop | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
@@ -68,7 +69,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Status | `/hello`, `/online`, `/players`, `/playerlist`, `/modlist`, `/help` |
 | Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
 | Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart <minutes>` (max 720, auto-resumes), `/cancelrestart [restore]`, `/restartstatus`, `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
-| Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
+| Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/unlinkall`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
@@ -234,6 +235,17 @@ an old request card into the new layout the next time it updates it. Re-run
 
 A form opened before either became true is refused the same way and isn't saved. Admin commands (`/whitelistadd` and the rest) aren't limited.
 
+### Season reset: unlink everyone
+
+`/unlinkall confirm:UNLINK ALL` (admin; **Unlink all** on the admin panel) removes every Discord-to-PZ link at
+once. It first copies the links to `rank_links-backup-<date>-<time>.json` in the bot folder (gitignored), then
+undoes what the links gave, as `/unlinkname` does for one member: with `RANK_SOURCE=bt_ladder` the rank roles
+come off; with `RANK_SOURCE=roles` the linked ranks are dropped and pushed to the server. Afterwards everyone
+can `/linkme` or apply for the whitelist again. It doesn't touch server accounts or the whitelist role:
+remove those separately. Anything other than `UNLINK ALL` in `confirm` changes nothing.
+
+The whitelist form asks for username, password and SteamID only (no character lore question).
+
 ### Whitelist card buttons
 
 Once a request is approved, its card in the approval channel has four admin buttons:
@@ -280,11 +292,9 @@ this week's Faction Reputation standings with member counts, the faction title
 each top-5 place earns (Legendary, Elite, Master, Veteran, Rising Faction; every
 member may wear it next week), and last week's faction title holders.
 
-Since Barangay Tales 0.83 the export is written through BLib to
-`Lua/BLib/mods/barangaytales/progression.json`. The bot reads that and falls back
-to the old `Lua/BarangayTales/progression.json` (BT 0.82 and older) until the
-BLib file has been read once, so it works on either version. `BT_PROGRESSION_PATH`
-overrides both.
+Barangay Tales v2 writes the export through BLib2 to
+`Lua/BLib2/mods/barangaytales2/progression.json`; the bot reads only that file
+(Barangay Tales v1's paths are not read). `BT_PROGRESSION_PATH` overrides it.
 
 The export doesn't contain the place → title tables, so the bot keeps copies in
 `DEFAULT_WEEKLY_TITLES` and `DEFAULT_FACTION_TITLES` (`bot/bt_progression.py`).
@@ -426,6 +436,7 @@ feature is off.
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events |
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
+| `COLLAPSE_CHANNEL_ID` | Jamie's Collapse announcements |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
 | `WHITELIST_ROLE_ID` | role given on whitelist approval, taken on account deletion (0 = off) |
 | `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |

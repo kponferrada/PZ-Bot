@@ -55,6 +55,19 @@ def test_old_bridge_status_has_no_results():
     assert "blibadmin" in siege_night.bridge_line(lua_bridge.siege_bridge_info(_blib_status()))
 
 
+def test_blib2_status_reads_the_same_and_names_blib2():
+    # BLib2 (v2 fork, the test server) writes the same file; only the version
+    # key is `blib2` (mods/blib-v2/tools/dump_siege_status.lua).
+    status = lua_bridge._parse_lua_nested(
+        (Path(__file__).parent / "fixtures" / "siege_night_status_blib2.txt").read_text(encoding="utf-8"))
+    sched, siege, waves = siege_night.SiegeNightCog._split_status(status)
+    assert sched["phase"] == "active" and siege["currentPhase"] == "SURGE" and waves["waveCount"] == 5
+    assert lua_bridge.find_siege_result(status, 1, 1700000000)["ok"] is True
+    line = siege_night.bridge_line(lua_bridge.siege_bridge_info(status))
+    assert line == "Bridge: BLib2 2.0.0-dev (blib2admin), protocol 2"
+    assert siege_night.bridge_line(lua_bridge.siege_bridge_info(_blib_status())).startswith("Bridge: BLib 0.7.0 ")
+
+
 def test_command_file_carries_protocol_and_who_asked():
     text = lua_bridge._build_lua_table("siegeschedule", 3, timestamp=1700000000, protocol=2,
                                        by="Peña", byId="1234", targetDay=12)

@@ -182,18 +182,49 @@ class _Bot:
     config = _Cfg()
 
 
-def test_export_paths_blib_first_then_legacy_until_blib_seen(monkeypatch):
-    monkeypatch.setitem(btp._cache, "blib_seen", False)
-    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json",
-                                  "/srv/Lua/BarangayTales/progression.json"]
-    monkeypatch.setitem(btp._cache, "blib_seen", True)
-    assert btp._paths(_Bot()) == ["/srv/Lua/BLib/mods/barangaytales/progression.json"]
+class _FakeSftp:
+    def __init__(self, files):
+        self.files = files
+        self.reads = []
+
+    async def read_text(self, path):
+        self.reads.append(path)
+        if path not in self.files:
+            raise btp.sftp_client.SftpError("no such file")
+        return self.files[path]
+
+
+def _read(monkeypatch, files):
+    import asyncio
+    import json
+    fake = _FakeSftp({p: json.dumps({"generatedAt": g}) for p, g in files.items()})
+    monkeypatch.setattr(btp.sftp_client, "get", lambda: fake)
+    monkeypatch.setitem(btp._cache, "at", 0.0)
+    return asyncio.run(btp.read_progression(_Bot(), force=True)), fake
+
+
+_BT2 = "/srv/Lua/BLib2/mods/barangaytales2/progression.json"
+
+
+def test_export_path_is_bt2_only():
+    assert btp.export_path(_Bot()) == _BT2
+
+
+def test_read_never_touches_v1_files_and_keeps_the_last_good_copy(monkeypatch):
+    monkeypatch.setitem(btp._cache, "data", None)
+    v1 = {"/srv/Lua/BLib/mods/barangaytales/progression.json": 1, "/srv/Lua/BarangayTales/progression.json": 0}
+    data, fake = _read(monkeypatch, v1)
+    assert data is None and fake.reads == [_BT2]
+    data, fake = _read(monkeypatch, {_BT2: 2, **v1})
+    assert data["generatedAt"] == 2
+    data, fake = _read(monkeypatch, v1)   # BT2's file gone for a moment: last good copy
+    assert data["generatedAt"] == 2 and fake.reads == [_BT2]
 
 
 def test_export_path_override(monkeypatch):
     bot = _Bot()
     bot.config = type("C", (), {"SFTP_LUA_DIR": "/srv/Lua", "BT_PROGRESSION_PATH": " /x/p.json "})()
-    assert btp._paths(bot) == ["/x/p.json"]
+    assert btp.export_path(bot) == "/x/p.json"
 
 
 def test_rpleaderboard_embed_renders_fire_ranks_players_only():

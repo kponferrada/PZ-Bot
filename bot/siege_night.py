@@ -114,8 +114,12 @@ def bridge_line(bridge: dict | None) -> str:
     if not bridge:
         return "Bridge: old Siege Night Bridge mod (commands get no answer)"
     owner = bridge.get("owner") or "?"
-    blib = bridge.get("blib") or "?"
-    return f"Bridge: BLib {blib} ({owner}), protocol {bridge.get('protocol', '?')}"
+    # BLib2 (the v2 fork) writes its version as `blib2`; BLib v1 as `blib`.
+    if bridge.get("blib2"):
+        lib, version = "BLib2", bridge["blib2"]
+    else:
+        lib, version = "BLib", bridge.get("blib") or "?"
+    return f"Bridge: {lib} {version} ({owner}), protocol {bridge.get('protocol', '?')}"
 
 
 def describe_siege_outcome(action: str, outcome: dict, user: str) -> tuple[str, str, bool | None]:

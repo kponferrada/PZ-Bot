@@ -107,6 +107,8 @@ class Config:
         self.SIEGE_CHANNEL_ID = _env_int("SIEGE_CHANNEL_ID", 0)
         # Jamie's Fortune jackpot announcements (0 = fall back to DISCORD_CHANNEL_ID)
         self.JACKPOT_CHANNEL_ID = _env_int("JACKPOT_CHANNEL_ID", 0)
+        # Jamie's Collapse event announcements (0 = fall back to DISCORD_CHANNEL_ID)
+        self.COLLAPSE_CHANNEL_ID = _env_int("COLLAPSE_CHANNEL_ID", 0)
         self.SIEGE_ROLE_ID = _env_int("SIEGE_ROLE_ID", 0)
         # Dedicated channel for join/leave notifications (0 = fall back to DISCORD_CHANNEL_ID)
         self.JOIN_LEAVE_CHANNEL_ID = _env_int("JOIN_LEAVE_CHANNEL_ID", 0)
@@ -147,8 +149,8 @@ class Config:
         self.AEGIS_STATS_PATH = _env("AEGIS_STATS_PATH")
 
         # Barangay Tales progression export (weekly RP leaderboard, ladder ranks).
-        # Defaults to {SFTP_LUA_DIR}/BLib/mods/barangaytales/progression.json
-        # (BT 0.83+), falling back to the pre-0.83 path, in bt_progression.
+        # Defaults to BT2's {SFTP_LUA_DIR}/BLib2/mods/barangaytales2/progression.json
+        # (bt_progression.export_path).
         self.BT_PROGRESSION_PATH = _env("BT_PROGRESSION_PATH")
         # Where in-game ranks come from: "bt_ladder" (Barangay Tales weekly
         # reputation ladder) or "roles" (the RANK_1..6 Discord roles).
@@ -391,7 +393,7 @@ class PZBot(commands.Bot):
         lua_bridge.init(self)
 
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
-                    "jeeves_drops", "jamies_fortune", "jeeves_modmanager", "server_status",
+                    "jeeves_drops", "jamies_fortune", "jamies_collapse", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "stats", "weekly_rp", "cleanup",
                     "help", "admin_panel", "player_panel"):
             try:
@@ -434,6 +436,11 @@ class PZBot(commands.Bot):
     def get_jackpot_channel(self) -> Optional[discord.TextChannel]:
         """Channel for Jamie's Fortune jackpots (dedicated if configured, else the main channel)."""
         ch_id = self.config.JACKPOT_CHANNEL_ID or self.config.CHANNEL_ID
+        return self.get_channel(ch_id)
+
+    def get_collapse_channel(self) -> Optional[discord.TextChannel]:
+        """Channel for Jamie's Collapse announcements (dedicated if configured, else the main channel)."""
+        ch_id = self.config.COLLAPSE_CHANNEL_ID or self.config.CHANNEL_ID
         return self.get_channel(ch_id)
 
     def get_siege_channel(self) -> Optional[discord.TextChannel]:

@@ -37,6 +37,7 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/syncranks", "Rebuild the rank file from the reputation ladder (or linked members' roles). [admin]"),
         ("/linkname <member> <username>", "Link a Discord user to their PZ username. [admin]"),
         ("/unlinkname <member>", "Remove a user's Discord-to-PZ link. [admin]"),
+        ("/unlinkall confirm:UNLINK ALL", "Remove every Discord-to-PZ link (season reset); keeps a backup file. [admin]"),
         ("/listlinks", "List all Discord-to-PZ username links. [admin]"),
         ("/linkme <username>", "Link your Discord account to your PZ username."),
         ("/unlinkme", "Remove your own Discord-to-PZ link. [admin]"),
