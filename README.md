@@ -33,6 +33,7 @@ on boot.
 | Death certificates (portrait from the `/linkme` Discord avatar, injury diagram, cause, survival time, day/week counts) | `death_log.py`, `death_card.py`, `death_store.py` | Death Log mod (`2972685375`) | `deaths` |
 | Auto-updating status dashboard (embed or rendered card) | `server_status.py`, `status_card.py`, `game_calendar.py` | Jeeve's Integration | `status_dashboard` |
 | Server up / restarting / down banners | `main.py` (`monitor_server_state`) | RCON | `server_up_down` |
+| One-line "Server is down · restarting" / "Server is back up" notices in extra channels (`STATUS_NOTICE_CHANNEL_IDS`): one "down" per outage, at once for a restart the bot started, otherwise after 60 s offline (brief blips post nothing); "up" only after a "down". The time is a Discord timestamp | `main.py`, `status_notice.py` | RCON | `status_notices` |
 | In-game ↔ Discord chat relay | `chat_relay.py` | Jeeve's Integration | `chat_relay` |
 | In-game name colours from the Barangay Tales reputation ladder (or Discord roles) | `rank_sync.py`, `bt_progression.py` | Jeeve's Integration, Barangay Tales | — |
 | Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
@@ -432,6 +433,7 @@ feature is off.
 | `STATUS_CHANNEL_ID` | the status dashboard (refreshes every 30 s) |
 | `CHAT_RELAY_CHANNEL_ID` | chat relay (only the `General` in-game channel) |
 | `SERVER_NOTIFICATION_CHANNEL_ID` + `NOTIFY_ROLE_ID` | up/down banners and every restart / mod-update notice |
+| `STATUS_NOTICE_CHANNEL_IDS` + `STATUS_NOTICE_ROLE_ID` | extra channels (comma-separated) for the one-line down / back-up notice; empty = off |
 | `JOIN_LEAVE_CHANNEL_ID` | join / leave banners |
 | `DEATH_LOGS_CHANNEL_ID` | death cards |
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events |
