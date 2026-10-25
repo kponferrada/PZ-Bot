@@ -38,6 +38,7 @@ on boot.
 | Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
 | Airdrop / supply-event notices and triggers | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
+| Jamie's Collapse announcements (event start, results, event nights, votes, season champion) as cards | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse` |
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
 | Scheduled restarts (UTC hours) | `restart_watch.py` | RCON | `scheduled_restarts` |
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
@@ -424,6 +425,7 @@ feature is off.
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events |
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
+| `COLLAPSE_CHANNEL_ID` | Jamie's Collapse announcements |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |
 | `WHITELIST_ROLE_ID` | role given on whitelist approval, taken on account deletion (0 = off) |
 | `ADMIN_PANEL_CHANNEL_ID` | admin control panel (`/adminpanel`) |
