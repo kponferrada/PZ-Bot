@@ -1,13 +1,11 @@
 """bt_progression.py — read the Barangay Tales progression export.
 
-Barangay Tales (server mod) writes its full progression state as JSON
-(`JsonExport.lua`), refreshed at most every 5 minutes and at least every 10.
-Since BT 0.83 every BT file goes through BLib.Files (scope "server"), so the
-export is `Lua/BLib/mods/barangaytales/progression.json`; BT 0.82 and older
-wrote `Lua/BarangayTales/progression.json`. Barangay Tales v2 (BT2, on BLib2)
-writes the same JSON to `Lua/BLib2/mods/barangaytales2/progression.json`.
-This module reads it over SFTP, caches it briefly, and shapes the parts the
-bot shows.
+Barangay Tales v2 (server mod, BT2 on BLib2) writes its full progression
+state as JSON (`JsonExport.lua`), refreshed at most every 5 minutes and at
+least every 10, through BLib2.Files (scope "server"):
+`Lua/BLib2/mods/barangaytales2/progression.json`. Barangay Tales v1's paths
+are not read (user, 2026-10-25). This module reads the export over SFTP,
+caches it briefly, and shapes the parts the bot shows.
 
 Weekly Survivor Ranking (BT `WeeklyRanking.lua`):
   - Weekly Reputation Points (RP) from wealth, zombie kills, quests and event
@@ -77,40 +75,19 @@ _CATEGORIES = ("wealth", "kills", "quests", "events")
 # The export changes every 5-10 minutes; a minute of caching is plenty.
 _CACHE_TTL = 60.0
 
-# `seen`: index in EXPORTS of the newest export read so far. Older ones (which
-# stay on disk, stale, after an upgrade) are never used again.
-_cache: dict = {"data": None, "at": 0.0, "seen": None}
+_cache: dict = {"data": None, "at": 0.0}
 
-# Under SFTP_LUA_DIR, newest first: BT2 (BLib2.Files), BT 0.83+ (BLib.Files,
-# scope "server"), BT 0.82 and older. One bot code serves the live server (v1)
-# and the test server (v2).
-BT2_EXPORT = "BLib2/mods/barangaytales2/progression.json"
-BLIB_EXPORT = "BLib/mods/barangaytales/progression.json"
-LEGACY_EXPORT = "BarangayTales/progression.json"
-EXPORTS = (BT2_EXPORT, BLIB_EXPORT, LEGACY_EXPORT)
+# Under SFTP_LUA_DIR (BT2 via BLib2.Files, scope "server").
+EXPORT = "BLib2/mods/barangaytales2/progression.json"
 
 
-def _under_lua(bot, rel: str) -> str:
-    lua = getattr(bot.config, "SFTP_LUA_DIR", "") or ""
-    return f"{lua.rstrip('/')}/{rel}" if lua else ""
-
-
-def default_path(bot) -> str:
-    return _under_lua(bot, BLIB_EXPORT)
-
-
-def legacy_path(bot) -> str:
-    return _under_lua(bot, LEGACY_EXPORT)
-
-
-def _paths(bot) -> list:
-    """Paths to try, in order."""
+def export_path(bot) -> str:
+    """BT_PROGRESSION_PATH, else {SFTP_LUA_DIR}/EXPORT ("" when neither is set)."""
     override = (getattr(bot.config, "BT_PROGRESSION_PATH", "") or "").strip()
     if override:
-        return [override]
-    seen = _cache["seen"]
-    exports = EXPORTS if seen is None else EXPORTS[:seen + 1]
-    return [p for p in (_under_lua(bot, rel) for rel in exports) if p]
+        return override
+    lua = getattr(bot.config, "SFTP_LUA_DIR", "") or ""
+    return f"{lua.rstrip('/')}/{EXPORT}" if lua else ""
 
 
 # The only parts of the export the bot reads. The rest (per-player stats,
@@ -156,28 +133,13 @@ async def read_progression(bot, force: bool = False) -> Optional[dict]:
     now = time.time()
     if not force and _cache["data"] is not None and now - _cache["at"] < _CACHE_TTL:
         return _cache["data"]
-    paths = _paths(bot)
-    for i, path in enumerate(paths):
-        # A newer export that isn't there (a v1 server has no BT2 file) is
-        # skipped quietly; only the last candidate's failure is logged.
-        if i < len(paths) - 1:
-            try:
-                if not await sftp_client.get().exists(path):
-                    continue
-            except sftp_client.SftpError:
-                continue
-        data = await _read_json(path)
-        if data is None:
-            continue
-        known = [_under_lua(bot, rel) for rel in EXPORTS]
-        if path in known:
-            idx = known.index(path)
-            if _cache["seen"] is None or idx < _cache["seen"]:
-                _cache["seen"] = idx
-        _cache["data"] = data
-        _cache["at"] = now
-        return data
-    return _cache["data"]
+    path = export_path(bot)
+    data = await _read_json(path) if path else None
+    if data is None:
+        return _cache["data"]
+    _cache["data"] = data
+    _cache["at"] = now
+    return data
 
 
 # ---- shaping (pure: no I/O, unit-tested) ------------------------------------

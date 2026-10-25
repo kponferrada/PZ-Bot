@@ -43,7 +43,7 @@ on boot.
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
 | Whitelist applications, approval (also links the requester's Discord account to the approved username, like `/linkme`), admin. An approved card has Change Username, Change Password, Check Status and Delete Account buttons | `whitelist.py`, `rank_sync.py` | RCON, SFTP (`db/pzserver.db` for the status) | `whitelist` |
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
-| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
+| `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales v2 (`BLib2/mods/barangaytales2/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
 | `/modlist`: every Workshop item as "Mod Name - <Workshop page>" in the server's order (names from the Workshop, or the item's mod.info when unlisted), a summary of Mods=/Map=, and the list as a text file (paste it into the workspace Mod Builder to make a Steam collection) | `jeeves_modmanager.py`, `server_config.py`, `mod_checker.py` | server `.ini`, Steam Workshop | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
@@ -280,13 +280,9 @@ this week's Faction Reputation standings with member counts, the faction title
 each top-5 place earns (Legendary, Elite, Master, Veteran, Rising Faction; every
 member may wear it next week), and last week's faction title holders.
 
-Since Barangay Tales 0.83 the export is written through BLib to
-`Lua/BLib/mods/barangaytales/progression.json`; Barangay Tales v2 (on BLib2)
-writes the same JSON to `Lua/BLib2/mods/barangaytales2/progression.json`. The
-bot tries the BT2 file, then the BLib file, then the old
-`Lua/BarangayTales/progression.json` (BT 0.82 and older), and once it has read
-a newer one it stops reading the older ones (they stay on disk, stale), so it
-works on any version. `BT_PROGRESSION_PATH` overrides all of them.
+Barangay Tales v2 writes the export through BLib2 to
+`Lua/BLib2/mods/barangaytales2/progression.json`; the bot reads only that file
+(Barangay Tales v1's paths are not read). `BT_PROGRESSION_PATH` overrides it.
 
 The export doesn't contain the place → title tables, so the bot keeps copies in
 `DEFAULT_WEEKLY_TITLES` and `DEFAULT_FACTION_TITLES` (`bot/bt_progression.py`).
