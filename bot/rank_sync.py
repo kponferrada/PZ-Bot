@@ -501,6 +501,27 @@ class RankSync(commands.Cog):
         print(f"[RankSync] {after.display_name} ({pz_username}): {old_rank} -> {new_rank}")
         await self._update_rank_and_push(pz_username, new_rank)
 
+    def links_to(self, pz_username: str) -> list:
+        """Discord ids (str) linked to `pz_username`, any case."""
+        name = (pz_username or "").strip().lower()
+        return [did for did, pz in self._links.items() if pz.lower() == name]
+
+    async def unlink_account(self, pz_username: str) -> list:
+        """Remove every link to `pz_username` (any case), as /unlinkname would.
+        Used when the whitelist deletes the account. Returns the Discord ids
+        that were unlinked."""
+        dids = self.links_to(pz_username)
+        if not dids:
+            return []
+        guild = self.bot.get_guild(getattr(self.bot.config, "GUILD_ID", 0) or 0)
+        olds = [(did, self._links.pop(did)) for did in dids]
+        self._save_links()
+        for did, old_name in olds:
+            member = guild.get_member(int(did)) if guild else None
+            await self._on_unlinked(member or discord.Object(id=int(did)), old_name)
+            print(f"[RankSync] Unlinked {did} from {old_name} (account deleted)")
+        return dids
+
     async def _on_unlinked(self, user, old_name: str) -> None:
         """Undo what a link gave: role-based rank, or the ladder rank role."""
         if self._ladder_mode:

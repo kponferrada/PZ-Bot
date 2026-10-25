@@ -66,6 +66,7 @@ class GameClockRate:
     def __init__(self, window: float = 900.0, min_span: float = 120.0):
         self.window, self.min_span = window, min_span
         self.samples: list = []
+        self.last: float | None = None  # last measured speed, kept across resets
 
     def record(self, real: float, world: dict | None) -> None:
         game = game_minutes(world)
@@ -85,7 +86,13 @@ class GameClockRate:
         (r0, g0), (r1, g1) = self.samples[0], self.samples[-1]
         if r1 - r0 < self.min_span or g1 <= g0:
             return None
-        return (g1 - g0) / (r1 - r0)
+        self.last = (g1 - g0) / (r1 - r0)
+        return self.last
+
+    def best(self) -> float | None:
+        """The current speed, or the last one measured: the day length doesn't
+        change across a restart or a pause, so it is still right right after one."""
+        return self.rate() or self.last
 
 
 def siege_real_time(world: dict | None, siege: dict | None, start_hour: int,

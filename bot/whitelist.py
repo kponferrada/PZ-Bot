@@ -32,9 +32,13 @@ Flow:
        stored password is a hash; if re-adding fails the old one is restored).
      - Check Status → the account on the server whitelist (SteamID, access
        level, last connection), whether the player is online, and the link.
-     - Delete Account → removes the account over RCON (`removeuser` +
-       `removeSteamID`), records the reason in `Notes`, takes the whitelist
-       role away from the requester, and updates the form.
+     - Delete Account → removes the account over RCON (`removeuser` deletes
+       its row from the server's account database, db/<server>.db;
+       `removeSteamID` drops the SteamID), checks the row is really gone,
+       unlinks the Discord account from it (so they can apply again), takes
+       the whitelist role away, records the reason in `Notes`, and updates the
+       form. The character stays in the world's players.db (see README).
+       `/whitelistremove` does the same without a request card.
      Name and password changes are refused while the player is online, update
      the CSV and the card, and DM the requester their new login.
 
@@ -1165,6 +1169,38 @@ class WhitelistCog(commands.Cog):
         _result, line = await roles.set_member_role(guild, discord_id, self._role_id, give, f"Whitelist: {why}")
         return line
 
+    async def _after_removal(self, guild, username: str, discord_id: str, why: str) -> str:
+        """After `removeuser`: confirm the account is gone from the server
+        database, unlink it and take the whitelist role. Lines for the admin."""
+        notes = [await self._confirm_removed(username)]
+        rank_cog = self.bot.get_cog("RankSync")
+        unlinked = []
+        if rank_cog is not None:
+            discord_id = discord_id or str((rank_cog.links_to(username) or [""])[0])
+            unlinked = await rank_cog.unlink_account(username)
+        if unlinked:
+            notes.append("\u26d3\ufe0f Unlinked " + ", ".join(f"<@{d}>" for d in unlinked)
+                         + f" from **{username}**.")
+        else:
+            notes.append(f"\u26d3\ufe0f No Discord account was linked to **{username}**.")
+        notes.append(await self._set_role(guild, discord_id, False, why))
+        return "\n".join(n for n in notes if n)
+
+    async def _confirm_removed(self, username: str) -> str:
+        """Check the account row left the server database (read again once if
+        it still shows: the file can trail the server by a moment)."""
+        for attempt in range(2):
+            account, err = await self._server_account(username)
+            if err:
+                return f"\u26a0\ufe0f Couldn't check the server database: {err}"
+            if account is None:
+                return f"\u2705 **{username}** is gone from the server's account database."
+            if attempt == 0:
+                await asyncio.sleep(3)
+        return (f"\u26a0\ufe0f **{username}** still shows in the server's account database after "
+                "`removeuser`. Check with **Check Status** in a minute; if it is still there, "
+                "run `/whitelistremove` again.")
+
     async def _link_requester(self, discord_id: str, username: str) -> str:
         """Link the requester to their approved username; returns a line for the admin."""
         rank_cog = self.bot.get_cog("RankSync")
@@ -1249,11 +1285,10 @@ class WhitelistCog(commands.Cog):
         })
         request = self._lookup_request(request_id)
         await self._finalize_approval(message, request, interaction.user, "deleted", reason)
-        role_note = await self._set_role(interaction.guild, request.get("discord_id", ""), False,
-                                         f"{username} deleted by {interaction.user}: {reason}")
+        notes = await self._after_removal(interaction.guild, username, request.get("discord_id", ""),
+                                          f"{username} deleted by {interaction.user}: {reason}")
         await interaction.followup.send(
-            f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV."
-            + (f"\n{role_note}" if role_note else ""),
+            f"\U0001f5d1\ufe0f Deleted **{username}**. Reason recorded in the CSV.\n{notes}",
             ephemeral=True)
         print(f"[Whitelist] Deleted account {username} (request {request_id}): {reason}")
 
@@ -1665,14 +1700,9 @@ class WhitelistCog(commands.Cog):
         msg = f"\U0001f5d1\ufe0f Removed **{username}** from the whitelist."
         if reason:
             msg += f"\nReason: {reason}"
-        if self._role_id:
-            discord_id = requester_for_username(self._read_csv(), username)
-            rank_cog = self.bot.get_cog("RankSync")
-            if not discord_id and rank_cog is not None:
-                discord_id = str(rank_cog.discord_id_for_pz_username(username) or "")
-            role_note = await self._set_role(interaction.guild, discord_id, False,
-                                             f"{username} removed by {interaction.user}")
-            msg += f"\n{role_note}"
+        msg += "\n" + await self._after_removal(interaction.guild, username,
+                                               requester_for_username(self._read_csv(), username),
+                                               f"{username} removed by {interaction.user}")
         await interaction.followup.send(msg, ephemeral=True)
         print(f"[Whitelist] Removed {username} (SteamID {steamid or '-'}) "
               f"by {interaction.user}; reason: {reason or '-'}")

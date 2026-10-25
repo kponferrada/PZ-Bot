@@ -45,7 +45,7 @@ on boot.
 | `/stats` and `/leaderboard` | `stats.py`, `aegis_stats.py` | Aegis Panel (`3766508989`) | — |
 | `/rpleaderboard`: weekly RP standings (players and factions), fire ranks and the title each top-5 place earns | `weekly_rp.py`, `bt_progression.py` | Barangay Tales (`BLib/mods/barangaytales/progression.json`) | — |
 | `/repboard`: top 5 survivors / factions drawn on the Reputation Ranking poster | `weekly_rp.py`, `rep_board.py`, `bt_progression.py` | Barangay Tales (same export) | — |
-| `/modlist` | `jeeves_modmanager.py`, `server_config.py` | server `.ini` | — |
+| `/modlist`: every Workshop item as "Mod Name - <Workshop page>" in the server's order (names from the Workshop, or the item's mod.info when unlisted), a summary of Mods=/Map=, and the list as a text file (paste it into the workspace Mod Builder to make a Steam collection) | `jeeves_modmanager.py`, `server_config.py`, `mod_checker.py` | server `.ini`, Steam Workshop | — |
 | Feature toggles | `features.py`, `feature_controls.py` | — | — |
 | Cleanup of regenerable bot files | `cleanup.py` | — | — |
 
@@ -173,10 +173,18 @@ one card (a Discord Components V2 card), with everything below inside it:
    from the world status over the last 15 minutes. It appears about 2 minutes
    after the bot starts, hides during a siege, and assumes the clock keeps
    running (a server that pauses when empty starts the siege later).
-   It is worked out once per siege and then stays put. It is worked out again
-   only for a new siege day or start hour, when the time passes without the
-   siege starting, or about 2 minutes after a server restart (the game clock
-   stops while the server is down, so the siege moves later by that much);
+   It is worked out once and then stays put. The game clock stops while the
+   server is down and can pause while it is empty, so the siege moves later
+   then; the time is worked out again after every server restart and when
+   players go from 0 to 1, using the last clock speed measured (the day length
+   doesn't change). It is also redone for a new siege day or start hour, and
+   when its time passes with players on and no siege. Nothing is redone while
+   the server is empty.
+
+   The player count on the card comes from the mod's world status while that
+   file is fresh. When the server empties the mod stops writing it, so the bot
+   then asks the server over RCON (`players`) instead, and the count drops to 0
+   straight away rather than staying on the last player until a restart;
 3. a graph of players online over the
    last 24 hours (Philippine time; one point per 5 minutes, the highest count
    seen in it, joined by straight lines, with a dot on the peak; gaps where the
@@ -233,7 +241,14 @@ Once a request is approved, its card in the approval channel has four admin butt
 - **Change Username:** Project Zomboid has no RCON command to rename an account, so the bot adds the new account and then removes the old one. **PZ saves characters per username, so the player starts a new character.** The Discord link moves to the new name.
 - **Change Password:** removes and re-adds the account with the new password. If re-adding fails, the old password is put back.
 - **Check Status:** the account on the server whitelist (SteamID, access level, last connection, banned), whether the player is in game, and their Discord link.
-- **Delete Account:** removes the account and its SteamID, with a reason, and takes the whitelist role away (below).
+- **Delete Account:** asks for a reason, then:
+  - deletes the account (`removeuser` removes its row from the server's account database, `db/<server>.db`; `removeSteamID` drops its SteamID) and checks the row is really gone (the reply warns if it still shows);
+  - unlinks the Discord account from it, so `/myrank` and the rank role stop and the member can apply again;
+  - takes the whitelist role away (below).
+
+  `/whitelistremove <username>` does the same for an account without a request card.
+
+  The **character** is not deleted: Project Zomboid keeps it in the world's `Saves/Multiplayer/<world>/players.db`, which `removeuser` doesn't touch and the bot can't safely edit while the server runs. If the same username is added again later, that player gets the old character back.
 
 Name and password changes are refused while the player is in game. Both update the CSV and the card, and DM the requester their new login. Cards approved before this version only show Delete Account.
 
