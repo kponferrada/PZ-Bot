@@ -244,6 +244,32 @@ def pending_message(row: dict) -> str:
               "You can't send another request until then. If it should no longer count, ask an admin.")
 
 
+# The channels a newly approved player is asked to read (user, 2026-10-25).
+WELCOME_LINKS = (
+    ("\U0001f4dc", "Rules", "https://discord.com/channels/1541725057938882600/1541725891053363220"),
+    ("\U0001f9e9", "Modlist", "https://discord.com/channels/1541725057938882600/1541726944368926720"),
+    ("\U0001f4d8", "Guides", "https://discord.com/channels/1541725057938882600/1563847420364984340"),
+)
+
+
+def approval_message(display_name: str, username: str, steam_id: str) -> str:
+    """The approval DM: login details, the channels to read, and the local-load note."""
+    links = "\n".join(f"{emoji} [{label}]({url})" for emoji, label, url in WELCOME_LINKS)
+    return (
+        f"Hey {display_name}, your whitelist request for **PZ Tambayan** has been **approved**! \U0001f389\n"
+        "Welcome to the barangay.\n\n"
+        "**Your login**\n"
+        f"Username: `{username}`\n"
+        f"SteamID: `{steam_id}`\n\n"
+        "**Before you join**\n"
+        "Please read these channels first so you know the server rules and guidelines:\n"
+        f"{links}\n\n"
+        "**Heads up:** some mods have to be loaded locally first, then Project Zomboid restarted, "
+        "before you join. Tomb's body mod is one of them.\n\n"
+        "See you in the apocalypse! \U0001f9df"
+    )
+
+
 def linked_message(pz_username: str) -> str:
     """What a requester is told when their Discord account is already linked to an
     in-game account (approval links them, as /linkme would)."""
@@ -747,21 +773,7 @@ class WhitelistCog(commands.Cog):
         """Welcome the requester now that they've been whitelisted."""
         embed = discord.Embed(
             title="\u2705 Whitelist Approved",
-            description=(
-                f"Hey {submitter.display_name}, your whitelist request for "
-                f"**PZ Tambayan** has been **approved**! \U0001f389\n\n"
-                f"Welcome to the barangay! Your account is now on the server whitelist.\n\n"
-                f"- **Username:** `{username}`\n"
-                f"- **SteamID:** `{steam_id}`\n\n"
-                f"Before you proceed further, we would like to remind you to check below channels and read through them to familiarize yourself with the server rules and guidelines:\n"
-                f"Rules: https://discord.com/channels/1541725057938882600/1541725891053363220 \n"
-                f"In-Game Rules: https://discord.com/channels/1541725057938882600/1547307029297635328 \n"
-                f"Modlist (Preferrably download from outside game before connecting): https://discord.com/channels/1541725057938882600/1541726944368926720 \n"
-                f"Performance guide: https://discord.com/channels/1541725057938882600/1550188547787595837 \n"
-                f"Server guides: https://discord.com/channels/1541725057938882600/1550134978216722494 \n"
-                f"Please note that some mods may require you to load it locally first then restarting Project Zomboid before joining. One sample is Desire body mod: https://steamcommunity.com/sharedfiles/filedetails/?id=3766704869 \n\n"
-                f"You can now join the server. See you in the apocalypse! \U0001f9df"
-            ),
+            description=approval_message(submitter.display_name, username, steam_id),
             colour=discord.Colour.green(),
         )
         await self._dm_submitter(submitter, embed)

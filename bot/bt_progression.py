@@ -314,6 +314,8 @@ def weekly_leaderboard(data: dict, limit: Optional[int] = None) -> dict:
         "generatedAt": epoch seconds (0 if unknown),
         "titles": ["Legendary Survivor", ...],         # place 1..N
         "rows": [{rank, player, displayName, rp, categories{wealth,kills,quests,events},
+                  characterKills, # zombies their current character killed (BT2's export, the
+                                  # game's own counter); None when the export doesn't have it
                   title,          # title this place earns if the week ended now (top 5)
                   heldTitle,      # weekly title the player holds now (from last week)
                   fire}],         # fire rank 0-6 (BT Notebook.fireTier)
@@ -341,6 +343,7 @@ def weekly_leaderboard(data: dict, limit: Optional[int] = None) -> dict:
             "displayName": str(r.get("displayName") or pid),
             "rp": rp,
             "categories": {c: _int(cats.get(c)) for c in _CATEGORIES},
+            "characterKills": _int(r["characterKills"]) if r.get("characterKills") is not None else None,
             "title": title_for_rank(titles, rank),
             "heldTitle": held_weekly_title(players.get(pid) or {}),
             "fire": fire_rank(holders.get(pid), rp),

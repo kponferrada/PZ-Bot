@@ -286,6 +286,7 @@ players then factions; `board` shows only one of them. The players embed shows:
 - the title each top-5 place earns when the week ends (Monday 00:00 GMT+8): Legendary, Elite, Master, Veteran, Rising Survivor. Winners hold the title for the following week.
 - last week's winners and the titles they were actually granted.
 - each player's fire rank (the same stars BT's in-game leaderboard shows, see below).
+- the zombies each player killed this week and, from Barangay Tales 2 after 2.0.0, with their current character (the game's own counter, the number A-Life and Aegis Panel show): `🧟 12 this week (340 this character)`. An older export gives the week's kills only.
 
 The factions embed shows the same for factions:
 this week's Faction Reputation standings with member counts, the faction title

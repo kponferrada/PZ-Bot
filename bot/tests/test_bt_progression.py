@@ -227,6 +227,34 @@ def test_export_path_override(monkeypatch):
     assert btp.export_path(bot) == "/x/p.json"
 
 
+def test_character_kills_are_read_and_optional():
+    data = _sample()
+    rows = data["weeklyRanking"]["leaderboard"]
+    rows[0]["categories"]["kills"] = 12
+    rows[0]["characterKills"] = 340
+    rows[1]["characterKills"] = 0
+    board = btp.weekly_leaderboard(btp.slim(data))
+    by = {r["player"]: r for r in board["rows"]}
+    assert by["p1"]["characterKills"] == 340          # kept through slim, read as a number
+    assert by["p2"]["characterKills"] == 0
+    assert by["p3"]["characterKills"] is None         # an older export: no field
+
+
+def test_rpleaderboard_rows_show_week_and_character_kills():
+    import weekly_rp
+    data = _sample()
+    rows = data["weeklyRanking"]["leaderboard"]
+    rows[0]["categories"]["kills"] = 1234
+    rows[0]["characterKills"] = 340
+    rows[1]["categories"]["kills"] = 7                # an older export: the week's kills only
+    embed = weekly_rp.build_embed(btp.weekly_leaderboard(data, limit=10))
+    lines = embed.description.split("\n")
+    assert "\U0001f9df 1,234 this week (340 this character)" in lines[0]
+    assert "\U0001f9df 7 this week" in lines[1] and "this character" not in lines[1]
+    assert "\U0001f9df" not in lines[2]               # no kills at all: nothing added
+    assert len(embed) <= weekly_rp._MESSAGE_EMBED_CHARS
+
+
 def test_rpleaderboard_embed_renders_fire_ranks_players_only():
     import weekly_rp
     embed = weekly_rp.build_embed(btp.weekly_leaderboard(_sample(), limit=10))
