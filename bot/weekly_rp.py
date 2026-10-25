@@ -3,7 +3,8 @@
 /rpleaderboard posts two embeds, players then factions (`board` picks one):
 
 - players: this week's personal Reputation Points standings with the weekly
-  title each top-5 place earns when the week ends, plus last week's winners and
+  title each top-5 place earns when the week ends, the zombies each killed this
+  week and with their current character, plus last week's winners and
   the titles they were granted. Each player carries their fire rank (BT's
   leaderboard stars, the in-game chat colour).
 - factions: this week's Faction Reputation standings with the faction title
@@ -49,6 +50,18 @@ def _week_end_epoch(now: datetime.datetime | None = None) -> int:
     return int((monday + datetime.timedelta(days=7)).timestamp())
 
 
+def _kills_note(row: dict) -> str:
+    """'12 this week (340 this character)' with a zombie emoji; empty when there is nothing to say."""
+    week = (row.get("categories") or {}).get("kills") or 0
+    char = row.get("characterKills")
+    if not week and not char:
+        return ""
+    note = f"\U0001f9df {week:,} this week"
+    if char is not None:
+        note += f" ({char:,} this character)"
+    return note
+
+
 def _row_line(row: dict) -> str:
     rank = row["rank"]
     badge = _badge(rank) if rank <= 10 else f"`#{rank}`"
@@ -58,6 +71,9 @@ def _row_line(row: dict) -> str:
     if fire and row.get("fire"):
         name = f"{fire.emoji} {name}"
     line = f"{badge} **{name}** — **{rp}**" if rank <= 3 else f"{badge} **{name}** — {rp}"
+    kills = _kills_note(row)
+    if kills:
+        line += f" · {kills}"
     if row.get("title"):
         line += f" · \U0001f396️ *{row['title']}*"
     return line
