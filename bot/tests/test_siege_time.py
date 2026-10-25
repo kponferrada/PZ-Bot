@@ -92,25 +92,84 @@ def test_icons_draw_and_fall_back():
     assert status_icons.weather_key("Heavy Rain") == "rain" and status_icons.weather_key("Clear") == "clear"
 
 
-def test_siege_time_is_worked_out_once(monkeypatch):
-    import asyncio
-
+def _status_cog(monkeypatch, rates):
     async def start_hour(_bot):
         return 20
     monkeypatch.setattr(server_config, "read_siege_start_hour", start_hour)
     cog = server_status.ServerStatusCog.__new__(server_status.ServerStatusCog)
-    cog.bot, cog._siege_at, cog._clock = None, None, gc.GameClockRate()
-    rates = iter([0.4, 0.5, 0.6, 0.7])
-    cog._clock.rate = lambda: next(rates)
+    cog.bot, cog._siege_at, cog._last_players, cog._clock = None, None, None, gc.GameClockRate()
+    rates = iter(rates)
+    cog._clock.best = lambda: next(rates)
+    return cog
+
+
+def test_siege_time_is_worked_out_once(monkeypatch):
+    import asyncio
+    cog = _status_cog(monkeypatch, [0.4, 0.5, 0.6, 0.7, 0.8])
+    on = {**WORLD, "playerCount": 1}
 
     async def run():
-        first = await cog._siege_time(True, WORLD, SIEGE)
-        again = await cog._siege_time(True, {**WORLD, "minutes": 40}, SIEGE)    # next update: kept
-        moved = await cog._siege_time(True, WORLD, {**SIEGE, "nextSiegeDay": 666})   # another siege
-        down = await cog._siege_time(False, WORLD, SIEGE)                       # server down: dropped
-        back = await cog._siege_time(True, WORLD, SIEGE)                        # back: worked out again
+        first = await cog._siege_time(True, on, SIEGE)
+        again = await cog._siege_time(True, {**on, "minutes": 40}, SIEGE)       # next update: kept
+        moved = await cog._siege_time(True, on, {**SIEGE, "nextSiegeDay": 666})  # another siege
+        down = await cog._siege_time(False, on, SIEGE)                          # restart: dropped
+        back = await cog._siege_time(True, on, SIEGE)                           # back: worked out again
         return first, again, moved, down, back
 
     first, again, moved, down, back = asyncio.run(run())
     assert first == again                       # the clock-speed estimate moved, the shown time didn't
     assert moved != first and down is None and back not in (None, first)
+
+
+def test_siege_time_redone_when_players_return(monkeypatch):
+    import asyncio
+    cog = _status_cog(monkeypatch, [0.4, 0.8])
+    on, empty = {**WORLD, "playerCount": 1}, {**WORLD, "playerCount": 0}
+
+    async def run():
+        first = await cog._siege_time(True, on, SIEGE)
+        while_empty = await cog._siege_time(True, empty, SIEGE)    # empty: kept, not redone
+        rejoined = await cog._siege_time(True, on, SIEGE)          # 0 -> 1: redone
+        kept = await cog._siege_time(True, on, SIEGE)
+        return first, while_empty, rejoined, kept
+
+    first, while_empty, rejoined, kept = asyncio.run(run())
+    assert while_empty == first and rejoined != first and kept == rejoined
+
+
+def test_nothing_worked_out_while_empty(monkeypatch):
+    import asyncio
+    cog = _status_cog(monkeypatch, [0.4])
+    assert asyncio.run(cog._siege_time(True, {**WORLD, "playerCount": 0}, SIEGE)) is None
+
+
+def test_live_players_falls_back_to_rcon_when_the_file_is_stale():
+    import asyncio
+    import types
+    sent = []
+
+    class Rcon:
+        async def send_command(self, cmd):
+            sent.append(cmd)
+            return "Players connected (0):"
+
+        def parse_players(self, response):
+            return set(), 0
+
+    cog = server_status.ServerStatusCog.__new__(server_status.ServerStatusCog)
+    cog.bot = types.SimpleNamespace(rcon=Rcon(), state=types.SimpleNamespace())
+    stuck = {**WORLD, "playerCount": 1, "players": "admin"}
+    fresh = asyncio.run(cog._live_players(stuck, True))
+    assert fresh["playerCount"] == 1 and not sent                 # fresh file: trusted, no RCON
+    now = asyncio.run(cog._live_players(stuck, False))
+    assert now["playerCount"] == 0 and now["players"] == "" and sent == ["players"]
+    assert cog.bot.state.player_count == 0 and cog.bot.state.players_online is False
+
+
+def test_clock_keeps_its_last_speed():
+    clock = gc.GameClockRate()
+    for i in range(0, 301, 30):
+        clock.record(1000 + i, _world_at(i * 24 // 60))
+    assert abs(clock.best() - 0.4) < 0.01
+    clock.samples = []                                           # restart / pause
+    assert clock.rate() is None and abs(clock.best() - 0.4) < 0.01

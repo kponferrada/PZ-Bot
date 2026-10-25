@@ -173,10 +173,18 @@ one card (a Discord Components V2 card), with everything below inside it:
    from the world status over the last 15 minutes. It appears about 2 minutes
    after the bot starts, hides during a siege, and assumes the clock keeps
    running (a server that pauses when empty starts the siege later).
-   It is worked out once per siege and then stays put. It is worked out again
-   only for a new siege day or start hour, when the time passes without the
-   siege starting, or about 2 minutes after a server restart (the game clock
-   stops while the server is down, so the siege moves later by that much);
+   It is worked out once and then stays put. The game clock stops while the
+   server is down and can pause while it is empty, so the siege moves later
+   then; the time is worked out again after every server restart and when
+   players go from 0 to 1, using the last clock speed measured (the day length
+   doesn't change). It is also redone for a new siege day or start hour, and
+   when its time passes with players on and no siege. Nothing is redone while
+   the server is empty.
+
+   The player count on the card comes from the mod's world status while that
+   file is fresh. When the server empties the mod stops writing it, so the bot
+   then asks the server over RCON (`players`) instead, and the count drops to 0
+   straight away rather than staying on the last player until a restart;
 3. a graph of players online over the
    last 24 hours (Philippine time; one point per 5 minutes, the highest count
    seen in it, joined by straight lines, with a dot on the peak; gaps where the

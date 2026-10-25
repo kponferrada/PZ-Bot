@@ -501,6 +501,7 @@ class ServerStatusCog(commands.Cog):
         self._last_world_at = 0.0
         self._clock = GameClockRate()  # in-game clock speed, for the siege's real start time
         self._siege_at = None          # ((nextSiegeDay, start hour), epoch): worked out once per siege
+        self._last_players = None      # players on at the last update (None: server down / not seen yet)
         self._last_siege = None
 
         if not self._channel_id:
@@ -634,14 +635,23 @@ class ServerStatusCog(commands.Cog):
     async def _siege_time(self, server_online: bool, world: dict, siege: dict) -> float | None:
         """The next siege's real-world start, worked out once and then kept.
 
-        It is worked out again only when the siege it belongs to changes (a new
-        nextSiegeDay or start hour), when that time has passed without the siege
-        starting, or after the server was down: the game clock stops while the
-        server is down, so the siege really does move later."""
+        The game clock stops while the server is down and can pause while it is
+        empty, so the siege moves later then. It is worked out again only:
+          - after every server restart (offline, then back online);
+          - when players go from 0 to 1 (the clock may have been paused);
+          - for a different siege (a new nextSiegeDay or start hour), or when
+            its time has passed with players on and the siege hasn't started.
+        Nothing is worked out while the server is empty."""
+        players = int(world.get("playerCount", 0) or 0) if server_online else 0
+        rejoined = self._last_players == 0 and players > 0
+        self._last_players = players if server_online else None
         if not server_online:
             self._siege_at = None
             self._clock.samples = []  # a speed measured across the downtime would be too slow
             return None
+        if rejoined:
+            self._siege_at = None
+            self._clock.samples = []  # nor across a pause
         if not siege or str(siege.get("phase", "")).lower() in ("active", "dawn"):
             self._siege_at = None
             return None
@@ -649,9 +659,31 @@ class ServerStatusCog(commands.Cog):
         key = (siege.get("nextSiegeDay"), start_hour)
         if self._siege_at is not None and self._siege_at[0] == key and self._siege_at[1] > time.time():
             return self._siege_at[1]
-        at = siege_real_time(world, siege, start_hour, self._clock.rate(), time.time())
+        if players == 0:
+            return None  # empty, so the clock may be paused: worked out when someone joins
+        at = siege_real_time(world, siege, start_hour, self._clock.best(), time.time())
         self._siege_at = (key, at) if at else None
         return at
+
+    async def _live_players(self, world: dict, world_fresh: bool) -> dict:
+        """`world` with a player count that is right now.
+
+        The mod stops rewriting the world file when the server empties (the game
+        pauses or stops ticking), so its last count (often 1) would stay on the
+        card until a restart. When the file isn't fresh, ask the server over
+        RCON instead. Also keeps bot.state's roster current."""
+        if world_fresh and world.get("playerCount") is not None:
+            names = {n.strip() for n in str(world.get("players", "") or "").split(",") if n.strip()}
+            count = int(world.get("playerCount") or 0)
+        else:
+            response = await self.bot.rcon.send_command("players")
+            if response is None:
+                return world
+            names, count = self.bot.rcon.parse_players(response)
+            world = {**world, "playerCount": count, "players": ",".join(sorted(names, key=str.lower))}
+        self.bot.state.player_names, self.bot.state.player_count = set(names), count
+        self.bot.state.players_online = count > 0
+        return world
 
     async def _graph_png(self, max_players: int) -> bytes | None:
         """The 24-hour player chart, re-rendered only when the history changed."""
@@ -726,11 +758,14 @@ class ServerStatusCog(commands.Cog):
             if world:
                 self._last_world = world
                 self._last_world_at = time.time()
-                self._clock.record(self._last_world_at, world)
+                if world_fresh:  # a stale file's clock is frozen, not slow
+                    self._clock.record(self._last_world_at, world)
             if siege:
                 self._last_siege = siege
             world = world or self._last_world or {}
             siege = siege or self._last_siege or {}
+            if server_online:
+                world = await self._live_players(world, world_fresh)
 
             max_players = await server_config.read_max_players(self.bot, getattr(self.bot.config, "MAX_PLAYERS", 32))
             if self._history.record(world.get("playerCount", 0) if server_online else 0):
