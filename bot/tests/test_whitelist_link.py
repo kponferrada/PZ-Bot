@@ -225,3 +225,14 @@ def test_cancel_clears_an_old_row_without_ids(tmp_path):
     assert cog._read_csv()[0]["Username"] == "silver"           # the rest of the row kept
     assert cog.refusal_for(silvast) is None
     assert "submitted for review" in _submit(cog, silvast).sent[0][0]
+
+
+def test_approval_message():
+    text = whitelist.approval_message("Juan", "juan_pz", "76561198000000001")
+    assert text.startswith("Hey Juan, your whitelist request for **PZ Tambayan** has been **approved**!")
+    assert "Username: `juan_pz`\nSteamID: `76561198000000001`" in text
+    for label in ("Rules", "Modlist", "Guides"):
+        assert f"[{label}](https://discord.com/channels/1541725057938882600/" in text
+    assert "Tomb's body mod" in text and "Desire" not in text
+    assert len(text) < 4096                      # embed description limit
+
