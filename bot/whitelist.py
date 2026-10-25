@@ -3,8 +3,9 @@
 Flow:
   1. An admin runs `/whitelistsetup`, which posts a persistent "Apply for
      Whitelist" button into the whitelist channel (WHITELIST_CHANNEL_ID).
-  2. A user clicks the button → a modal opens asking for username, password,
-     SteamID and whether they want character lore. A requester whose Discord
+  2. A user clicks the button → a modal opens asking for username, password
+     and SteamID (the character lore question is gone, user 2026-10-25; the
+     CSV keeps its column, blank for new requests). A requester whose Discord
      account is already linked to an in-game account (RankSync; approval links
      them) can't apply again, and neither can one with a request still pending
      (never acted on by staff): the button and /whitelist say so instead of
@@ -85,16 +86,6 @@ _CSV_HEADERS = ["Timestamp", "Username", "Password", "Discord Username", "SteamI
                 "request_id", "discord_id"]
 
 _APPLY_CUSTOM_ID = "whitelist:apply"
-
-
-def _normalize_yesno(value: str) -> str:
-    """Normalize a yes/no answer to 'true'/'false'; anything else is kept as-is."""
-    v = value.strip().lower()
-    if v in ("yes", "y", "true", "1", "with lore"):
-        return "true"
-    if v in ("no", "n", "false", "0", "without lore"):
-        return "false"
-    return value.strip()
 
 
 def _validate_steam_id(value: str) -> str | None:
@@ -282,12 +273,6 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
         required=True,
         max_length=32,
     )
-    character_lore = discord.ui.TextInput(
-        label="Character Lore",
-        placeholder="yes/no — do you want your character in the server's lore?",
-        required=True,
-        max_length=8,
-    )
 
     def __init__(self, cog: "WhitelistCog"):
         super().__init__()
@@ -303,7 +288,6 @@ class WhitelistModal(discord.ui.Modal, title="Whitelist Request"):
             username=self.username.value.strip(),
             password=self.password.value.strip(),
             steam_id=self.steam_id.value.strip(),
-            character_lore=_normalize_yesno(self.character_lore.value),
         )
 
 
@@ -713,7 +697,8 @@ class WhitelistCog(commands.Cog):
         embed.add_field(name="Username", value=f"`{request.get('Username', '')}`", inline=False)
         embed.add_field(name="Password", value=f"`{request.get('Password', '')}`", inline=False)
         embed.add_field(name="SteamID", value=f"`{request.get('SteamID', '')}`", inline=False)
-        embed.add_field(name="Character Lore", value=request.get("withCharacterLore", ""), inline=False)
+        if request.get("withCharacterLore"):  # requests from before the question was dropped
+            embed.add_field(name="Character Lore", value=request["withCharacterLore"], inline=False)
         embed.add_field(name="Submitted at", value=request.get("Timestamp", ""), inline=False)
         embed.set_footer(text="Approve to add to the server whitelist, or Deny with a reason.")
         return embed
@@ -1029,7 +1014,7 @@ class WhitelistCog(commands.Cog):
 
     async def handle_request(self, interaction: discord.Interaction,
                              username: str, password: str, steam_id: str,
-                             character_lore: str = "false") -> None:
+                             character_lore: str = "") -> None:
         """Persist the request to CSV and forward it to the approval channel.
         Refused while the requester's Discord account is linked to an in-game
         account, or a request of theirs is still pending (the form may have been

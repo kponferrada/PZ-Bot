@@ -31,6 +31,7 @@ Discord Roles -> In-Game Ranks:
 
 import json
 import asyncio
+import datetime
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -522,6 +523,32 @@ class RankSync(commands.Cog):
             print(f"[RankSync] Unlinked {did} from {old_name} (account deleted)")
         return dids
 
+    async def unlink_all(self) -> tuple[int, str]:
+        """Remove every Discord-to-PZ link (season reset). The links are copied
+        to rank_links-backup-<time>.json first. -> (how many, backup file name)."""
+        if not self._links:
+            return 0, ""
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = LINK_FILE.with_name(f"rank_links-backup-{stamp}.json")
+        backup.write_text(json.dumps(self._links, indent=2), encoding="utf-8")
+        olds = list(self._links.items())
+        self._links.clear()
+        self._save_links()
+        if self._ladder_mode:
+            # In-game ranks follow the ladder; only the Discord rank roles came from links.
+            guild = self.bot.get_guild(getattr(self.bot.config, "GUILD_ID", 0) or 0)
+            for did, _name in olds:
+                member = guild.get_member(int(did)) if guild else None
+                if member is not None:
+                    await self._sync_member_roles(member, 0)
+        else:
+            for _did, name in olds:
+                self._ranks.pop(name, None)
+            await self._write_ranks_file()
+            await self._push_ranks_to_server()
+        print(f"[RankSync] Unlinked all {len(olds)} account(s); backup {backup.name}")
+        return len(olds), backup.name
+
     async def _on_unlinked(self, user, old_name: str) -> None:
         """Undo what a link gave: role-based rank, or the ladder rank role."""
         if self._ladder_mode:
@@ -700,6 +727,29 @@ class RankSync(commands.Cog):
                                   description=f"{member.mention} has no PZ username linked.",
                                   colour=discord.Colour.greyple())
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="unlinkall",
+                          description="Remove every Discord-to-PZ link (season reset). A backup is kept.")
+    @app_commands.describe(confirm="Type UNLINK ALL to confirm")
+    @admin_only()
+    async def cmd_unlinkall(self, interaction: discord.Interaction, confirm: str):
+        await interaction.response.defer(ephemeral=True)
+        if " ".join(confirm.split()).upper() != "UNLINK ALL":
+            await interaction.followup.send(
+                "Nothing changed. To remove every link, type `UNLINK ALL` in `confirm`.", ephemeral=True)
+            return
+        count, backup = await self.unlink_all()
+        if not count:
+            await interaction.followup.send(embed=discord.Embed(
+                title="No Links", description="There were no Discord-to-PZ links to remove.",
+                colour=discord.Colour.greyple()), ephemeral=True)
+            return
+        await interaction.followup.send(embed=discord.Embed(
+            title="\u26d3\ufe0f All Links Removed",
+            description=(f"Removed **{count}** Discord-to-PZ link(s). Everyone can `/linkme` or apply for "
+                         f"the whitelist again.\nBackup: `{backup}` in the bot folder."),
+            colour=discord.Colour.orange()), ephemeral=True)
+        print(f"[RankSync] /unlinkall by {interaction.user}: {count} link(s), backup {backup}")
 
     @app_commands.command(name="listlinks", description="List all Discord-to-PZ username links.")
     @admin_only()

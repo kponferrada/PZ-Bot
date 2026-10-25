@@ -69,7 +69,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Status | `/hello`, `/online`, `/players`, `/playerlist`, `/modlist`, `/help` |
 | Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
 | Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart <minutes>` (max 720, auto-resumes), `/cancelrestart [restore]`, `/restartstatus`, `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
-| Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/listlinks` |
+| Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/unlinkall`, `/listlinks` |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
@@ -234,6 +234,17 @@ an old request card into the new layout the next time it updates it. Re-run
 - **a request of theirs is still pending**: never acted on by staff (not approved, denied, deleted or cancelled). Rows staff acted on never block, including a deleted account whose reason was left blank. If a pending request should no longer count (for example its approval card was deleted), an admin runs `/whitelistcancel <member>`.
 
 A form opened before either became true is refused the same way and isn't saved. Admin commands (`/whitelistadd` and the rest) aren't limited.
+
+### Season reset: unlink everyone
+
+`/unlinkall confirm:UNLINK ALL` (admin; **Unlink all** on the admin panel) removes every Discord-to-PZ link at
+once. It first copies the links to `rank_links-backup-<date>-<time>.json` in the bot folder (gitignored), then
+undoes what the links gave, as `/unlinkname` does for one member: with `RANK_SOURCE=bt_ladder` the rank roles
+come off; with `RANK_SOURCE=roles` the linked ranks are dropped and pushed to the server. Afterwards everyone
+can `/linkme` or apply for the whitelist again. It doesn't touch server accounts or the whitelist role:
+remove those separately. Anything other than `UNLINK ALL` in `confirm` changes nothing.
+
+The whitelist form asks for username, password and SteamID only (no character lore question).
 
 ### Whitelist card buttons
 

@@ -57,6 +57,8 @@ GROUPS = (
         Action("syncranks", "Sync ranks", "syncranks", "\U0001f501"),
         Action("linkname", "Link", "linkname", "\U0001f517", BLUE),
         Action("unlinkname", "Unlink", "unlinkname", "⛓️", RED),
+        Action("unlinkall", "Unlink all", "unlinkall", "\U0001f9f9", RED,
+               confirm="Remove EVERY Discord-to-PZ link? (season reset; a backup is kept)"),
         Action("listlinks", "List links", "listlinks", "\U0001f4dc"),
     )),
     Group("\U0001f4dd Whitelist", "Manage server accounts and whitelist requests.", 0x2ECC71, (
