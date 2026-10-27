@@ -104,3 +104,86 @@ def test_nothing_sent_while_the_toggle_is_off():
     cog, channel = _cog(enabled=False)
     asyncio.run(cog._handle_line(_line("## JAMIE'S COLLAPSE: VOTE\n**Next map?**").strip()))
     assert channel.sent == []
+
+
+def test_newer_posts_get_their_own_kinds():
+    # headings from 1.10.42 (TC_Discord, TC_Run, TC_Server, TC_Extras)
+    cases = {
+        "## JAMIE'S COLLAPSE: PVE EVENT IN 15 MIN": "reminder",
+        "## JAMIE'S COLLAPSE: EVENT NIGHT IN 60 MIN": "reminder",
+        "## BLOOD RUN IN 15 MIN": "reminder",
+        "## JAMIE'S COLLAPSE: EVENT ABORTED": "called_off",
+        "### KINGSMOUTH RUN: CANCELLED": "called_off",
+        "## JAMIE'S COLLAPSE: SEASON CHAMPIONS": "champion",
+        "## LEADERBOARDS": "board",
+        "### KINGSMOUTH RUN: THEY'RE GOING IN": "start",
+        "### KINGSMOUTH RUN: EXTRACTION REVEALED": "live",
+        "### KINGSMOUTH RUN: MOST WANTED": "live",
+        "### OVERTIME": "live",
+        "### THE STORM CLOSES IN": "live",
+        "### THE SECOND COLLAPSE": "live",      # a collapse is headed by its own name
+        "## SOMETHING NEW": "other",
+    }
+    for heading, kind in cases.items():
+        assert jc.render({"time": 1, "content": heading + "\nbody"})["kind"] == kind, heading
+
+
+def test_blood_run_posts_without_a_heading_get_a_title():
+    reg = jc.render({"time": 1, "content": "**Kingsmouth Run**: registration is open, deploying in 10 min."})
+    assert reg["kind"] == "registration" and reg["title"].endswith("KINGSMOUTH RUN: REGISTRATION OPEN")
+    assert reg["description"].startswith("**Kingsmouth Run**: registration is open")
+    over = jc.render({"time": 1, "content": "**Kingsmouth Run** is over.\nGot out (2 of 5): Ana, bob"})
+    assert over["kind"] == "win" and over["title"].endswith("KINGSMOUTH RUN IS OVER")
+    assert over["description"] == "Got out (2 of 5): Ana, bob"
+    champ = jc.render({"time": 1, "content": "**Blood Run Champion, Oct 2026**: Ana!\n**Ana: 40 pts**"})
+    assert champ["kind"] == "champion" and champ["title"].endswith("BLOOD RUN CHAMPION, OCT 2026")
+    assert champ["description"].startswith("Ana!")
+
+
+LINKS = {"ana": 111, "bob_pz": 222, "xo": 333}
+
+
+def test_linked_players_are_mentioned_in_place_of_their_names():
+    post = jc.render({"time": 1, "content": (
+        "## JAMIE'S COLLAPSE: RED WINS\n**Friday Brawl** (Teams)\n**Last team standing: ANA & Bob_PZ & carl**\n"
+        "Most zombies killed: bob_pz 40, Anabel 3, ana 2\nSeason so far (Oct): 1. ana 30, 2. bob_pz 20")}, LINKS)
+    lines = post["description"].split("\n")
+    assert lines[1] == "**Last team standing: <@111> & <@222> & carl**"
+    assert lines[2] == "Most zombies killed: <@222> 40, Anabel 3, <@111> 2"   # whole names only
+    assert lines[3] == "Season so far (Oct): 1. ana 30, 2. bob_pz 20"        # not this event's attendees
+    assert post["mentions"] == [111, 222]
+
+
+def test_no_mentions_on_leaderboards_short_names_or_without_links():
+    board = jc.render({"time": 1, "content": "## LEADERBOARDS\n1. ana: 30 pts"}, LINKS)
+    assert board["mentions"] == [] and "<@" not in board["description"]
+    short = jc.render({"time": 1, "content": "### FLARE\n**xo** is trying to get out early."}, LINKS)
+    assert short["mentions"] == []
+    plain = jc.render({"time": 1, "content": "### FLARE\n**ana** is trying to get out early."})
+    assert plain["mentions"] == [] and "**ana**" in plain["description"]
+
+
+def test_blood_run_deploy_pings_every_linked_attendee():
+    post = jc.render({"time": 1, "content": "### KINGSMOUTH RUN: THEY'RE GOING IN\n3 players into Kingsmouth: ana, bob_pz, carl"},
+                     LINKS)
+    assert post["kind"] == "start"
+    assert post["description"].endswith(": <@111>, <@222>, carl") and post["mentions"] == [111, 222]
+
+
+def test_sent_card_pings_only_the_linked_attendees():
+    cog, channel = _cog()
+    cog.bot.features = types.SimpleNamespace(is_enabled=lambda key: key in ("collapse", "collapse_mentions"))
+    cog.bot.get_cog = lambda name: types.SimpleNamespace(discord_ids_by_pz_username=lambda: dict(LINKS))
+    asyncio.run(cog._handle_line(_line("## JAMIE'S COLLAPSE: SURVIVED!\n**Night** (PvE)\n2 made it to the end: ana, carl").strip()))
+    mentions = channel.sent[0]["allowed_mentions"]
+    assert not mentions.everyone and not mentions.roles
+    assert [u.id for u in mentions.users] == [111]
+    assert "<@111>" in json.dumps(channel.sent[0]["view"].to_components())
+
+
+def test_pings_off_with_the_toggle():
+    cog, channel = _cog()   # only "collapse" is on
+    cog.bot.get_cog = lambda name: types.SimpleNamespace(discord_ids_by_pz_username=lambda: dict(LINKS))
+    asyncio.run(cog._handle_line(_line("## JAMIE'S COLLAPSE: SURVIVED!\n2 made it: ana, carl").strip()))
+    assert not channel.sent[0]["allowed_mentions"].users
+    assert "<@111>" not in json.dumps(channel.sent[0]["view"].to_components())

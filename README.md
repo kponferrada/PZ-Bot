@@ -39,7 +39,7 @@ on boot.
 | Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
 | Airdrop / supply-event notices and triggers | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
-| Jamie's Collapse announcements (event start, results, event nights, votes, season champion) as cards | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse` |
+| Jamie's Collapse announcements as cards: event start, results, reminders, event nights, votes, season champions, live moments, leaderboards and the Blood Run. Players named in a post who are linked (`/linkme`) are pinged in place of their name (not on leaderboards or the "Season so far" line) | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse`; pings: `collapse_mentions` |
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
 | Scheduled restarts (UTC hours) | `restart_watch.py` | RCON | `scheduled_restarts` |
 | Restart notices (countdown, kick warning, deferral) | `restart_watch.py` | RCON | `restarts` |
