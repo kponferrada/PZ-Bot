@@ -502,6 +502,14 @@ class RankSync(commands.Cog):
         print(f"[RankSync] {after.display_name} ({pz_username}): {old_rank} -> {new_rank}")
         await self._update_rank_and_push(pz_username, new_rank)
 
+    def discord_ids_by_pz_username(self) -> Dict[str, int]:
+        """Lower-cased PZ username -> Discord id, for every link (the first
+        link wins if a name is linked twice)."""
+        out: Dict[str, int] = {}
+        for did, pz in self._links.items():
+            out.setdefault(pz.lower(), int(did))
+        return out
+
     def links_to(self, pz_username: str) -> list:
         """Discord ids (str) linked to `pz_username`, any case."""
         name = (pz_username or "").strip().lower()

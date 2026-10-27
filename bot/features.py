@@ -21,6 +21,7 @@ FEATURES = {
     "airdrops": "Airdrop & supply notifications",
     "jackpots": "Jamie's Fortune jackpot notifications",
     "collapse": "Jamie's Collapse event announcements",
+    "collapse_mentions": "Jamie's Collapse: ping linked players named in announcements",
     "restarts": "Restart notifications",
     "scheduled_restarts": "Scheduled restarts",
     "mod_updates": "Workshop mod update checker",
