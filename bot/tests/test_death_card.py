@@ -86,6 +86,20 @@ def test_autopsy_notes():
     assert notes.endswith("Signs of infection were present at time of death.")
 
 
+def test_autopsy_notes_use_death_log_details():
+    notes = dc.autopsy_notes(
+        "Zombie - Sprinter", True, "2 hours",
+        "Hand_L: Bitten, Bleeding, Infected Wound; Neck: Bitten, Bleeding, Infected Wound",
+        "unemployed",
+        "Lee Caldwell was attacked by a zombie, suffering a bite to the neck and bleeding out.")
+    assert notes == ("Lee Caldwell was attacked by a zombie, suffering a bite to the neck "
+                     "and bleeding out. 6 wounds recorded. 2 signs of infection.")
+    notes = dc.autopsy_notes("Bled Out", False, "", "Torso_Upper: Bleeding",
+                             details="Rick Grimes bled out from a gunshot wound to the torso upper")
+    assert notes == ("Rick Grimes bled out from a gunshot wound to the torso upper. "
+                     "1 wound recorded. No signs of infection.")
+
+
 def _data(**over):
     data = dict(
         survivor="silvast", character_name="Jamie Bear", infected="true",
