@@ -355,7 +355,19 @@ def registry_number(issued: datetime.datetime, serial: int) -> str:
 
 
 def autopsy_notes(cause: str, infected: bool, survival_time: str,
-                  injuries: str, profession: str = "") -> str:
+                  injuries: str, profession: str = "", details: str = "") -> str:
+    """The Death Log's own `Details:` sentence with the wound and infection
+    counts; older log entries without one get a sentence built from the cause."""
+    parsed = parse_injuries(injuries)
+    wounds = sum(len(c) or 1 for _k, c in parsed)
+    details = details.strip()
+    if details:
+        text = details if details.endswith((".", "!", "?")) else details + "."
+        signs = sum(c.count("infected wound") for _k, c in parsed)
+        text += f" {wounds} wound{'s' if wounds != 1 else ''} recorded."
+        text += (f" {signs} sign{'s' if signs != 1 else ''} of infection." if signs
+                 else " No signs of infection.")
+        return text
     headline, detail = split_cause(cause)
     if headline == "Zombie Attack":
         what = f"a zombie attack ({detail})" if detail else "a zombie attack"
@@ -370,7 +382,6 @@ def autopsy_notes(cause: str, infected: bool, survival_time: str,
     if survival_time.strip():
         text += f" after surviving {survival_time.strip()}"
     text += "."
-    wounds = sum(len(c) or 1 for _k, c in parse_injuries(injuries))
     if wounds:
         text += f" {wounds} wound{'s' if wounds != 1 else ''} recorded."
     text += (" Signs of infection were present at time of death." if infected
@@ -577,7 +588,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
 
     `data` keys: survivor, character_name, infected, survival_time,
     zombie_kills, cause, injuries, location, game_date_time, death_count,
-    deaths_today, deaths_week; optional: discord_name, profession,
+    deaths_today, deaths_week; optional: discord_name, profession, details,
     registry_serial, issued_at (aware datetime, default now in PHT).
     `avatar` is the raw image bytes of the survivor's Discord avatar, if linked.
 
@@ -633,9 +644,10 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
     summary = injury_summary(injuries)
     _type_block(draw, _INJURY_SUMMARY, summary or ["None recorded"], bullet=bool(summary))
     survived = str(data.get("survival_time") or "")
+    details = str(data.get("details") or "")
     notes = autopsy_notes(cause, infected, survived, injuries,
-                          str(data.get("profession") or ""))
-    if not _paragraph_fits(draw, _NOTES, notes):
+                          str(data.get("profession") or ""), details)
+    if not details and not _paragraph_fits(draw, _NOTES, notes):
         notes = autopsy_notes(cause, infected, survived, injuries)
     _type_paragraph(draw, _NOTES, notes)
     _type_paragraph(draw, _CERT, _CERT_TEXT)

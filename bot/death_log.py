@@ -42,6 +42,7 @@ _DEATH_LOG_NAME = "player-death-logging.log"
 #   Survival Time: 23 days, 5 hours
 #   Location: X: 12345, Y: 67890, Z: 0
 #   Game Date Time: 1993-7-22 14:32
+#   Details: baz was attacked by a zombie, suffering a bite to the neck and bleeding out.
 #   =================================
 
 
@@ -148,6 +149,7 @@ class DeathLogCog(commands.Cog):
         game_date_time = d.get("game date time") or ""
         infected = (d.get("infected") or "").strip().lower() in ("true", "yes", "1")
         profession = d.get("profession") or ""
+        details = d.get("details") or ""
         died_at = datetime.datetime.now(_TZ)
 
         # Death count comes from Aegis Panel's ledger (authoritative). Aegis
@@ -199,6 +201,7 @@ class DeathLogCog(commands.Cog):
             "deaths_today": deaths_today,
             "deaths_week": deaths_week,
             "profession": profession,
+            "details": details,
             "registry_serial": registry_serial,
             "issued_at": died_at,
         }
