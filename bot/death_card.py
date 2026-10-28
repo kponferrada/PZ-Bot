@@ -281,6 +281,8 @@ def split_cause(cause: str) -> Tuple[str, str]:
     "Zombie - Shambler" -> ("Zombie Attack", "Shambler")
     "Player - bob"      -> ("Homicide", "bob")
     "Animal - Wolf"     -> ("Animal Attack", "Wolf")
+    "NPC - Ray Costa"   -> ("NPC Attack", "Ray Costa")   (BLib2 Admin: an NPC mod's person)
+    "NPC"               -> ("NPC Attack", "")            (an NPC nobody could name)
     Anything else is kept as the headline.
     """
     cause = (cause or "").strip() or "Unknown"
@@ -290,10 +292,12 @@ def split_cause(cause: str) -> Tuple[str, str]:
         cause, _, by = cause.partition(" — by ")
     kind, sep, detail = cause.partition(" - ")
     kind_l = kind.strip().lower()
-    if sep and kind_l in ("zombie", "player", "animal"):
+    if sep and kind_l in ("zombie", "player", "animal", "npc"):
         headline = {"zombie": "Zombie Attack", "player": "Homicide",
-                    "animal": "Animal Attack"}[kind_l]
+                    "animal": "Animal Attack", "npc": "NPC Attack"}[kind_l]
         return headline, (by or detail).strip()
+    if not sep and kind_l == "npc":
+        return "NPC Attack", by.strip()
     if by:
         return cause.strip(), by.strip()
     return cause.strip(), ""
@@ -303,8 +307,8 @@ def format_cause(cause: str) -> str:
     headline, detail = split_cause(cause)
     if not detail:
         return headline
-    if headline == "Homicide":
-        return f"Homicide — killed by {detail}"
+    if headline in ("Homicide", "NPC Attack"):
+        return f"{headline} — killed by {detail}"
     return f"{headline} ({detail})"
 
 
@@ -375,6 +379,8 @@ def autopsy_notes(cause: str, infected: bool, survival_time: str,
         what = f"an attack by {detail}" if detail else "an attack by another survivor"
     elif headline == "Animal Attack":
         what = f"an animal attack ({detail})" if detail else "an animal attack"
+    elif headline == "NPC Attack":
+        what = f"an attack by {detail}" if detail else "an attack by an NPC"
     else:
         what = headline.lower()
     who = f"Victim ({profession.strip().lower()})" if profession.strip() else "Victim"

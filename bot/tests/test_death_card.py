@@ -61,6 +61,19 @@ def test_split_and_format_cause():
     assert dc.format_cause("Player - bob") == "Homicide — killed by bob"
 
 
+def test_npc_cause():
+    # BLib2 Admin's death log: an NPC mod's person (Roaming Survivors) is "NPC - <name>", or "NPC" unnamed
+    assert dc.split_cause("NPC - Ray Costa") == ("NPC Attack", "Ray Costa")
+    assert dc.split_cause("NPC") == ("NPC Attack", "")
+    assert dc.format_cause("NPC - Ray Costa") == "NPC Attack — killed by Ray Costa"
+    assert dc.format_cause("NPC") == "NPC Attack"
+    assert dc.autopsy_notes("NPC - Ray Costa", False, "3 days", "").startswith(
+        "Victim succumbed to an attack by Ray Costa after surviving 3 days.")
+    assert dc.autopsy_notes("NPC", False, "", "").startswith("Victim succumbed to an attack by an NPC.")
+    # a cause that merely starts with "NPC" is not one
+    assert dc.split_cause("NPCs everywhere") == ("NPCs everywhere", "")
+
+
 def test_format_game_date():
     assert dc.format_game_date("1993-7-22 14:32") == "July 22, 1993   14:32"
     assert dc.format_game_date("1993-07-09") == "July 9, 1993"
