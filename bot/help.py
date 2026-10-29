@@ -71,6 +71,10 @@ _COMMANDS: dict[str, list[tuple[str, str]]] = {
         ("/supplyevent", "Trigger a supply event. [admin]"),
         ("/supplyeventstatus", "Show supply event status. [admin]"),
     ],
+    "🗓️ Seasons": [
+        ("/seasonreset <season> confirm:RESET SEASON [whitelist_role]", "Start a new season: archive the bot's deaths, known players, whitelist requests and links, then start them empty. [admin]"),
+        ("/seasoninfo", "The current season and the archived ones. [admin]"),
+    ],
     "🔔 Notifications": [
         ("/enable <feature>", "Enable a notification feature. [admin]"),
         ("/disable <feature>", "Disable a notification feature. [admin]"),

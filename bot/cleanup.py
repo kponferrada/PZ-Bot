@@ -11,7 +11,8 @@ Targets:
     regenerated caches are never raced).
 
 Excluded (never descended into): `venv/`, `.venv/`, `.git/`, `assets/`,
-`scripts/`, `deploy/`. Everything not in the safe set above is left alone.
+`scripts/`, `deploy/`, `archive/` (season archives). Everything not in the
+safe set above is left alone.
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from discord.ext import commands, tasks
 _BOT_DIR = Path(__file__).resolve().parent
 
 # Directories we never descend into (third-party env, VCS, static/source assets).
-_EXCLUDED_DIRS = {".git", "venv", ".venv", "assets", "scripts", "deploy"}
+_EXCLUDED_DIRS = {".git", "venv", ".venv", "assets", "scripts", "deploy", "archive"}
 
 # Regenerated-on-demand files that are safe to delete once they go stale.
 _STALE_NAMES = {"status_card.png", "dashboard_assets.json"}

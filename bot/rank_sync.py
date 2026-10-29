@@ -531,13 +531,15 @@ class RankSync(commands.Cog):
             print(f"[RankSync] Unlinked {did} from {old_name} (account deleted)")
         return dids
 
-    async def unlink_all(self) -> tuple[int, str]:
+    async def unlink_all(self, backup=None) -> tuple[int, str]:
         """Remove every Discord-to-PZ link (season reset). The links are copied
-        to rank_links-backup-<time>.json first. -> (how many, backup file name)."""
+        to `backup` (default rank_links-backup-<time>.json beside the links)
+        first. -> (how many, backup file name)."""
         if not self._links:
             return 0, ""
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = LINK_FILE.with_name(f"rank_links-backup-{stamp}.json")
+        if backup is None:
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = LINK_FILE.with_name(f"rank_links-backup-{stamp}.json")
         backup.write_text(json.dumps(self._links, indent=2), encoding="utf-8")
         olds = list(self._links.items())
         self._links.clear()

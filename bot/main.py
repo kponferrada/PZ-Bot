@@ -400,7 +400,7 @@ class PZBot(commands.Bot):
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jamies_fortune", "jamies_collapse", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "stats", "weekly_rp", "cleanup",
-                    "help", "admin_panel", "player_panel"):
+                    "help", "admin_panel", "player_panel", "season"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")
