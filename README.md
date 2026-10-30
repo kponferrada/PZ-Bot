@@ -37,7 +37,7 @@ on boot.
 | In-game ↔ Discord chat relay | `chat_relay.py` | Jeeve's Integration | `chat_relay` |
 | In-game name colours from the Barangay Tales reputation ladder (or Discord roles) | `rank_sync.py`, `bt_progression.py` | Jeeve's Integration, Barangay Tales | — |
 | Siege Night warnings, start, per-wave, end; admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
-| Airdrop / supply-event notices and triggers | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
+| Airdrop / supply-event notices and triggers. A personal drop pings the player it landed near if they are linked (`/linkme`); supply drop events ping `EVENT_PING_ROLE_ID` | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
 | Jamie's Collapse announcements as cards: event start, results, reminders, event nights, votes, season champions, live moments, leaderboards and the Blood Run. Each has a subtitle, stat blocks (players still in, next collapse as a live countdown, zone status), medal kill boards and the MVP on results; vote options show as coloured buttons (vote in game). Players named in a post who are linked (`/linkme`) are pinged in place of their name (not on leaderboards or the "Season so far" line) | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse`; pings: `collapse_mentions` |
 | Workshop update checker → controlled restart | `mod_checker.py`, `restart_watch.py` | Steam Web API (key for unlisted items) | `mod_updates` |
@@ -465,7 +465,8 @@ feature is off.
 | `STATUS_NOTICE_CHANNEL_IDS` + `STATUS_NOTICE_ROLE_ID` | extra channels (comma-separated) for the one-line down / back-up notice; empty = off |
 | `JOIN_LEAVE_CHANNEL_ID` | join / leave banners |
 | `DEATH_LOGS_CHANNEL_ID` | death cards |
-| `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events |
+| `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events; the role is pinged on drop errors (a personal drop pings its linked player instead) |
+| `EVENT_PING_ROLE_ID` | role pinged for supply drop events (0 = `AIRDROP_ROLE_ID`) |
 | `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `COLLAPSE_CHANNEL_ID` | Jamie's Collapse announcements |
