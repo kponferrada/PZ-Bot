@@ -108,7 +108,7 @@ class Config:
         self.DEATH_LOGS_CHANNEL_ID = _env_int("DEATH_LOGS_CHANNEL_ID", 0)
         self.AIRDROP_CHANNEL_ID = _env_int("AIRDROP_CHANNEL_ID", 0)
         self.AIRDROP_ROLE_ID = _env_int("AIRDROP_ROLE_ID", 0)
-        # Role pinged for supply drop events (0 = AIRDROP_ROLE_ID)
+        # Role pinged for supply drop events (0 = AIRDROP_ROLE_ID) and Siege Night (0 = SIEGE_ROLE_ID)
         self.EVENT_PING_ROLE_ID = _env_int("EVENT_PING_ROLE_ID", 0)
         self.SIEGE_CHANNEL_ID = _env_int("SIEGE_CHANNEL_ID", 0)
         # Jamie's Fortune jackpot announcements (0 = fall back to DISCORD_CHANNEL_ID)

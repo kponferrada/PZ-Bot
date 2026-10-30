@@ -466,8 +466,8 @@ feature is off.
 | `JOIN_LEAVE_CHANNEL_ID` | join / leave banners |
 | `DEATH_LOGS_CHANNEL_ID` | death cards |
 | `AIRDROP_CHANNEL_ID` / `AIRDROP_ROLE_ID` | drops and supply events; the role is pinged on drop errors (a personal drop pings its linked player instead) |
-| `EVENT_PING_ROLE_ID` | role pinged for supply drop events (0 = `AIRDROP_ROLE_ID`) |
-| `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night |
+| `EVENT_PING_ROLE_ID` | the "Event Pings" role: pinged for supply drop events (0 = `AIRDROP_ROLE_ID`) and Siege Night notices (0 = `SIEGE_ROLE_ID`) |
+| `SIEGE_CHANNEL_ID` / `SIEGE_ROLE_ID` | Siege Night (the role only when `EVENT_PING_ROLE_ID` is 0) |
 | `JACKPOT_CHANNEL_ID` | Jamie's Fortune jackpots |
 | `COLLAPSE_CHANNEL_ID` | Jamie's Collapse announcements |
 | `WHITELIST_CHANNEL_ID` / `WHITELIST_APPROVAL_CHANNEL_ID` | whitelist button / approval queue |

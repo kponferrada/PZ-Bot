@@ -1,7 +1,8 @@
-"""Jeeve's Drops notices: who gets pinged.
+"""Jeeve's Drops and Siege Night notices: who gets pinged.
 
 A personal drop pings only the player it landed near, when they are linked
-(/linkme); a supply drop event pings EVENT_PING_ROLE_ID (else AIRDROP_ROLE_ID).
+(/linkme); supply drop events and Siege Night ping EVENT_PING_ROLE_ID (else
+AIRDROP_ROLE_ID / SIEGE_ROLE_ID).
 Run from bot/:  python -m pytest tests
 """
 
@@ -91,3 +92,12 @@ def test_supply_events_ping_the_event_role(monkeypatch):
     cog, _, roled = _cog(monkeypatch, active)          # no event role set: the airdrop role
     asyncio.run(cog.supply_event_poller.coro(cog))
     assert [r for r, _ in roled] == [55]
+
+
+def test_siege_night_pings_the_event_role():
+    import siege_night
+    cog = siege_night.SiegeNightCog.__new__(siege_night.SiegeNightCog)
+    cog.bot = types.SimpleNamespace(config=types.SimpleNamespace(EVENT_PING_ROLE_ID=77, SIEGE_ROLE_ID=66))
+    assert cog._ping_role() == 77
+    cog.bot.config.EVENT_PING_ROLE_ID = 0                  # not set: the old siege role
+    assert cog._ping_role() == 66
