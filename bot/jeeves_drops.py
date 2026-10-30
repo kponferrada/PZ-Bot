@@ -10,6 +10,7 @@ Add to Jeeves bot:
 """
 
 import asyncio
+from typing import Dict, Optional
 
 import discord
 from discord import app_commands
@@ -37,6 +38,13 @@ CRATE_EMOJIS = {
 }
 
 
+def drop_mention(target: str, links: Dict[str, int]) -> Optional[int]:
+    """The Discord id linked (/linkme) to a personal drop's target, or None.
+    Jeeve's Drops writes the target's PZ username (`pending.username`);
+    `links` maps lower-cased PZ username -> Discord id."""
+    return links.get((target or "").strip().lower()) if links else None
+
+
 class JeevesDropsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -45,6 +53,24 @@ class JeevesDropsCog(commands.Cog):
         self._sent_events: set[tuple] = set()
         self._last_event_poller_key = None
         self._sent_error_key = None   # (dropId, timestamp) of the last error announced
+
+    def _event_role(self) -> int:
+        """The role pinged for supply drop events (EVENT_PING_ROLE_ID, else AIRDROP_ROLE_ID)."""
+        cfg = self.bot.config
+        return getattr(cfg, "EVENT_PING_ROLE_ID", 0) or cfg.AIRDROP_ROLE_ID
+
+    async def _send_personal_drop(self, channel, target: str, embed: discord.Embed) -> None:
+        """A personal drop pings only its target, when linked; nobody otherwise."""
+        rank_cog = self.bot.get_cog("RankSync")
+        did = drop_mention(target, rank_cog.discord_ids_by_pz_username() if rank_cog else {})
+        try:
+            if did:
+                await channel.send(content=f"<@{did}>", embed=embed, allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[discord.Object(id=did)]))
+            else:
+                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            print(f"[JeevesDrops] Failed to send drop notification: {e}")
 
     async def cog_load(self):
         self.drops_status_poller.start()
@@ -106,7 +132,7 @@ class JeevesDropsCog(commands.Cog):
                     colour=discord.Colour.blue()
                 )
                 if self.bot.features.is_enabled("airdrops"):
-                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self._send_personal_drop(channel, target, embed)
                 self._sent_drops.add(drop_key)
 
                 print(f"[JeevesDrops] Notification sent for dropId={drop_id}, ts={ts}")
@@ -329,7 +355,7 @@ class JeevesDropsCog(commands.Cog):
                     colour=discord.Colour.red()
                 )
                 if self.bot.features.is_enabled("airdrops"):
-                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.send_to_channel(channel, self._event_role(), embed)
                 self._sent_events.add(event_key)
                 print(f"[JeevesDrops] Supply event notification sent: {loc_name} (id={event_id})")
 
@@ -353,7 +379,7 @@ class JeevesDropsCog(commands.Cog):
                     colour=discord.Colour.dark_red()
                 )
                 if self.bot.features.is_enabled("airdrops"):
-                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.send_to_channel(channel, self._event_role(), embed)
 
             elif phase == "ended":
                 skipped = status.get("skipped", False)
@@ -370,7 +396,7 @@ class JeevesDropsCog(commands.Cog):
                         colour=discord.Colour.greyple()
                     )
                 if self.bot.features.is_enabled("airdrops"):
-                    await self.bot.send_to_channel(channel, self.bot.config.AIRDROP_ROLE_ID, embed)
+                    await self.bot.send_to_channel(channel, self._event_role(), embed)
 
         except Exception as e:
             print(f"[JeevesDrops] Supply event poller error: {e}")
