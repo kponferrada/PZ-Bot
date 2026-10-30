@@ -35,6 +35,7 @@ import discord
 from discord.ext import commands, tasks
 
 import aegis_stats
+import season
 import player_banner
 import sftp_client
 
@@ -438,6 +439,11 @@ class PlayerTrackerCog(commands.Cog):
         return known
 
     async def _seed_known_players(self):
+        if season.fresh_start():
+            # After /seasonreset everyone's first join is new: last season's
+            # players on the server (Aegis, pzserver.db) are not seeded.
+            self._seeded = True
+            return
         # Prefer Aegis Panel's ledger (authoritative); fall back to the server's
         # players.db when Aegis isn't present yet.
         known = await aegis_stats.known_players(self.bot, force=True)

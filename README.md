@@ -75,6 +75,7 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
 | Features | `/enable <feature>`, `/disable <feature>` |
+| Seasons | `/seasonreset <season> confirm:RESET SEASON [whitelist_role]`, `/seasoninfo` (see below) |
 | Panels | `/adminpanel`, `/playerpanel` (see below) |
 
 ### Restart flow
@@ -235,6 +236,34 @@ an old request card into the new layout the next time it updates it. Re-run
 - **a request of theirs is still pending**: never acted on by staff (not approved, denied, deleted or cancelled). Rows staff acted on never block, including a deleted account whose reason was left blank. If a pending request should no longer count (for example its approval card was deleted), an admin runs `/whitelistcancel <member>`.
 
 A form opened before either became true is refused the same way and isn't saved. Admin commands (`/whitelistadd` and the rest) aren't limited.
+
+### New season: archive and clear the bot's data
+
+`/seasonreset season:<name of the new season> confirm:RESET SEASON` (admin; **New season** on the admin
+panel's Bot card) starts the bot's data from scratch for a new season. It first copies everything the bot
+saved during the season into `archive/<date>-<time>-<old season>/` in the bot folder (gitignored), then
+empties it:
+
+| Data | File | After the reset |
+|---|---|---|
+| Death log | `deaths.json` | Empty. The death card's registry number (`BT-DC-<date>-<n>`) and the today/this-week counts start at 1 again |
+| Known players | `players.db` | Empty. Everyone's first join of the season gets the **new player** banner, not "returning" |
+| Whitelist requests | `whitelist_requests.csv` | Empty (header kept). Old request cards' buttons answer "Request not found" |
+| Discord-to-PZ links | `rank_links.json` | Empty, as `/unlinkall` (rank roles come off). Everyone can `/linkme` or apply again |
+
+The archive folder also holds `season.json` (which season ended, when, who reset it, rows archived).
+`whitelist_role:True` also takes the whitelist role from everyone who has it (default: kept).
+Anything other than `RESET SEASON` in `confirm` changes nothing.
+
+The bot's own settings stay: feature toggles, restart and mod-update state, the 24-hour player graph.
+Data on the game server is not touched: server accounts (`db/<server>.db`), Aegis stats (the death card's
+"server deaths" total), the Barangay Tales export. Wipe or reset those with the server.
+
+`season_state.json` keeps the current season and the list of archived ones (`/seasoninfo`). After a reset the
+bot no longer seeds known players from the server (Aegis, `db/<server>.db`), so last season's players are
+not counted as returning; a player is known from their first join this season.
+
+To restore a season, stop the bot and copy the files from its archive folder back into `bot/`.
 
 ### Season reset: unlink everyone
 

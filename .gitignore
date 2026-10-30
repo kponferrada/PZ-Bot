@@ -26,6 +26,8 @@ player_history.json
 whitelist_requests.csv
 rank_links-backup-*.json
 deaths.json
+season_state.json
+archive/
 
 # Runtime lock file (bot PID)
 *.lock

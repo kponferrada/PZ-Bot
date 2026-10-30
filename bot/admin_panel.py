@@ -83,10 +83,12 @@ GROUPS = (
                confirm="Start a supply event now?"),
         Action("supplyeventstatus", "Supply status", "supplyeventstatus", "\U0001f4ca"),
     )),
-    Group("\U0001f514 Bot", "Turn bot notifications on or off.", 0x95A5A6, (
+    Group("\U0001f514 Bot", "Turn bot notifications on or off; start a new season.", 0x95A5A6, (
         Action("features", "Features", "features", "\U0001f4cb"),
         Action("enable", "Enable", "enable", "\U0001f7e2", GREEN),
         Action("disable", "Disable", "disable", "\U0001f534", RED),
+        Action("seasoninfo", "Season", "seasoninfo", "\U0001f5d3️"),
+        Action("seasonreset", "New season", "seasonreset", "\U0001f9f9", RED),
     )),
 )
 
