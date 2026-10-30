@@ -97,7 +97,7 @@ def test_each_post_is_sent_once_as_a_card_that_pings_nobody():
     mentions = sent["allowed_mentions"]
     assert not mentions.everyone and not mentions.users and not mentions.roles
     text = json.dumps(sent["view"].to_components())
-    assert "JAMIE'S COLLAPSE HAS STARTED" in text and "4 players" in text
+    assert "JAMIE'S COLLAPSE HAS STARTED" in text and "-# PLAYERS\\n### 4" in text
 
 
 def test_nothing_sent_while_the_toggle_is_off():
@@ -187,3 +187,135 @@ def test_pings_off_with_the_toggle():
     asyncio.run(cog._handle_line(_line("## JAMIE'S COLLAPSE: SURVIVED!\n2 made it: ana, carl").strip()))
     assert not channel.sent[0]["allowed_mentions"].users
     assert "<@111>" not in json.dumps(channel.sent[0]["view"].to_components())
+
+
+# --- The cards (the user's mockups, 2026-10-30) ------------------------------
+
+def _texts(post) -> list:
+    return [item[1] for item in post["layout"] if item[0] == "text"]
+
+
+def _components(post) -> dict:
+    return jc.card(post).to_component_dict()
+
+
+def test_critical_collapse_is_the_final_stand():
+    post = jc.render({"time": 1792900000, "content":
+                      "### CRITICAL COLLAPSE\nArena 4 of 4: **Final Arena**. 2 players still in."})
+    assert post["kind"] == "collapse" and post["colour"] == jc._RED
+    head, players, zone, warning = _texts(post)
+    assert head == ("### ⚡ CRITICAL COLLAPSE\n-# JAMIE'S COLLAPSE · ARENA 4 OF 4\n**Final Arena**\n"
+                    "The final collapsed zone is now active. Only the last survivors remain.")
+    assert players == "-# PLAYERS STILL IN\n### 2"
+    assert zone.startswith("-# ZONE STATUS\n### ") and zone.endswith("CRITICAL")
+    assert warning.endswith("**This is the final stand.**\nStay alive. There is no next arena.")
+    card = _components(post)
+    assert card["accent_color"] == jc._RED
+    assert card["components"][-1]["content"] == "-# Jamie's Collapse • <t:1792900000:f>"
+    # text, line, two tiles, line, the warning, the footer
+    assert [c["type"] for c in card["components"]] == [10, 14, 10, 10, 14, 10, 10]
+
+
+def test_second_collapse_counts_down_to_the_next():
+    post = jc.render({"time": 1000, "content":
+                      "### SECOND COLLAPSE\nArena 3 of 4: **Mall**. 2 players (2 teams) still in.\nNext collapse in 06:59."})
+    assert post["kind"] == "collapse" and post["colour"] == jc._ORANGE
+    head, players, nxt = _texts(post)
+    assert "-# JAMIE'S COLLAPSE · ARENA 3 OF 4" in head and head.endswith("The second collapsed zone is now active.")
+    assert players == "-# PLAYERS REMAINING\n### 2 players · 2 teams"
+    assert nxt.startswith("-# NEXT COLLAPSE\n### ") and "06:59" in nxt and nxt.endswith("<t:1419:R>")
+    pvp = jc.render({"time": None, "content":
+                     "### FIRST COLLAPSE\nArena 2 of 4: **Yard**. 1 player still in.\n12:00 left on the clock."})
+    assert "-# TIME LEFT" in _texts(pvp)[-1] and "<t:" not in _texts(pvp)[-1]
+
+
+def test_vote_options_are_coloured_buttons():
+    post = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: VOTE\n**What do you want to play this weekend?**\n"
+                                            "Blood Toll | Battle Royale\nVote in game on your JPhone: Collapse app > Stats."})
+    assert post["colour"] == 0x3498DB and post["title"] == "\U0001f4ca JAMIE'S COLLAPSE: VOTE"
+    assert _texts(post)[0].endswith("-# PvP · COMMUNITY POLL\n**What do you want to play this weekend?**")
+    assert post["footer"] == "Vote in-game: JPhone → Collapse → Stats"
+    row = [c for c in _components(post)["components"] if c["type"] == 1][0]
+    buttons = [(b["label"], b["style"], b["disabled"], b["emoji"]["name"]) for b in row["components"]]
+    assert buttons == [("Blood Toll", 4, True, "\U0001f480"), ("Battle Royale", 1, True, "⚔️")]
+    mixed = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: VOTE\n**Next?**\nPvE survival | Blood Toll: Mall"})
+    assert "-# COMMUNITY POLL" in _texts(mixed)[0]
+
+
+def test_survived_results_card():
+    post = jc.render({"time": 1, "content": (
+        "## JAMIE'S COLLAPSE: SURVIVED!\n**Jamie's Collapse** (PvE survival)\n**2 made it to the end: Ardyan, NEJiii**\n"
+        "Prize is handed out by the event staff.\nMost zombies killed: NEJiii 244, Ardyan 231\n"
+        "**MVP: NEJiii (244 zombies, survived 30:00)**\nSeason so far (Oct): 1. NEJiii 30\n\n"
+        "Next event: **Fri 20:00 (UTC+8)**. Sign up on JPhone > Collapse.")}, {"ardyan": 1, "nejiii": 2})
+    head, survivors, board, mvp, small, nxt = _texts(post)
+    assert head.endswith("SURVIVED!\n-# PvE SURVIVAL EVENT\n**2 players made it to the end!**")
+    assert survivors == "-# SURVIVORS\n<@1> · <@2>"
+    assert board == "**KILL LEADERBOARD**\n\U0001f947 <@2> · **244 kills**\n\U0001f948 <@1> · **231 kills**"
+    assert mvp == "\U0001f451 **MVP · <@2>**\n244 kills · 30:00 survived"
+    assert small == "-# Prize distribution handled by event staff.\n-# Season so far (Oct): 1. NEJiii 30"
+    assert nxt.startswith("Next event:")
+    assert post["mentions"] == [1, 2]
+    _components(post)
+
+
+def test_team_royale_and_blood_run_results():
+    team = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: Red WINS\n**Brawl** (Blood Toll)\n"
+                                            "**Last team standing: ana & carl**\n**Prize: $500, $250 each**\n"
+                                            "Most players eliminated: ana 3\nMost zombies killed: carl 40\n"
+                                            "**MVP: ana (3 kills, 40 hits, 2 zombies, survived 20:00)**"}, {"ana": 7})
+    head, winners, elim, zombies, mvp, prize = _texts(team)
+    assert head.endswith("-# BRAWL · BLOOD TOLL EVENT\n**Red is the last team standing!**")
+    assert winners == "-# WINNERS\n<@7> · `carl`"          # unlinked players as pills
+    assert elim.startswith("**ELIMINATIONS**") and "**3 eliminated**" in elim
+    assert zombies.startswith("**ZOMBIE KILLS**")
+    assert mvp.endswith("3 kills · 40 hits · 2 zombies · 20:00 survived")
+    assert prize == "\U0001f4b0 **Prize:** $500, $250 each"
+    royale = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: Blue WINS THE ROYALE\n**BR** (Battle Royale)\n"
+                                              "**1st  Blue  (ana, bob)  5 kills**\n2nd  Red  (carl)  1 kill"})
+    texts = _texts(royale)
+    assert texts[0].endswith("**Blue wins the Royale!**")
+    assert texts[1] == ("**PLACINGS**\n\U0001f947 **Blue** (ana, bob) · **5 kills**\n"
+                        "\U0001f948 **Red** (carl) · **1 kill**")
+    horde = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: THE HORDE WINS\n**Night** (PvE survival)\nNobody survived."})
+    assert _texts(horde)[0].endswith("-# NIGHT · PvE SURVIVAL EVENT\n**Nobody survived.**")
+    run = jc.render({"time": 1, "content": "**Kingsmouth Run** is over.\nGot out (2 of 5): Ana, bob\nMost kills: bob (3)"})
+    head, extracted, highlights = _texts(run)
+    assert "-# JAMIE'S COLLAPSE · BLOOD RUN · RESULTS\n**2 of 5 got out!**" in head
+    assert extracted == "-# EXTRACTED\n`Ana` · `bob`" and highlights == "Most kills: bob (3)"
+
+
+def test_other_kinds_share_the_style():
+    start = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE HAS STARTED\n**Friday Brawl** (Blood Toll), 6 players\n"
+                                             "**THE COLLAPSE HAS BEGUN.**\nStay inside the arena."})
+    assert _texts(start) == ["### \U0001f6a8 JAMIE'S COLLAPSE HAS STARTED\n-# FRIDAY BRAWL · BLOOD TOLL · LIVE NOW\n"
+                             "**THE COLLAPSE HAS BEGUN.**\nStay inside the arena.", "-# PLAYERS\n### 6"]
+    remind = jc.render({"time": 1000, "content": "## BLOOD RUN IN 15 MIN\n**Kingsmouth Run**: registration opens at **20:00**."})
+    assert _texts(remind)[0].startswith("### ⏰ BLOOD RUN IN 15 MIN\n-# JAMIE'S COLLAPSE · COMING UP\n")
+    assert _texts(remind)[1] == "-# STARTS\n### <t:1900:R>"
+    board = jc.render({"time": 1, "content": "## LEADERBOARDS\n**Blood Toll, Oct 2026** Champion gets 5 reputation.\n"
+                                             "1. ana: 30 pts (2 wins)\n4. bob: 1 pts\n\n**Blood Run, Oct 2026**\nNobody on it yet."},
+                      LINKS)
+    assert _texts(board)[1] == ("**BLOOD TOLL, OCT 2026**\n-# Champion gets 5 reputation.\n"
+                                "\U0001f947 ana · **30 pts** · 2 wins\n`4.` bob · **1 pts**")
+    assert _texts(board)[2] == "**BLOOD RUN, OCT 2026**\nNobody on it yet." and board["mentions"] == []
+    champs = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: SEASON CHAMPIONS\nOct 2026\n"
+                                              "**Blood Toll:** ana (30 pts), 2nd bob, 3rd carl\nEach champion gets 5 reputation."})
+    head, rows, notes = _texts(champs)
+    assert head.endswith("-# OCT 2026")
+    assert rows == "\U0001f451 **Blood Toll** · ana · **30 pts**\n-# 2nd bob · 3rd carl"
+    over = jc.render({"time": 1, "content": "### OVERTIME\n5 more minutes in the final arena. 3 players still in."})
+    assert over["colour"] == jc._RED and _texts(over)[-1] == "-# PLAYERS STILL IN\n### 3"
+    off = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: EVENT NIGHT CALLED OFF\nNot enough players."})
+    assert _texts(off) == ["### \U0001f6ab JAMIE'S COLLAPSE: EVENT NIGHT CALLED OFF\n-# CALLED OFF\nNot enough players."]
+    for post in (start, remind, board, champs, over, off):
+        assert _components(post)["components"][-1]["content"].startswith("-# Jamie's Collapse")
+
+
+def test_every_card_fits_discords_limits():
+    long = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: SURVIVED!\n**N** (PvE survival)\n" + "x" * 5000})
+    card = _components(long)
+    assert sum(len(c.get("content", "")) for c in card["components"]) <= 4000 and len(card["components"]) <= 40
+    many = jc.render({"time": 1, "content": "## JAMIE'S COLLAPSE: VOTE\n**?**\n" + " | ".join(f"Opt {i}" for i in range(30))})
+    rows = [c for c in _components(many)["components"] if c["type"] == 1]
+    assert [len(r["components"]) for r in rows] == [5] * 5
