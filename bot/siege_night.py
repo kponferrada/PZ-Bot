@@ -156,6 +156,12 @@ class SiegeNightCog(commands.Cog):
         self._active_seen_at: float | None = None        # monotonic time this siege was first seen active
         self._last_poller_key = None
 
+    def _ping_role(self) -> int:
+        """The role Siege Night notices ping: EVENT_PING_ROLE_ID (the "Event
+        Pings" role, shared with supply drop events), else SIEGE_ROLE_ID."""
+        cfg = self.bot.config
+        return getattr(cfg, "EVENT_PING_ROLE_ID", 0) or cfg.SIEGE_ROLE_ID
+
     @staticmethod
     def _split_status(status):
         """Return (schedule, siege, waves) sub-dicts from a nested siege status dict.
@@ -218,7 +224,7 @@ class SiegeNightCog(commands.Cog):
                         colour=discord.Colour.dark_red(),
                     )
                     if self.bot.features.is_enabled("siege_night"):
-                        await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
+                        await self.bot.send_to_channel(channel, self._ping_role(), embed)
                     print(f"[SiegeNight] Siege tonight announced: day {event_day}")
 
             elif phase == "active":
@@ -267,7 +273,7 @@ class SiegeNightCog(commands.Cog):
                     if len(intel) > 1:
                         embed.add_field(name="\U0001f4a1 Intel", value=" · ".join(intel), inline=False)
                     if self.bot.features.is_enabled("siege_night"):
-                        await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
+                        await self.bot.send_to_channel(channel, self._ping_role(), embed)
                     print(f"[SiegeNight] Notification sent: active, siege={siege_count}")
                     # In-game red-alert (servermsg + alert sound) — best-effort, after the
                     # Discord message so a slow RCON can never suppress the notification.
@@ -312,7 +318,7 @@ class SiegeNightCog(commands.Cog):
                         )
                     if self.bot.features.is_enabled("siege_night"):
                         await self.bot.send_to_channel(
-                            channel, self.bot.config.SIEGE_ROLE_ID, wave_embed
+                            channel, self._ping_role(), wave_embed
                         )
                     print(f"[SiegeNight] Notification sent: wave {i}/{wave_count}")
 
@@ -369,7 +375,7 @@ class SiegeNightCog(commands.Cog):
                             nd += f" ({date_str})"
                         embed.add_field(name="\U0001f319 Next", value=nd, inline=False)
                     if self.bot.features.is_enabled("siege_night"):
-                        await self.bot.send_to_channel(channel, self.bot.config.SIEGE_ROLE_ID, embed)
+                        await self.bot.send_to_channel(channel, self._ping_role(), embed)
                     print(f"[SiegeNight] Notification sent: ended, completed={completed}")
 
         except Exception as e:
