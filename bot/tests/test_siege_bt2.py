@@ -81,6 +81,8 @@ def test_all_sieges_board_and_status_fields():
     during = [n for n, _ in siege_night.status_fields(_status("siege_night_status_bt2_night.txt"))]
     assert any(n.startswith("\U0001f9cd Still Standing (4)") for n in during)
     assert any(n.startswith("\U0001f480 Left / Dead (2)") for n in during)
+    fields = dict(siege_night.status_fields(_status("siege_night_status_bt2_night.txt")))
+    assert fields["\U0001f9df This Siege"] == "Spawned **160/250** · Killed **112/250**"
 
 
 def test_long_lists_stay_under_the_field_limit():

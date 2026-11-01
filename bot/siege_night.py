@@ -176,6 +176,10 @@ def status_fields(status: dict | None) -> list[tuple[str, str]]:
     parts = night_participants(status)
     if parts is not None:
         still, out = parts
+        night = status.get("night") or {}
+        if _int(night.get("target")):
+            fields.append(("🧟 This Siege", f"Spawned **{_int(night.get('spawned'))}/{_int(night.get('target'))}** · "
+                           f"Killed **{_int(night.get('kills'))}/{_int(night.get('target'))}**"))
         fields.append((f"\U0001f9cd Still Standing ({len(still)})",
                        _fit([f"`{i + 1}.` **{_name(r)}**{' *(late)*' if r.get('late') else ''} — {_int(r.get('kills'))} kills"
                              for i, r in enumerate(still)]) if still else "Nobody is left standing."))

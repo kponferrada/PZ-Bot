@@ -13,9 +13,9 @@ return {
         timestamp = 1700000020,
     },
     siege = {
-        targetZombies = 0,
-        spawnedThisSiege = 0,
-        killsThisSiege = 0,
+        targetZombies = 250,
+        spawnedThisSiege = 250,
+        killsThisSiege = 131,
         bonusKills = 0,
         specialKillsThisSiege = 0,
         tanksSpawned = 0,
@@ -32,7 +32,7 @@ return {
         currentWave = 0,
         wave1 = {
             number = 1,
-            expected = 10,
+            expected = 15,
             startedAt = 1700000008,
             status = "started",
         },
@@ -105,7 +105,7 @@ return {
     last = {
         day = 10,
         no = 1,
-        kills = 110,
+        kills = 131,
         players = 6,
         survived = 3,
         count = 6,
