@@ -285,6 +285,13 @@ def bridge_line(bridge: dict | None) -> str:
     return f"Bridge: {lib} {version} ({owner}), protocol {bridge.get('protocol', '?')}"
 
 
+def source_line(schedule: dict | None) -> str:
+    """Which mod the siege data comes from, when it isn't Siege Night (a bridge source such as Barangay Siege
+    names itself in schedule.source); empty for Siege Night."""
+    source = str((schedule or {}).get("source") or "").strip()
+    return f"Siege data: {source}" if source else ""
+
+
 def describe_siege_outcome(action: str, outcome: dict, user: str) -> tuple[str, str, bool | None]:
     """(title, description, ok) for a command's outcome; ok None = no answer."""
     title, verb = _ACTIONS.get(action, ("Siege Night", "send the command"))
@@ -643,6 +650,9 @@ class SiegeNightCog(commands.Cog):
             f"\U0001f4ca Sieges Completed: **{completed}**",
             bridge_line(lua_bridge.siege_bridge_info(status)),
         ]
+        source = source_line(sched)
+        if source:
+            lines.append(source)
 
         embed = discord.Embed(
             title="\U0001f4cb Siege Night Status",
