@@ -17,6 +17,7 @@ return {
         killsThisSiege = 16,
         bonusKills = 0,
         specialKillsThisSiege = 0,
+        tanksSpawned = 0,
         totalKillsAllTime = 0,
         lastDirection = -1,
         currentWaveIndex = 2,
