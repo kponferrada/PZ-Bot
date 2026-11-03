@@ -1,0 +1,152 @@
+return {
+    schedule = {
+        phase = "idle",
+        siegeState = "IDLE",
+        eventDay = 11,
+        nextSiegeDay = 14,
+        siegeCount = 0,
+        totalSiegesCompleted = 1,
+        siegeTrigger = "none",
+        interruptedByRestart = false,
+        interruptedByRestartDay = 0,
+        playerCount = 5,
+        timestamp = 1700000020,
+    },
+    siege = {
+        targetZombies = 250,
+        spawnedThisSiege = 250,
+        killsThisSiege = 131,
+        bonusKills = 0,
+        specialKillsThisSiege = 0,
+        tanksSpawned = 0,
+        totalKillsAllTime = 0,
+        lastDirection = -1,
+        currentWaveIndex = 0,
+        currentPhase = "SURGE",
+        totalWaves = 0,
+        siegeStartHour = 0,
+    },
+    waves = {
+        sessionId = "siege-0-1700000008",
+        waveCount = 5,
+        currentWave = 0,
+        wave1 = {
+            number = 1,
+            expected = 15,
+            startedAt = 1700000008,
+            status = "started",
+        },
+    },
+    tonight = {
+        siegeNumber = 2,
+        comesTonight = false,
+        announcedDay = 10,
+        startHour = 20,
+        endHour = 6,
+    },
+    night = {
+        open = false,
+    },
+    records = {
+        sieges = 1,
+        worldKills = 110,
+        killers = {
+            count = 6,
+            k1 = {
+                name = "jamiebear",
+                kills = 49,
+                nights = 1,
+            },
+            k2 = {
+                name = "pe\195\177a",
+                kills = 25,
+                nights = 1,
+            },
+            k3 = {
+                name = "nomad",
+                kills = 18,
+                nights = 1,
+            },
+            k4 = {
+                name = "ghost",
+                kills = 8,
+                nights = 1,
+            },
+            k5 = {
+                name = "echo",
+                kills = 5,
+                nights = 1,
+            },
+            k6 = {
+                name = "raven",
+                kills = 5,
+                nights = 1,
+            },
+        },
+        survivors = {
+            count = 3,
+            s1 = {
+                name = "jamiebear",
+                survived = 1,
+                nights = 1,
+            },
+            s2 = {
+                name = "nomad",
+                survived = 1,
+                nights = 1,
+            },
+            s3 = {
+                name = "pe\195\177a",
+                survived = 1,
+                nights = 1,
+            },
+        },
+    },
+    last = {
+        day = 10,
+        no = 1,
+        kills = 131,
+        players = 6,
+        survived = 3,
+        count = 6,
+        p1 = {
+            name = "jamiebear",
+            kills = 49,
+            status = "survived",
+        },
+        p2 = {
+            name = "pe\195\177a",
+            kills = 25,
+            status = "survived",
+        },
+        p3 = {
+            name = "nomad",
+            kills = 18,
+            status = "survived",
+        },
+        p4 = {
+            name = "ghost",
+            kills = 8,
+            status = "dead",
+        },
+        p5 = {
+            name = "echo",
+            kills = 5,
+            status = "in",
+        },
+        p6 = {
+            name = "raven",
+            kills = 5,
+            status = "left",
+        },
+    },
+    bridge = {
+        protocol = 2,
+        channel = "siegenight",
+        owner = "blib2admin",
+        blib2 = "2.8.0",
+        timestamp = 1700000020,
+        results = {
+        },
+    },
+}

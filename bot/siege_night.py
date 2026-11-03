@@ -17,6 +17,19 @@ Night's SN.onWaveStart API and writes them to the status file's `waves`
 section (sessionId + waveCount + wave1..waveN). We read that section, so a wave
 cannot be missed by the 15s poll — dedup is by (sessionId, wave number).
 
+Barangay Tales 2 adds its own sections to the same file (SiegeStats.lua through
+BLib2 Admin's bridge; lists keyed p1.., k1.., s1.. with a `count`):
+  tonight  siegeNumber, comesTonight, announcedDay, startHour, endHour
+  night    the night under way: open, no, kills, active, out, total, and every
+           participant { name, kills, status = in|dead|left, late }
+  records  all sieges: sieges, worldKills, killers (top 10), survivors (top 10)
+  last     the last siege's leaderboard: day, no, kills, players, survived, and
+           every participant { name, kills, status = survived|in|dead|left }
+A new `last` posts a results card (top killers, who survived the whole night,
+who fell or left); /siegestatus shows the night's participants and the
+all-sieges leaderboard. Without Barangay Tales these sections are absent and
+everything works as before.
+
 Deduplication ensures each phase/wave is only announced once per siege, even
 across bot restarts.
 
@@ -40,6 +53,156 @@ from checks import admin_only
 # the siege's targetZombies (it read 0 on the first poll). Hold the "begun"
 # notice this long for a real target, then post it without the number.
 _START_WAIT_SECONDS = 60
+
+
+# ── Barangay Tales 2's sections ──────────────────────────────────────────
+
+_MEDALS = ("🥇", "🥈", "🥉")
+_FIELD_MAX = 1000          # Discord's embed field limit is 1024
+
+
+def keyed_list(section, prefix: str) -> list[dict]:
+    """The rows of a keyed list (`count` + prefix1..prefixN), in order."""
+    if not isinstance(section, dict):
+        return []
+    out = []
+    for i in range(1, _int(section.get("count")) + 1):
+        row = section.get(f"{prefix}{i}")
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
+def night_participants(status: dict | None) -> tuple[list[dict], list[dict]] | None:
+    """(still in, dead or left) for the night under way, most kills first; None when no night is open."""
+    night = (status or {}).get("night")
+    if not isinstance(night, dict) or not night.get("open"):
+        return None
+    rows = keyed_list(night, "p")
+    return ([r for r in rows if r.get("status") == "in"],
+            [r for r in rows if r.get("status") != "in"])
+
+
+def last_siege(status: dict | None) -> dict | None:
+    """The last siege's record with its leaderboard as `rows`; None before the first."""
+    last = (status or {}).get("last")
+    if not isinstance(last, dict) or not last.get("day"):
+        return None
+    out = {k: v for k, v in last.items() if not (k.startswith("p") and k[1:].isdigit())}
+    out["rows"] = keyed_list(last, "p")
+    return out
+
+
+def all_sieges(status: dict | None) -> tuple[list[dict], list[dict], dict]:
+    """(top killers, most nights survived, the records section) over every siege."""
+    rec = (status or {}).get("records")
+    if not isinstance(rec, dict):
+        return [], [], {}
+    return keyed_list(rec.get("killers"), "k"), keyed_list(rec.get("survivors"), "s"), rec
+
+
+def _name(row: dict) -> str:
+    return discord.utils.escape_markdown(str(row.get("name") or "?"))
+
+
+def _fit(lines: list[str], more: str = "… and {n} more") -> str:
+    """Join lines under the field limit, ending with how many were left out."""
+    out, used = [], 0
+    for i, line in enumerate(lines):
+        if used + len(line) + 1 > _FIELD_MAX - 30:
+            out.append(more.format(n=len(lines) - i))
+            break
+        out.append(line)
+        used += len(line) + 1
+    return "\n".join(out) or "—"
+
+
+def leaderboard_lines(rows: list[dict], value_key: str = "kills", unit: str = "kills", limit: int = 10) -> list[str]:
+    """Ranked lines: medals for the first three, then numbers."""
+    lines = []
+    for i, r in enumerate(rows[:limit]):
+        mark = _MEDALS[i] if i < 3 else f"`{i + 1}.`"
+        lines.append(f"{mark} **{_name(r)}** — {_int(r.get(value_key))} {unit}")
+    return lines
+
+
+def out_lines(rows: list[dict]) -> list[str]:
+    """Dead / left participants: 💀 dead, 🚪 left."""
+    return [f"{'💀' if r.get('status') == 'dead' else '🚪'} ~~{_name(r)}~~ — "
+            f"{_int(r.get('kills'))} kills ({'dead' if r.get('status') == 'dead' else 'left'})" for r in rows]
+
+
+def results_fields(last: dict) -> list[tuple[str, str]]:
+    """The results card's fields for one siege's leaderboard."""
+    rows = last.get("rows") or []
+    survivors = [r for r in rows if r.get("status") == "survived"]
+    stayed = [r for r in rows if r.get("status") == "in"]
+    fallen = [r for r in rows if r.get("status") in ("dead", "left")]
+    fields = [("📊 Night", f"Kills **{_int(last.get('kills'))}** · Participants **{_int(last.get('players'))}** "
+               f"· Survived **{_int(last.get('survived'))}**")]
+    if rows:
+        fields.append(("🏆 Top Killers", _fit(leaderboard_lines(rows, limit=10))))
+    fields.append((f"🛡️ Survived the Whole Night ({len(survivors)})",
+                   _fit([f"**{_name(r)}** — {_int(r.get('kills'))} kills" for r in survivors]) if survivors
+                   else "Nobody lasted from dusk to dawn."))
+    if stayed:
+        fields.append((f"🕒 Came Late, Still Standing ({len(stayed)})",
+                       _fit([f"**{_name(r)}** — {_int(r.get('kills'))} kills" for r in stayed])))
+    if fallen:
+        fields.append((f"💀 Fell or Left ({len(fallen)})", _fit(out_lines(fallen))))
+    return fields
+
+
+def _results_key(last: dict) -> tuple:
+    return (_int(last.get("day")), _int(last.get("no")))
+
+
+def results_embed(last: dict) -> discord.Embed:
+    """The card posted when a siege's leaderboard appears."""
+    no = _int(last.get("no"))
+    embed = discord.Embed(
+        title=f"\U0001f3c6 Siege Night #{no:02d} Results" if no else "\U0001f3c6 Siege Night Results",
+        description=f"Day **{_int(last.get('day'))}** — the dead have gone quiet. Here's who held the line.",
+        colour=discord.Colour.dark_red(),
+    )
+    for name, value in results_fields(last):
+        embed.add_field(name=name, value=value, inline=False)
+    return embed
+
+
+def status_fields(status: dict | None) -> list[tuple[str, str]]:
+    """/siegestatus's extra fields from Barangay Tales 2's sections (none without them)."""
+    fields = []
+    parts = night_participants(status)
+    if parts is not None:
+        still, out = parts
+        night = status.get("night") or {}
+        if _int(night.get("target")):
+            fields.append(("🧟 This Siege", f"Spawned **{_int(night.get('spawned'))}/{_int(night.get('target'))}** · "
+                           f"Killed **{_int(night.get('kills'))}/{_int(night.get('target'))}**"))
+        fields.append((f"\U0001f9cd Still Standing ({len(still)})",
+                       _fit([f"`{i + 1}.` **{_name(r)}**{' *(late)*' if r.get('late') else ''} — {_int(r.get('kills'))} kills"
+                             for i, r in enumerate(still)]) if still else "Nobody is left standing."))
+        if out:
+            fields.append((f"\U0001f480 Left / Dead ({len(out)})", _fit(out_lines(out))))
+    killers, survivors, rec = all_sieges(status)
+    if rec:
+        fields.append(("\U0001f3c6 All Sieges — Top Killers",
+                       _fit(leaderboard_lines(killers, limit=5)) if killers else "No siege kills yet."))
+        fields.append(("\U0001f6e1️ All Sieges — Most Nights Survived",
+                       _fit(leaderboard_lines(survivors, value_key="survived", unit="nights", limit=5)) if survivors
+                       else "Nobody has lasted a whole night yet."))
+        fields.append(("\U0001f30d World", f"Sieges recorded **{_int(rec.get('sieges'))}** · "
+                       f"Zombies killed by everyone **{_int(rec.get('worldKills')):,}**"))
+    last = last_siege(status)
+    if last and parts is None:
+        best = (last.get("rows") or [None])[0]
+        line = (f"Day **{_int(last.get('day'))}** · Kills **{_int(last.get('kills'))}** · "
+                f"Survived **{_int(last.get('survived'))}/{_int(last.get('players'))}**")
+        if best:
+            line += f" · Top **{_name(best)}** ({_int(best.get('kills'))})"
+        fields.append(("\U0001f4dc Last Siege", line))
+    return fields
 
 
 def _int(value) -> int:
@@ -122,6 +285,13 @@ def bridge_line(bridge: dict | None) -> str:
     return f"Bridge: {lib} {version} ({owner}), protocol {bridge.get('protocol', '?')}"
 
 
+def source_line(schedule: dict | None) -> str:
+    """Which mod the siege data comes from, when it isn't Siege Night (a bridge source such as Barangay Siege
+    names itself in schedule.source); empty for Siege Night."""
+    source = str((schedule or {}).get("source") or "").strip()
+    return f"Siege data: {source}" if source else ""
+
+
 def describe_siege_outcome(action: str, outcome: dict, user: str) -> tuple[str, str, bool | None]:
     """(title, description, ok) for a command's outcome; ok None = no answer."""
     title, verb = _ACTIONS.get(action, ("Siege Night", "send the command"))
@@ -155,6 +325,7 @@ class SiegeNightCog(commands.Cog):
         self._announced_waves: set[int] = set()          # wave numbers already announced
         self._active_seen_at: float | None = None        # monotonic time this siege was first seen active
         self._last_poller_key = None
+        self._announced_results: set[tuple] = set()      # (day, no) of the last-siege leaderboards posted
 
     def _ping_role(self) -> int:
         """The role Siege Night notices ping: EVENT_PING_ROLE_ID (the "Event
@@ -208,6 +379,15 @@ class SiegeNightCog(commands.Cog):
 
             channel = self.bot.get_siege_channel()
 
+            # Barangay Tales 2: a siege's leaderboard, once, whenever it appears
+            last = last_siege(status)
+            if last and _results_key(last) not in self._announced_results:
+                self._announced_results.add(_results_key(last))
+                embed = results_embed(last)
+                if self.bot.features.is_enabled("siege_night"):
+                    await self.bot.send_to_channel(channel, 0, embed)
+                print(f"[SiegeNight] Results posted: day {last.get('day')}, siege {last.get('no')}")
+
             if phase == "warning":
                 if event_day and event_day not in self._announced_warning_days:
                     self._announced_warning_days.add(event_day)
@@ -218,8 +398,10 @@ class SiegeNightCog(commands.Cog):
                         desc += f" ({date_str})"
                     desc += ("\n\nUse the daylight hours to prepare \u2014 fortify your "
                              "base, stock up on supplies, and gather your group.")
+                    number = _int(((status.get("tonight") or {}).get("siegeNumber")))
                     embed = discord.Embed(
-                        title="\U0001f319 Siege Night Is Tonight!",
+                        title=(f"\U0001f319 Siege Night #{number:02d} Is Tonight!" if number
+                               else "\U0001f319 Siege Night Is Tonight!"),
                         description=desc,
                         colour=discord.Colour.dark_red(),
                     )
@@ -402,6 +584,9 @@ class SiegeNightCog(commands.Cog):
                     self._announced_waves = set(range(1, int(cur) + 1))
                 if completed:
                     self._announced_ended_sieges.add(completed)
+                last = last_siege(status)
+                if last:
+                    self._announced_results.add(_results_key(last))
                 print(f"[SiegeNight] Seeded dedup: phase={phase}, day={event_day}, "
                       f"siege={sched.get('siegeCount', 0)}, completed={completed}")
         except Exception:
@@ -465,12 +650,18 @@ class SiegeNightCog(commands.Cog):
             f"\U0001f4ca Sieges Completed: **{completed}**",
             bridge_line(lua_bridge.siege_bridge_info(status)),
         ]
+        source = source_line(sched)
+        if source:
+            lines.append(source)
 
-        await interaction.followup.send(embed=discord.Embed(
+        embed = discord.Embed(
             title="\U0001f4cb Siege Night Status",
             description="\n".join(lines),
             colour=discord.Colour.red() if phase == "active" else discord.Colour.blue(),
-        ))
+        )
+        for name, value in status_fields(status):
+            embed.add_field(name=name, value=value, inline=False)
+        await interaction.followup.send(embed=embed)
 
     # ── /siegestart, /siegestop, /siegeschedule ─────────────────────────
     # BLib's bridge (blib-admin) checks every command against Siege Night's
