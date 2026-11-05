@@ -159,16 +159,16 @@ _PART_LABELS = {
     "upperleg_r": "Right thigh", "lowerleg_r": "Right shin", "foot_r": "Right foot",
 }
 
-# Approximate town bounds on the Knox County map (x0, y0, x1, y1). A death
-# outside all of them shows plain coordinates.
+# Approximate town bounds on the Knox County map (x0, y0, x1, y1) and the
+# initials the card shows. Coordinates are never shown (user, 2026-11-06).
 _TOWNS = [
-    ("Muldraugh", (10500, 9200, 11100, 10800)),
-    ("West Point", (11050, 6550, 12300, 7350)),
-    ("Riverside", (5800, 5050, 7050, 5700)),
-    ("Rosewood", (7900, 11250, 8600, 12000)),
-    ("March Ridge", (9650, 12450, 10450, 13150)),
-    ("Valley Station", (12600, 4500, 14100, 5800)),
-    ("Louisville", (11700, 900, 14700, 4500)),
+    ("MD", (10500, 9200, 11100, 10800)),   # Muldraugh
+    ("WP", (11050, 6550, 12300, 7350)),    # West Point
+    ("RS", (5800, 5050, 7050, 5700)),      # Riverside
+    ("RW", (7900, 11250, 8600, 12000)),    # Rosewood
+    ("MR", (9650, 12450, 10450, 13150)),   # March Ridge
+    ("VS", (12600, 4500, 14100, 5800)),    # Valley Station
+    ("LV", (11700, 900, 14700, 4500)),     # Louisville
 ]
 
 _MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -340,18 +340,13 @@ def town_for(x: int, y: int) -> Optional[str]:
     return None
 
 
-def format_location(position: str) -> Tuple[str, str]:
-    """(long, short) location text: "Muldraugh (X 10612, Y 9845, Floor 0)", "Muldraugh"."""
+def format_location(position: str) -> str:
+    """"Died near LV", "Died in the wilderness" or "Died somewhere in Knox County"; never coordinates."""
     pos = parse_position(position)
     if pos is None:
-        raw = (position or "").strip() or "Unknown"
-        return raw, raw
-    x, y, z = pos
-    coords = f"X {x}, Y {y}, Floor {z}"
-    town = town_for(x, y)
-    if town:
-        return f"near {town} ({coords})", f"near {town}"
-    return coords, f"{x}, {y} (F{z})"
+        return "Died somewhere in Knox County"
+    town = town_for(pos[0], pos[1])
+    return f"Died near {town}" if town else "Died in the wilderness"
 
 
 def registry_number(issued: datetime.datetime, serial: int) -> str:
@@ -613,7 +608,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
     issued = data.get("issued_at") or datetime.datetime.now(_TZ)
     issued = issued.astimezone(_TZ)
     reg_no = registry_number(issued, data.get("registry_serial") or data.get("death_count") or 0)
-    loc_long, loc_short = format_location(str(data.get("location") or ""))
+    location = format_location(str(data.get("location") or ""))
     cause_text = format_cause(cause)
     infection = ("Infected", _RED) if infected else ("Not Infected", _INK)
     discord_name = str(data.get("discord_name") or "").strip()
@@ -632,7 +627,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
         "deaths_week": (str(data.get("deaths_week") or 0), _INK),
         "death_time_irl": (f"{_MONTHS[issued.month - 1]} {issued.day}, {issued.year}   "
                            f"{issued:%H:%M} PHT", _INK),
-        "location": (loc_long, _INK),
+        "location": (location, _INK),
         "cause": (cause_text, _INK),
         "s_character_name": (character, _INK),
         "s_username": (survivor, _INK),
@@ -640,7 +635,7 @@ def render_death_card(data: Dict, avatar: Optional[bytes] = None) -> Image.Image
         "f_cause": (split_cause(cause)[0], _INK),
         "f_infection": infection,
         "death_time_game": (format_game_date(str(data.get("game_date_time") or "")) or "Unknown", _INK),
-        "d_location": (loc_short, _INK),
+        "d_location": (location, _INK),
     }
     for name, (x, y, max_w, size) in _FIELDS.items():
         text, fill = values[name]

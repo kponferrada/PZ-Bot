@@ -22,7 +22,7 @@ from discord.ext import commands, tasks
 import aegis_stats
 import death_store
 import sftp_client
-from death_card import render_death_card
+from death_card import format_location, render_death_card
 
 _TZ = datetime.timezone(datetime.timedelta(hours=8))  # PHT, as in death_store
 
@@ -181,7 +181,7 @@ class DeathLogCog(commands.Cog):
             f"🩸 Injuries: {injuries}",
             f"🧟 Zombie Kills: {kills}",
             f"⏳ Survival Time: {survived}",
-            f"📍 Location: {position}",
+            f"📍 {format_location(position)}",
             f"📅 Game Date Time: {game_date_time}",
             f"☠️ Death Counter: {death_count}",
         ]

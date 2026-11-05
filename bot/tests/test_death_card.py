@@ -81,10 +81,11 @@ def test_format_game_date():
 
 
 def test_format_location():
-    assert dc.format_location("X: 10612.4, Y: 9845.9, Z: 0") == (
-        "near Muldraugh (X 10612, Y 9846, Floor 0)", "near Muldraugh")
-    assert dc.format_location("X: 300, Y: 300, Z: 1") == ("X 300, Y 300, Floor 1", "300, 300 (F1)")
-    assert dc.format_location("") == ("Unknown", "Unknown")
+    assert dc.format_location("X: 10612.4, Y: 9845.9, Z: 0") == "Died near MD"
+    assert dc.format_location("X: 13000, Y: 2000, Z: 2") == "Died near LV"
+    assert dc.format_location("X: 300, Y: 300, Z: 1") == "Died in the wilderness"
+    assert dc.format_location("") == "Died somewhere in Knox County"
+    assert dc.format_location("somewhere odd") == "Died somewhere in Knox County"
 
 
 def test_registry_number():
