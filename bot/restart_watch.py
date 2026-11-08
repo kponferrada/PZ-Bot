@@ -20,9 +20,12 @@ Stopping a restart:
     brings it back).
   - A scheduled restart that comes within SCHEDULED_SKIP_AFTER_UPDATE_MINUTES
     of a mod-update restart is skipped; the schedule moves on to the next slot.
-  - A scheduled or mod-update restart that comes while a siege night is under
-    way (and players are on) waits for the siege to end, then runs; at most
-    SIEGE_RESTART_MAX_WAIT_MINUTES (0 = don't wait). Admin restarts don't wait.
+  - A countdown restart (scheduled, mod update, /restart, /forcemodupdate)
+    that comes while a siege night is under way or due within
+    SIEGE_RESTART_LEAD_MINUTES (default 10), with players on, waits for the
+    siege to end, then runs; at most SIEGE_RESTART_MAX_WAIT_MINUTES (0 = don't
+    wait). A countdown already running pauses the same way when a siege starts,
+    until players are being kicked. /restartnow never waits.
 The last mod-update restart and an admin-skipped slot are kept in
 restart_state.json so a bot restart doesn't forget them.
 """
@@ -55,6 +58,9 @@ MAX_DEFER_MINUTES = 720
 DEFAULT_SIEGE_MAX_WAIT = 180             # minutes a restart waits for a siege night to end (0 = don't wait)
 SIEGE_POLL_SECONDS = 30                  # how often a waiting restart re-reads the siege status
 SIEGE_STATUS_MAX_AGE = 120               # seconds: an older siege status file doesn't hold a restart
+DEFAULT_SIEGE_LEAD = 10                  # minutes: a siege due this soon holds a restart too
+SIEGE_DUE_GRACE = 300                    # seconds a siege still counts as due after its estimated start
+COUNTDOWN_SIEGE_CHECK = 15               # seconds between siege checks during a countdown
 _STATE_FILE = Path(__file__).parent / "restart_state.json"
 
 # What started a restart. Only an automatic mod-update restart can't be cancelled.
@@ -65,8 +71,23 @@ KIND_LABELS = {
     "manual": "Admin restart",
 }
 UPDATE_KINDS = ("mod_update", "forced_update")
-# Automatic restarts wait for a siege night to end; an admin's restart doesn't.
-SIEGE_WAIT_KINDS = ("mod_update", "scheduled")
+# Every countdown restart waits for a siege night (/restartnow is "manual" but
+# never goes through _start_restart, so it doesn't).
+SIEGE_WAIT_KINDS = ("mod_update", "scheduled", "manual", "forced_update")
+
+
+class _SiegePause(Exception):
+    """A siege night began during a restart countdown: pause it."""
+
+
+def siege_due_soon(eta: float | None, now: float, lead_s: float,
+                   grace_s: float = SIEGE_DUE_GRACE) -> bool:
+    """True when a siege estimated to start at `eta` (epoch) is at most `lead_s`
+    seconds away, or started less than `grace_s` ago without being seen yet
+    (the estimate drifts with the game clock). No estimate = not due."""
+    if not eta or lead_s <= 0:
+        return False
+    return -grace_s <= eta - now <= lead_s
 
 
 def siege_in_progress(status: dict | None, now: float | None = None,
@@ -141,6 +162,7 @@ class RestartWatch(commands.Cog):
         self._skip_after_update = 60 * int(os.getenv("SCHEDULED_SKIP_AFTER_UPDATE_MINUTES", str(DEFAULT_SKIP_AFTER_UPDATE)) or 0)
         self._update_skip_key = None  # slot already announced as skipped (recent mod update)
         self._siege_max_wait = 60 * int(os.getenv("SIEGE_RESTART_MAX_WAIT_MINUTES", str(DEFAULT_SIEGE_MAX_WAIT)) or 0)
+        self._siege_lead = 60 * int(os.getenv("SIEGE_RESTART_LEAD_MINUTES", str(DEFAULT_SIEGE_LEAD)) or 0)
 
         self._checker = ModChecker(bot)
         self._seeded = False
@@ -152,6 +174,9 @@ class RestartWatch(commands.Cog):
         self._deferred_kind = None # kind that resumes when the deferral ends (None = only a pause)
         self._deferred_slot = None # schedule slot a deferred scheduled restart belongs to
         self._siege_hold = False   # the deferral is a restart waiting for a siege night to end
+        self._restart_slot = None  # schedule slot the running restart stands for
+        self._restart_waited = False  # the running restart already waited for a siege: never pauses again
+        self._siege_eta = None     # last estimated real start of the next siege (from the dashboard)
         self._kick_all_task = None # pending /kickall (notice sent, kick after KICK_ALL_DELAY)
         # Persisted (restart_state.json): last mod-update restart, admin-skipped slot.
         self._last_update_restart = 0.0
@@ -163,7 +188,8 @@ class RestartWatch(commands.Cog):
               f"countdown {self._restart_delay}s (notify T-{self._kick_notify_at}s, save T-{self._save_at}s, kick T-{self._kick_at}s); "
               f"scheduled restarts @ {self._schedule_hours} UTC (warn {self._scheduled_warn}s, "
               f"skipped within {self._skip_after_update // 60} min after a mod update); "
-              f"waits up to {self._siege_max_wait // 60} min for a siege night; "
+              f"waits up to {self._siege_max_wait // 60} min for a siege night "
+              f"(or one due within {self._siege_lead // 60} min); "
               f"announce ch={self._channel_id or 'notification'}, role={self._role_id or 'none'}")
 
     def cog_unload(self):
@@ -341,9 +367,18 @@ class RestartWatch(commands.Cog):
         notified = False
         saved = False
         kicked = False
+        # A restart countdown (not maintenance) pauses when a siege starts, until the kick.
+        watch_siege = (finish is None and self._restart_kind in SIEGE_WAIT_KINDS
+                       and not self._restart_waited)
+        next_siege_check = time.monotonic() + COUNTDOWN_SIEGE_CHECK
         while remaining > 0:
             await asyncio.sleep(1)
             remaining = max(0.0, deadline - time.monotonic())
+            if watch_siege and not kicked and time.monotonic() >= next_siege_check:
+                next_siege_check = time.monotonic() + COUNTDOWN_SIEGE_CHECK
+                if await self._siege_holds_restart(timeout=5.0):
+                    raise _SiegePause()
+                remaining = max(0.0, deadline - time.monotonic())
             if not notified and remaining <= self._kick_notify_at:
                 notified = True
                 await self._announce_kick_notification()
@@ -369,6 +404,13 @@ class RestartWatch(commands.Cog):
             await self._run_countdown(duration)
         except asyncio.CancelledError:
             raise
+        except _SiegePause:
+            kind, slot = self._restart_kind, self._restart_slot
+            print(f"[RestartWatch] {KIND_LABELS.get(kind, 'Restart')} countdown paused: siege night")
+            self._restart_task = None  # this task: _hold_for_siege must not see a countdown running
+            self.bot.state.expecting_restart = False
+            self.bot.state.restart_shutdown_started = False
+            await self._hold_for_siege(kind, slot, paused=True)
         except Exception as e:
             print(f"[RestartWatch] countdown failed: {e}")
             self.bot.state.expecting_restart = False
@@ -407,6 +449,8 @@ class RestartWatch(commands.Cog):
         # set) so two concurrent triggers can't both start a countdown.
         self.bot.state.expect_restart()
         self._restart_kind = kind
+        self._restart_slot = slot
+        self._restart_waited = not wait_for_siege
         if not await self._server_responsive():
             print(f"[RestartWatch] Restart skipped — server not responding to RCON ({reason}).")
             # Roll back the lock we just claimed.
@@ -496,25 +540,36 @@ class RestartWatch(commands.Cog):
 
     # ---- Waiting for a siege night -------------------------------------------
 
-    async def _siege_holds_restart(self) -> bool:
-        """True when an automatic restart should wait: waiting is on, a siege
-        night is under way (fresh status file) and players are on. A failed read
-        never holds a restart."""
+    def _siege_due_soon(self) -> bool:
+        """A siege is due within SIEGE_RESTART_LEAD_MINUTES, by the dashboard's
+        estimate of its real start (the last one seen is kept, so a siege whose
+        estimated start just passed still counts for SIEGE_DUE_GRACE)."""
+        cog = self.bot.get_cog("ServerStatusCog")
+        eta = cog.next_siege_at() if cog is not None and hasattr(cog, "next_siege_at") else None
+        if eta:
+            self._siege_eta = eta
+        return siege_due_soon(self._siege_eta, time.time(), self._siege_lead)
+
+    async def _siege_holds_restart(self, timeout: float | None = None) -> bool:
+        """True when a restart should wait: waiting is on, a siege night is under
+        way (fresh status file) or due within the lead time, and players are on.
+        A failed or slow (`timeout` seconds) read never holds a restart."""
         if self._siege_max_wait <= 0:
             return False
         try:
-            status = await lua_bridge.read_siege_status()
+            read = lua_bridge.read_siege_status()
+            status = await (asyncio.wait_for(read, timeout) if timeout else read)
         except Exception as e:
-            print(f"[RestartWatch] siege status unreadable, not waiting: {e}")
-            return False
-        if not siege_in_progress(status):
+            print(f"[RestartWatch] siege status unreadable, not waiting: {e!r}")
+            status = None
+        if not siege_in_progress(status) and not self._siege_due_soon():
             return False
         try:
             return await self._get_player_count() > 0
         except Exception:
             return True  # a siege is on and the count is unknown: assume players
 
-    async def _hold_for_siege(self, kind: str, slot: int | None) -> None:
+    async def _hold_for_siege(self, kind: str, slot: int | None, paused: bool = False) -> None:
         """Hold a restart of `kind` until the siege night ends (at most
         SIEGE_RESTART_MAX_WAIT_MINUTES). It is a deferral: the checks skip while
         it lasts, /restartstatus shows it, /deferrestart replaces it and
@@ -529,12 +584,14 @@ class RestartWatch(commands.Cog):
         label = KIND_LABELS[kind]
         print(f"[RestartWatch] {label} waits for the siege night to end")
         if self.bot.features.is_enabled("restarts"):
+            why = "a siege night has begun" if paused else "a siege night is under way or about to start"
             await self._announce(
-                f"⏸️ {label} postponed: a siege night is under way. "
+                f"⏸️ {label} {'countdown paused' if paused else 'postponed'}: {why}. "
                 f"The server restarts once the siege is over (at the latest <t:{int(self._defer_until)}:R>).",
                 discord.Colour.orange(),
             )
-            await self._servermsg("Restart postponed until the siege night is over.")
+            await self._servermsg("Restart paused until the siege night is over." if paused
+                                  else "Restart postponed until the siege night is over.")
         self._defer_task = asyncio.create_task(self._wait_out_siege(kind))
 
     async def _wait_out_siege(self, kind: str) -> None:
@@ -941,6 +998,12 @@ class RestartWatch(commands.Cog):
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
                 ephemeral=True,
             )
+        elif self._siege_hold:
+            await interaction.followup.send(
+                "⏸️ Held: a siege night is under way or about to start; it restarts once the siege is over. "
+                "`/restartnow` restarts anyway, `/cancelrestart` drops it.",
+                ephemeral=True,
+            )
 
     @app_commands.command(name="restart", description="Force a server restart now (in-game announcement + countdown).")
     @admin_only()
@@ -954,6 +1017,12 @@ class RestartWatch(commands.Cog):
         ):
             await interaction.followup.send(
                 "⚠️ Restart skipped — a restart is already in progress or the server is not responding to RCON.",
+                ephemeral=True,
+            )
+        elif self._siege_hold:
+            await interaction.followup.send(
+                "⏸️ Held: a siege night is under way or about to start; it restarts once the siege is over. "
+                "`/restartnow` restarts anyway, `/cancelrestart` drops it.",
                 ephemeral=True,
             )
 

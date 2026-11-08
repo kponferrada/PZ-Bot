@@ -632,6 +632,11 @@ class ServerStatusCog(commands.Cog):
         # Remembered only once it is posted, so a failed post is retried next loop.
         self._card_key = key if self._message_id else None
 
+    def next_siege_at(self) -> float | None:
+        """The next siege's estimated real start (epoch), as last worked out for
+        the dashboard, or None. Read by restart_watch to hold restarts."""
+        return self._siege_at[1] if self._siege_at else None
+
     async def _siege_time(self, server_online: bool, world: dict, siege: dict) -> float | None:
         """The next siege's real-world start, worked out once and then kept.
 
