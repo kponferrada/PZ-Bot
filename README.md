@@ -115,6 +115,13 @@ Stopping or moving a restart:
 - A scheduled restart that falls within `SCHEDULED_SKIP_AFTER_UPDATE_MINUTES`
   (default 60, 0 = off) after a mod-update restart is skipped, with a notice;
   the next scheduled hour runs as normal.
+- A scheduled or mod-update restart that comes while a siege night is under
+  way (the siege status file says `active` or an open night, and players are on)
+  waits for the siege to end, then runs, with a notice in Discord and in game.
+  It waits at most `SIEGE_RESTART_MAX_WAIT_MINUTES` (default 180, 0 = off); a
+  status file older than 2 minutes doesn't hold it. Admin restarts don't wait.
+  The wait is a deferral: `/deferrestart` replaces it and `/cancelrestart`
+  cancels a scheduled one.
 - `/restartstatus` shows what is running, any deferral, the next two scheduled
   restarts (and whether they are skipped) and the last mod-update restart.
 
