@@ -118,7 +118,7 @@ Stopping or moving a restart:
 - Siege nights: a countdown restart (scheduled, mod update, `/restart`,
   `/forcemodupdate`) doesn't start while a siege night is under way (the siege
   status file says `active` or an open night) or due within
-  `SIEGE_RESTART_LEAD_MINUTES` (default 10, from the status dashboard's estimate
+  `SIEGE_RESTART_LEAD_MINUTES` (default 1, from the status dashboard's estimate
   of the siege's real start), with players on. A countdown already running
   pauses when a siege starts, until players are being kicked. Either way the
   restart waits for the siege to end, then runs, with notices in Discord and in

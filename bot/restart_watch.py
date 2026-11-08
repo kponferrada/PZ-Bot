@@ -22,7 +22,7 @@ Stopping a restart:
     of a mod-update restart is skipped; the schedule moves on to the next slot.
   - A countdown restart (scheduled, mod update, /restart, /forcemodupdate)
     that comes while a siege night is under way or due within
-    SIEGE_RESTART_LEAD_MINUTES (default 10), with players on, waits for the
+    SIEGE_RESTART_LEAD_MINUTES (default 1), with players on, waits for the
     siege to end, then runs; at most SIEGE_RESTART_MAX_WAIT_MINUTES (0 = don't
     wait). A countdown already running pauses the same way when a siege starts,
     until players are being kicked. /restartnow never waits.
@@ -58,7 +58,7 @@ MAX_DEFER_MINUTES = 720
 DEFAULT_SIEGE_MAX_WAIT = 180             # minutes a restart waits for a siege night to end (0 = don't wait)
 SIEGE_POLL_SECONDS = 30                  # how often a waiting restart re-reads the siege status
 SIEGE_STATUS_MAX_AGE = 120               # seconds: an older siege status file doesn't hold a restart
-DEFAULT_SIEGE_LEAD = 10                  # minutes: a siege due this soon holds a restart too
+DEFAULT_SIEGE_LEAD = 1                   # minutes: a siege due this soon holds a restart too
 SIEGE_DUE_GRACE = 300                    # seconds a siege still counts as due after its estimated start
 COUNTDOWN_SIEGE_CHECK = 15               # seconds between siege checks during a countdown
 _STATE_FILE = Path(__file__).parent / "restart_state.json"
