@@ -26,8 +26,10 @@ BLib2 Admin's bridge; lists keyed p1.., k1.., s1.. with a `count`):
   last     the last siege's leaderboard: day, no, kills, players, survived, and
            every participant { name, kills, status = survived|in|dead|left }
 A new `last` posts a results card (top killers, who survived the whole night,
-who fell or left); /siegestatus shows the night's participants and the
-all-sieges leaderboard. Without Barangay Tales these sections are absent and
+who fell or left); while a night is open, every participant who falls or leaves
+is posted as it happens (`fallen_embed`, one card per poll, no ping; seeded at
+start so a bot restart doesn't post them again); /siegestatus shows the night's
+participants and the all-sieges leaderboard. Without Barangay Tales these sections are absent and
 everything works as before.
 
 Deduplication ensures each phase/wave is only announced once per siege, even
@@ -130,6 +132,55 @@ def out_lines(rows: list[dict]) -> list[str]:
     """Dead / left participants: 💀 dead, 🚪 left."""
     return [f"{'💀' if r.get('status') == 'dead' else '🚪'} ~~{_name(r)}~~ — "
             f"{_int(r.get('kills'))} kills ({'dead' if r.get('status') == 'dead' else 'left'})" for r in rows]
+
+
+def night_number(status: dict | None) -> int:
+    """The open night's number (0 when none is open)."""
+    night = (status or {}).get("night")
+    return _int(night.get("no")) if isinstance(night, dict) and night.get("open") else 0
+
+
+def fallen_key(no: int, row: dict) -> tuple:
+    """One participant's fall in one night (a player brought back by staff and out again is not posted twice)."""
+    return (no, str(row.get("name") or "?"))
+
+
+def new_fallen(status: dict | None, seen: set) -> list[dict]:
+    """Participants of the open night who fell or left since `seen` (keys added to it), in the file's order."""
+    parts = night_participants(status)
+    if not parts:
+        return []
+    no = night_number(status)
+    out = []
+    for row in keyed_list((status or {}).get("night"), "p"):
+        if row.get("status") not in ("dead", "left"):
+            continue
+        key = fallen_key(no, row)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def fallen_embed(rows: list[dict], status: dict | None) -> discord.Embed:
+    """The siege channel's notice for participants who just fell or left."""
+    no = night_number(status)
+    still = night_participants(status)
+    standing = len(still[0]) if still else 0
+    night = f"Siege Night #{no:02d}" if no else "Siege Night"
+    if len(rows) == 1:
+        r = rows[0]
+        verb = "has fallen" if r.get("status") == "dead" else "left the siege"
+        title = f"{'💀' if r.get('status') == 'dead' else '🚪'} {night} — {_name(r)} {verb}"
+        desc = f"**{_name(r)}** — {_int(r.get('kills'))} kills."
+    else:
+        dead = sum(1 for r in rows if r.get("status") == "dead")
+        title = f"💀 {night} — {len(rows)} " + ("survivors fell" if dead == len(rows) else "survivors are out")
+        desc = _fit(out_lines(rows))
+    embed = discord.Embed(title=title, description=desc, colour=discord.Colour.dark_grey())
+    embed.set_footer(text=f"Still standing: {standing}")
+    return embed
 
 
 def results_fields(last: dict) -> list[tuple[str, str]]:
@@ -326,6 +377,7 @@ class SiegeNightCog(commands.Cog):
         self._active_seen_at: float | None = None        # monotonic time this siege was first seen active
         self._last_poller_key = None
         self._announced_results: set[tuple] = set()      # (day, no) of the last-siege leaderboards posted
+        self._announced_fallen: set[tuple] = set()       # (night no, name) of the participants posted as out
 
     def _ping_role(self) -> int:
         """The role Siege Night notices ping: EVENT_PING_ROLE_ID (the "Event
@@ -387,6 +439,13 @@ class SiegeNightCog(commands.Cog):
                 if self.bot.features.is_enabled("siege_night"):
                     await self.bot.send_to_channel(channel, 0, embed)
                 print(f"[SiegeNight] Results posted: day {last.get('day')}, siege {last.get('no')}")
+
+            # The night under way: who fell or left since the last poll (Barangay Siege / BT2's `night`)
+            fallen = new_fallen(status, self._announced_fallen)
+            if fallen:
+                if self.bot.features.is_enabled("siege_night"):
+                    await self.bot.send_to_channel(channel, 0, fallen_embed(fallen, status))
+                print(f"[SiegeNight] Out of the night: {', '.join(str(r.get('name')) for r in fallen)}")
 
             if phase == "warning":
                 if event_day and event_day not in self._announced_warning_days:
@@ -587,6 +646,7 @@ class SiegeNightCog(commands.Cog):
                 last = last_siege(status)
                 if last:
                     self._announced_results.add(_results_key(last))
+                new_fallen(status, self._announced_fallen)       # (already out before the bot started)
                 print(f"[SiegeNight] Seeded dedup: phase={phase}, day={event_day}, "
                       f"siege={sched.get('siegeCount', 0)}, completed={completed}")
         except Exception:

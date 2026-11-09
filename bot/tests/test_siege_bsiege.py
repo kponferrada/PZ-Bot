@@ -48,6 +48,32 @@ def test_night_participants_in_dead_and_left():
     assert {r["name"]: r["status"] for r in out} == {"Ghost": "dead", "Nomad": "left"}
 
 
+def test_falls_posted_once_as_they_happen():
+    status = _status("siege_night_status_bsiege_night.txt")
+    seen = set()
+    rows = siege_night.new_fallen(status, seen)
+    assert {r["name"]: r["status"] for r in rows} == {"Ghost": "dead", "Nomad": "left"}
+    assert siege_night.new_fallen(status, seen) == []            # the next poll: nothing new
+    embed = siege_night.fallen_embed(rows, status)
+    assert "Siege Night #01" in embed.title and "2 survivors are out" in embed.title
+    assert "Ghost" in embed.description and "Nomad" in embed.description
+    assert embed.footer.text == "Still standing: 3"
+
+
+def test_one_fall_has_its_own_title():
+    status = _status("siege_night_status_bsiege_night.txt")
+    seen = {siege_night.fallen_key(siege_night.night_number(status), {"name": "Nomad"})}
+    rows = siege_night.new_fallen(status, seen)
+    assert [r["name"] for r in rows] == ["Ghost"]
+    assert siege_night.fallen_embed(rows, status).title.endswith("Ghost has fallen")
+
+
+def test_no_falls_without_an_open_night():
+    assert siege_night.new_fallen(_status("siege_night_status_bsiege_after.txt"), set()) == []
+    assert siege_night.new_fallen({}, set()) == []
+    assert siege_night.new_fallen(None, set()) == []
+
+
 def test_status_fields_this_siege_and_all_sieges():
     fields = dict(siege_night.status_fields(_status("siege_night_status_bsiege_night.txt")))
     assert "Spawned" in fields["\U0001f9df This Siege"]
