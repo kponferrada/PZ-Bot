@@ -31,12 +31,13 @@ on boot.
 |---|---|---|---|
 | Join / leave / welcome banners, split-screen players | `player_tracker.py`, `player_banner.py` | `Logs/*_user.txt` | `join_leave` |
 | Death certificates (portrait from the `/linkme` Discord avatar, injury diagram, cause, survival time, day/week counts) | `death_log.py`, `death_card.py`, `death_store.py` | Death Log mod (`2972685375`) | `deaths` |
-| Auto-updating status dashboard (embed or rendered card) | `server_status.py`, `status_card.py`, `game_calendar.py` | Jeeve's Integration | `status_dashboard` |
+| Auto-updating status dashboard (embed or rendered card) | `server_status.py`, `status_card.py`, `game_calendar.py` | BLib2 Admin (*Discord bot bridge*) or Jeeve's Integration | `status_dashboard` |
 | Server up / restarting / down banners | `main.py` (`monitor_server_state`) | RCON | `server_up_down` |
 | One-line "Server is down · restarting" / "Server is back up" notices in extra channels (`STATUS_NOTICE_CHANNEL_IDS`): one "down" per outage, at once for a restart the bot started, otherwise after 60 s offline (brief blips post nothing); "up" only after a "down". The time is a Discord timestamp | `main.py`, `status_notice.py` | RCON | `status_notices` |
-| In-game ↔ Discord chat relay | `chat_relay.py` | Jeeve's Integration | `chat_relay` |
-| In-game name colours from the Barangay Tales reputation ladder (or Discord roles) | `rank_sync.py`, `bt_progression.py` | Jeeve's Integration, Barangay Tales | — |
+| In-game ↔ Discord chat relay | `chat_relay.py` | BLib2 Admin or Jeeve's Integration | `chat_relay` |
+| In-game name colours from the Barangay Tales reputation ladder (or Discord roles) | `rank_sync.py`, `bt_progression.py` | BLib2 Admin or Jeeve's Integration, Barangay Tales | — |
 | Siege Night warnings, start, per-wave, who falls or leaves as it happens, end, each siege's results (with Barangay Tales 2 / Barangay Siege); admin control | `siege_night.py` | Siege Night (`3669589584`) + BLib Admin (BLib 0.8+, setting *Siege Night bot bridge*); the old `siege-night-bridge` mod still works for status, but never answers commands | `siege_night` |
+| In-game admin from Discord: give items / XP / tokens (held for the next login when the player is offline), heal, unstuck, whisper, players with positions, and the game's own admin commands (god mode, invisible, no-clip, teleport, kick, ban, horde, weather, helicopter, vehicles, save, any other with `/gamecmd`) | `game_admin.py`, `lua_bridge.py` | BLib2 Admin (*Discord bot bridge*) for the first group, RCON for the rest | — |
 | Airdrop / supply-event notices and triggers. A personal drop pings the player it landed near if they are linked (`/linkme`); supply drop events ping `EVENT_PING_ROLE_ID` | `jeeves_drops.py` | Jeeve's Drops | `airdrops` |
 | Jamie's Fortune jackpot announcements | `jamies_fortune.py` | Jamie's Fortune | `jackpots` |
 | Jamie's Collapse announcements as cards: event start, results, reminders, event nights, votes, season champions, live moments, leaderboards and the Blood Run. Each has a subtitle, stat blocks (players still in, next collapse as a live countdown, zone status), medal kill boards and the MVP on results; vote options show as coloured buttons (vote in game). Players named in a post who are linked (`/linkme`) are pinged in place of their name (not on leaderboards or the "Season so far" line) | `jamies_collapse.py` | Jamie's Collapse (`3821310744`; its admin panel's Discord switch on) | `collapse`; pings: `collapse_mentions` |
@@ -71,6 +72,8 @@ Admin commands require the Discord role named by `DEFAULT_ROLE` (default `Admin`
 | Server control | `/msg`, `/announce`, `/playsound`, `/teleport`, `/setaccesslevel`, `/kickall [reason]` (notice now, kick everyone 1 min later; `cancel: True` stops it), `/stop` |
 | Restarts | `/restart` (countdown), `/restartnow` (kick in 30 s), `/deferrestart <minutes>` (max 720, auto-resumes), `/cancelrestart [restore]`, `/restartstatus`, `/forcemodupdate`, `/maintenance [reason] [minutes] [end]` (countdown and kick, no restart) |
 | Ranks and links | `/setrank`, `/syncranks`, `/linkname`, `/unlinkname`, `/unlinkall`, `/listlinks` |
+| In game (BLib2 Admin) | `/giveitem <player> <item> [count] [offline]`, `/finditem <query>`, `/givexp`, `/givetokens`, `/pending`, `/heal`, `/unstuck`, `/whisper`, `/gameplayers`, `/whereis` |
+| In game (RCON) | `/tpto <player> <x> <y> [z]`, `/godmode`, `/invisible`, `/noclip`, `/kick`, `/ban`, `/unban`, `/horde <count> [player]`, `/weather`, `/chopper`, `/addvehicle`, `/save`, `/gamecmd <command>` (any in-game admin command as typed in game; `quit` refused) |
 | Siege Night | `/siegestatus`, `/siegestart`, `/siegestop`, `/siegeschedule <day>` |
 | Drops | `/airdrop [player] [crate]`, `/airdropstatus`, `/supplyevent`, `/supplyeventstatus` |
 | Whitelist | `/whitelistsetup`, `/whitelistadd`, `/whitelistmodify`, `/whitelistlist`, `/whitelistremove`, `/whitelistcancel`, `/whitelistrolesync` |
@@ -136,7 +139,7 @@ The last mod-update restart and a skipped scheduled slot are kept in
 
 `/adminpanel` posts the control panel into `ADMIN_PANEL_CHANNEL_ID` (or the
 channel it is run in): one card per group (Restarts, Server, Players & Ranks,
-Whitelist, Events, Bot), with the buttons inside the card. Running it again
+Whitelist, Events, In game: give & help, In game: moderate, In game: world, Bot), with the buttons inside the card. Running it again
 replaces the bot's earlier panel cards in that channel.
 
 Each button runs the admin slash command of the same name. A command with
@@ -408,6 +411,7 @@ the ladder rank too. `RANK_SOURCE=roles` restores the old role-based ranks.
 - **SFTP:** read and **write** on `Lua/` (bridge features), read on `Logs/`, `Server/`, `db/` and the Workshop folder. Without write access only the read-only features work (dashboard, tracking, roster).
 - **Mods:** install the ones for the features you want (see the Features table).
 - **Siege Night with Barangay Tales 2:** BT2 adds its own sections to the bridge's status file. After each siege night the bot posts a **Siege Night #NN Results** card (no ping): the top killers, who survived the whole night (from the start hour to dawn), who came late and stayed, and who died or left. The "tonight" notice carries the siege number. While a night is on, each poll (15 s) posts who fell or left since the last one (one card, no ping; anyone already out when the bot starts is not posted). `/siegestatus` adds, during a siege, everyone still standing with their kills and who died or left; and always the all-sieges leaderboard (top killers, most nights survived), the world's total zombie kills and the last siege. Without BT2 nothing changes.
+- **BLib2 Admin's Discord bot bridge** (replaces Jeeve's Integration): blib2-admin with the setting *Discord bot bridge* on (default). It writes `Lua/blib2_discord_status.txt` (world, players with positions, item lookups, answers) and reads `blib2_discord_commands.txt`, `blib2_discord_chat.txt` and the bot's `blib2_discord_ranks.txt`. With `GAME_BRIDGE=auto` (default) the bot uses it while that status file is fresh and falls back to Jeeve's files otherwise; `GAME_BRIDGE=blib2` / `jeeves` pins one. The `/give*`, `/heal`, `/unstuck`, `/whisper`, `/finditem`, `/pending`, `/whereis` and `/gameplayers` commands need it; every one is checked on the server and kept in BLib2's staff log under the Discord name. In game the alert sounds are the game's own (6; Jeeve's 7-11 map onto them) and the restart / kick countdown lines play them by themselves.
 - **Siege Night:** BLib Admin's Siege Night bot bridge replaces the `siege-night-bridge` mod; turn that mod off (while it is on, BLib's bridge stays off). `/siegestart`, `/siegestop` and `/siegeschedule` then show the server's answer: done, or why not (a siege already running, nobody online, a past day, ...). Each command is checked on the server and kept in BLib's staff log under the Discord name.
 
 Indifferent Broccoli layout:

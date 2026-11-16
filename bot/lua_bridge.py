@@ -5,17 +5,24 @@ from the game server. The Jeeves mods read/write these files in `Zomboid/Lua/`;
 they cannot tell whether the bytes arrived from a local process or over SFTP.
 
 Files:
-  bot -> mod (commands) : jeeves_commands.txt, jeeves_chat.txt, siege_night_commands.txt
-  mod -> bot (status)   : jeeves_world_status.txt, jeeves_drops_status.txt,
+  bot -> mod (commands) : jeeves_commands.txt, jeeves_chat.txt, siege_night_commands.txt,
+                          blib2_discord_commands.txt, blib2_discord_chat.txt, blib2_discord_ranks.txt
+  mod -> bot (status)   : jeeves_world_status.txt, jeeves_drops_status.txt, blib2_discord_status.txt,
                           jeeves_supply_event_status.txt, siege_night_status.txt,
                           JamiesFortune_JackpotLog.txt (tailed by jamies_fortune),
                           JamiesCollapse_discord.log (tailed by jamies_collapse)
+
+BLib2 Admin's Discord bridge (blib2-admin `Discord.lua`, protocol 2) replaces
+Jeeve's Integration: with GAME_BRIDGE=auto (default) chat, broadcasts, sounds,
+ranks and the world status go to BLib2 while its status file is fresh, else to
+the jeeves_* files; GAME_BRIDGE=blib2 / jeeves pins one.
 
 > These are `.txt`, not `.lua` — Build 42.20 restricted which extensions
 > `getFileWriter` accepts. Requires the current Workshop versions of the Jeeves mods.
 """
 
 import os
+import re
 import time
 import asyncio
 from pathlib import PurePosixPath
@@ -31,6 +38,11 @@ _siege_command_id: int = 0
 _write_lock = asyncio.Lock()
 _chat_lock = asyncio.Lock()
 _siege_write_lock = asyncio.Lock()
+_discord_command_id: int = 0
+_discord_chat_id: int = 0
+_discord_lock = asyncio.Lock()
+_discord_chat_lock = asyncio.Lock()
+_mode: str = "auto"            # GAME_BRIDGE: auto | blib2 | jeeves
 
 COMMAND_FILE = "jeeves_commands.txt"
 CHAT_FILE = "jeeves_chat.txt"
@@ -41,18 +53,26 @@ SIEGE_STATUS_FILE = "siege_night_status.txt"
 SIEGE_COMMAND_FILE = "siege_night_commands.txt"
 JAMIES_JACKPOT_FILE = "JamiesFortune_JackpotLog.txt"
 JAMIES_COLLAPSE_FILE = "JamiesCollapse_discord.log"
+DISCORD_STATUS_FILE = "blib2_discord_status.txt"
+DISCORD_COMMAND_FILE = "blib2_discord_commands.txt"
+DISCORD_CHAT_FILE = "blib2_discord_chat.txt"
+DISCORD_RANKS_FILE = "blib2_discord_ranks.txt"
 
 
 def init(bot) -> str:
     """Initialize the bridge from bot.config.SFTP_LUA_DIR (a remote path)."""
-    global _lua_dir
+    global _lua_dir, _mode
+    _mode = str(getattr(bot.config, "GAME_BRIDGE", "auto") or "auto").lower()
+    if _mode not in ("auto", "blib2", "jeeves"):
+        print(f"[LuaBridge] WARNING: GAME_BRIDGE={_mode!r} unknown, using auto")
+        _mode = "auto"
     _lua_dir = getattr(bot.config, "SFTP_LUA_DIR", None) or os.getenv("SFTP_LUA_DIR")
     if not _lua_dir:
         _lua_dir = "Lua"
         print("[LuaBridge] WARNING: SFTP_LUA_DIR not set, using remote 'Lua' (relative)")
     # Normalize to a POSIX remote path (forward slashes) regardless of the bot host OS.
     _lua_dir = str(PurePosixPath(_lua_dir))
-    print(f"[LuaBridge] Initialized — remote Lua dir: {_lua_dir}")
+    print(f"[LuaBridge] Initialized — remote Lua dir: {_lua_dir}, game bridge: {_mode}")
     return _lua_dir
 
 
@@ -164,18 +184,30 @@ async def write_chat(author: str, message: str) -> bool:
 # ---- convenience wrappers -----------------------------------------------------
 
 async def broadcast(message: str, sound_only: bool = False) -> bool:
+    if await uses_blib2():
+        if sound_only:
+            # the RCON servermsg shows it; BLib2's client plays the countdown sound off that line itself
+            return True
+        return (await discord_command("broadcast", wait=0, message=message))["sent"]
     return await write_command("broadcast", message=message, soundOnly=sound_only)
 
 
 async def chat_relay(author: str, message: str) -> bool:
+    if await uses_blib2():
+        return await write_discord_chat(author, message)
     return await write_chat(author, message)
 
 
 async def playsound(sound_id: int, message: str | None = None) -> bool:
+    if await uses_blib2():
+        return (await discord_command("playsound", wait=0, sound=blib2_sound(sound_id),
+                                      message=message or None))["sent"]
     return await write_command("playsound", sound=sound_id, message=message or "")
 
 
 async def rank_push() -> bool:
+    if await uses_blib2():
+        return (await discord_command("ranks", wait=0))["sent"]
     return await write_command("rankpush")
 
 
@@ -501,6 +533,10 @@ async def read_drops_status() -> dict | None:
 
 
 async def read_world_status() -> dict | None:
+    if await uses_blib2():
+        status = await read_discord_status()
+        world = (status or {}).get("world")
+        return world if isinstance(world, dict) else None
     return await _read_status(WORLD_STATUS_FILE)
 
 
@@ -518,7 +554,7 @@ async def read_world_status_with_age() -> tuple[dict | None, float | None]:
     if _lua_dir is None:
         return None, None
     sftp = sftp_client.get()
-    path = _path(WORLD_STATUS_FILE)
+    path = _path(DISCORD_STATUS_FILE if await uses_blib2() else WORLD_STATUS_FILE)
     st = await sftp.stat(path)
     if st is None:
         return None, None
@@ -551,3 +587,143 @@ def _mtime_age(path: str, mtime: float, now_mono: float | None = None,
         _mtime_seen[path] = (mtime, now_mono)
         return 0.0
     return max(0.0, now_mono - prev[1])
+
+
+# ---- BLib2 Admin's Discord bridge (protocol 2) ----------------------------------
+# blib2-admin Discord.lua: channel "discord" (status + commands, answered in
+# bridge.results like Siege Night) and "discordchat" (chat only, never waits).
+# Sample: tests/fixtures/blib2_discord_status.txt (blib-v2 tools/dump_discord_status.lua).
+
+DISCORD_FRESH_SECONDS = 120.0   # auto mode: BLib2 is "there" while its status file is this fresh
+DISCORD_RESULT_WAIT = 12.0
+BLIB2_SOUNDS = 6                # A.DISCORD_SOUNDS in blib2-admin Shared.lua
+_blib2_seen: tuple[float, bool] | None = None   # (monotonic time checked, answer)
+_SPOT_RE = re.compile(r"safe spot (-?\d+),(-?\d+),(-?\d+)")
+
+
+def mode() -> str:
+    return _mode
+
+
+def blib2_sound(sound_id: int) -> int:
+    """Jeeve's 11 sound ids onto BLib2's 6 (1-4 are the countdown alarms in both)."""
+    n = int(sound_id)
+    return n if 1 <= n <= BLIB2_SOUNDS else (n - 1) % BLIB2_SOUNDS + 1
+
+
+async def uses_blib2() -> bool:
+    """Send to BLib2's Discord bridge? GAME_BRIDGE pins it; auto asks whether
+    BLib2's status file is fresh (checked at most every 30 s)."""
+    global _blib2_seen
+    if _mode != "auto":
+        return _mode == "blib2"
+    if _lua_dir is None:
+        return False
+    now = time.monotonic()
+    if _blib2_seen is not None and now - _blib2_seen[0] < 30:
+        return _blib2_seen[1]
+    answer = False
+    try:
+        path = _path(DISCORD_STATUS_FILE)
+        st = await sftp_client.get().stat(path)
+        answer = st is not None and st[0] > 0 and _mtime_age(path, st[1]) <= DISCORD_FRESH_SECONDS
+    except Exception as exc:
+        print(f"[LuaBridge] BLib2 bridge check failed: {exc}")
+    _blib2_seen = (now, answer)
+    return answer
+
+
+async def read_discord_status() -> dict | None:
+    return await _read_status_nested(DISCORD_STATUS_FILE)
+
+
+async def write_discord_command(command: str, by: str | None = None, by_id: str | None = None,
+                                **kwargs) -> tuple[int, int] | None:
+    """Write a command for BLib2's Discord bridge; (id, timestamp) once written, else None."""
+    if _lua_dir is None:
+        print("[LuaBridge] ERROR: Not initialized! Call lua_bridge.init(bot) first.")
+        return None
+    global _discord_command_id
+    _discord_command_id += 1
+    cmd_id, sent = _discord_command_id, int(time.time())
+    content = _build_lua_table(command, cmd_id, timestamp=sent, protocol=SIEGE_PROTOCOL,
+                               by=(by or None) and by[:64], byId=by_id, **kwargs)
+    ok = await _write_file(_path(DISCORD_COMMAND_FILE), _discord_lock, content,
+                           f"discord command '{command}' (id={cmd_id})")
+    return (cmd_id, sent) if ok else None
+
+
+async def discord_command(command: str, by: str | None = None, by_id: str | None = None,
+                          wait: float = DISCORD_RESULT_WAIT, **kwargs) -> dict:
+    """Send a command to BLib2's Discord bridge and (wait > 0) wait for its answer.
+
+    Returns {"sent": bool, "result": dict | None, "status": dict | None}.
+    `result` None: no answer in time (server down or busy, or blib2-admin off).
+    """
+    written = await write_discord_command(command, by=by, by_id=by_id, **kwargs)
+    if not written:
+        return {"sent": False, "result": None, "status": None}
+    if wait <= 0:
+        return {"sent": True, "result": None, "status": None}
+    cmd_id, sent = written
+    deadline = time.monotonic() + wait
+    while True:
+        status = await read_discord_status()
+        result = find_siege_result(status, cmd_id, sent)
+        if result is not None or time.monotonic() >= deadline:
+            return {"sent": True, "result": result, "status": status}
+        await asyncio.sleep(1.5)
+
+
+async def write_discord_chat(author: str, message: str) -> bool:
+    if _lua_dir is None:
+        print("[LuaBridge] ERROR: Not initialized! Call lua_bridge.init(bot) first.")
+        return False
+    global _discord_chat_id
+    _discord_chat_id += 1
+    content = _build_lua_table("chat", _discord_chat_id, protocol=SIEGE_PROTOCOL,
+                               author=(author or "Discord")[:64], message=message[:300])
+    return await _write_file(_path(DISCORD_CHAT_FILE), _discord_chat_lock, content,
+                             f"discord chat (id={_discord_chat_id})")
+
+
+def ranks_file_text(entries: dict) -> str:
+    """blib2_discord_ranks.txt: "username<TAB>rank<TAB>r,g,b" (0..1) per line.
+    entries: username -> (rank, (r, g, b) 0..255)."""
+    lines = ["# Written by PZ-Bot (rank_sync). username, rank, name colour r,g,b (0..1)."]
+    for name in sorted(entries, key=str.lower):
+        rank, rgb = entries[name]
+        if not name or any(c in name for c in "\t\n|"):
+            continue
+        r, g, b = (max(0.0, min(1.0, c / 255.0)) for c in rgb)
+        lines.append(f"{name}\t{int(rank)}\t{r:.3f},{g:.3f},{b:.3f}")
+    return "\n".join(lines) + "\n"
+
+
+async def write_discord_ranks(entries: dict) -> bool:
+    if _lua_dir is None:
+        return False
+    try:
+        await sftp_client.get().write_text(_path(DISCORD_RANKS_FILE), ranks_file_text(entries))
+        return True
+    except Exception as exc:
+        print(f"[LuaBridge] Failed to write {DISCORD_RANKS_FILE}: {exc}")
+        return False
+
+
+def keyed(section: dict | None, prefix: str) -> list:
+    """A status list keyed p1.. / i1.. (with `count`) as a Python list."""
+    if not isinstance(section, dict):
+        return []
+    out = []
+    i = 1
+    while f"{prefix}{i}" in section:
+        out.append(section[f"{prefix}{i}"])
+        i += 1
+    return out
+
+
+def unstuck_spot(message: str | None) -> tuple[int, int, int] | None:
+    """The (x, y, z) in an `unstuck` answer ("safe spot 101,199,0 for Ann")."""
+    m = _SPOT_RE.search(message or "")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None

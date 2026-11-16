@@ -83,6 +83,38 @@ GROUPS = (
                confirm="Start a supply event now?"),
         Action("supplyeventstatus", "Supply status", "supplyeventstatus", "\U0001f4ca"),
     )),
+    Group("\U0001f392 In game: give & help", "Through BLib2 Admin's Discord bridge: items, XP and tokens (held for "
+          "the next login when offline), heal, unstuck, a private message. Logged in BLib2's staff log.", 0x27AE60, (
+        Action("giveitem", "Give item", "giveitem", "\U0001f381", GREEN),
+        Action("finditem", "Find item id", "finditem", "\U0001f50e"),
+        Action("givexp", "Give XP", "givexp", "\U0001f4c8", GREEN),
+        Action("givetokens", "Give tokens", "givetokens", "\U0001fa99", GREEN),
+        Action("pending", "Waiting items", "pending", "\U0001f4ec"),
+        Action("heal", "Heal", "heal", "\u2764\ufe0f"),
+        Action("unstuck", "Unstuck", "unstuck", "\U0001f9ed"),
+        Action("whisper", "Whisper", "whisper", "\U0001f4ac"),
+    )),
+    Group("\U0001f6e1\ufe0f In game: moderate", "Where players are, and the game's own admin commands (RCON), "
+          "run as if typed in game.", 0xC0392B, (
+        Action("gameplayers", "Players + positions", "gameplayers", "\U0001f5fa\ufe0f"),
+        Action("whereis", "Where is", "whereis", "\U0001f4cd"),
+        Action("tpto", "Teleport to x,y,z", "tpto", "\U0001f300"),
+        Action("godmode", "God mode", "godmode", "\u2728"),
+        Action("invisible", "Invisible", "invisible", "\U0001f47b"),
+        Action("noclip", "No-clip", "noclip", "\U0001f6aa"),
+        Action("kick", "Kick", "kick", "\U0001f462", RED),
+        Action("ban", "Ban", "ban", "\u26d4", RED),
+        Action("unban", "Unban", "unban", "\u267b\ufe0f"),
+    )),
+    Group("\U0001f30d In game: world", "Hordes, weather, the helicopter, vehicles, saving, and any other "
+          "in-game admin command.", 0x16A085, (
+        Action("horde", "Horde", "horde", "\U0001f9df", RED),
+        Action("weather", "Weather", "weather", "\U0001f327\ufe0f"),
+        Action("chopper", "Helicopter", "chopper", "\U0001f681"),
+        Action("addvehicle", "Spawn vehicle", "addvehicle", "\U0001f697"),
+        Action("save", "Save world", "save", "\U0001f4be", BLUE),
+        Action("gamecmd", "Game command", "gamecmd", "\u2328\ufe0f"),
+    )),
     Group("\U0001f514 Bot", "Turn bot notifications on or off; start a new season.", 0x95A5A6, (
         Action("features", "Features", "features", "\U0001f4cb"),
         Action("enable", "Enable", "enable", "\U0001f7e2", GREEN),

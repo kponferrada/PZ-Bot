@@ -145,6 +145,9 @@ class Config:
         self.SFTP_KEY_PATH = _env("SFTP_KEY_PATH")
         self.SFTP_ZOMBOID_ROOT = _env("SFTP_ZOMBOID_ROOT")
         self.SFTP_LUA_DIR = _env("SFTP_LUA_DIR") or _join(self.SFTP_ZOMBOID_ROOT, "Lua")
+        # Which game mod the Lua file bridge talks to: auto (BLib2 Admin's Discord bridge while its
+        # status file is fresh, else Jeeve's Integration), blib2, or jeeves.
+        self.GAME_BRIDGE = (_env("GAME_BRIDGE") or "auto").lower()
         self.SFTP_LOGS_DIR = _env("SFTP_LOGS_DIR") or _join(self.SFTP_ZOMBOID_ROOT, "Logs")
         self.SFTP_SERVER_INI = _env("SFTP_SERVER_INI")
         self.SFTP_SERVER_DB = _env("SFTP_SERVER_DB") or _join(self.SFTP_ZOMBOID_ROOT, "db/pzserver.db")
@@ -402,7 +405,7 @@ class PZBot(commands.Bot):
         for ext in ("player_tracker", "death_log", "rank_sync", "chat_relay", "siege_night",
                     "jeeves_drops", "jamies_fortune", "jamies_collapse", "jeeves_modmanager", "server_status",
                     "restart_watch", "feature_controls", "whitelist", "stats", "weekly_rp", "cleanup",
-                    "help", "admin_panel", "player_panel", "season"):
+                    "help", "admin_panel", "player_panel", "season", "game_admin"):
             try:
                 await self.load_extension(ext)
                 print(f"Loaded {ext}")

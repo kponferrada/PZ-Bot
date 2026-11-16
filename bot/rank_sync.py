@@ -217,6 +217,9 @@ class RankSync(commands.Cog):
             content = "\n".join(lines)
             sftp = sftp_client.get()
             await sftp.write_text(path, content)
+            # BLib2 Admin's Discord bridge reads its own file (name colours as r,g,b)
+            await lua_bridge.write_discord_ranks({
+                u: (r, ranks.RANKS[r].rgb) for u, r in self._ranks.items() if r in ranks.RANKS and r > 0})
             self._ranks_file_written = True
             return True
         except Exception as e:
